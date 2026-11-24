@@ -1,0 +1,29 @@
+{
+  "name": "pmart-cdc-simulation",
+  "version": "0.1.0",
+  "description": "PMart 칠곡 DC(CDC) 출고·피킹·상차 3D 가상 현장 시뮬레이터 (React + react-three-fiber)",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "type": "module",
+  "dependencies": {
+    "@react-three/fiber": "^9.8.2",
+    "react": "~19.2.0",
+    "react-dom": "~19.2.0",
+    "three": "^0.169.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@types/three": "^0.169.0",
+    "@vitejs/plugin-react": "^4.7.0",
+    "typescript": "^5.8.3",
+    "vite": "^6.3.5",
+    "vitest": "^3.2.4"
+  },
+  "private": true
+}
