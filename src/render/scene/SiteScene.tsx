@@ -5,10 +5,11 @@ import { useEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { AppContext, useApp, useView, type AppCtx } from '../../app/context';
-import { RACK } from '../../config';
+import { RACK, SHELF } from '../../config';
 import type { FloorLayout, Location, Rect } from '../../domain/layout';
 import { SCENE, ZONE_COLOR } from '../colors';
 import { plateTexture } from '../sprites';
+import { Shelves } from './Shelves';
 
 export function SiteScene({ app }: { app: AppCtx }) {
   return (
@@ -43,10 +44,11 @@ function FloorContent() {
     <group key={f.floor}>
       <Slab w={layout.width} d={layout.depth} />
       {f.zones.map((z) =>
-        z.kind === 'RACK' ? <Tint key={z.id} r={z.rect} color={ZONE_COLOR[z.temp!]} /> : z.kind === 'BAND' ? <Tint key={z.id} r={z.rect} color={SCENE.band} opacity={0.6} /> : null,
+        z.kind === 'RACK' ? <Tint key={z.id} r={z.rect} color={ZONE_COLOR[z.temp!]} /> : z.kind === 'BAND' ? <Tint key={z.id} r={z.rect} color={SCENE.band} opacity={0.6} /> : z.kind === 'SHELF' ? <Tint key={z.id} r={z.rect} color={ZONE_COLOR[z.temp!]} opacity={0.3} /> : null,
       )}
       <Racks f={f} />
       <Loads f={f} />
+      <Shelves f={f} />
       {view.labelMode !== 'off' && <Plates f={f} />}
       <Lifts f={f} />
       <Staging f={f} />
@@ -159,29 +161,31 @@ function Racks({ f }: { f: FloorLayout }) {
 
 /**
  * 칸마다 팔레트(1.1 × 1.1m 나무 받침) + 랩 씌운 박스 짐 — 사진처럼 단마다 2개.
- * 원장에 현물이 있는 칸만, 짐 높이 = 칸 용량 대비 현물. 누르면 그 칸을 고른다.
+ * 칸마다 인스턴스 하나(빈 칸은 크기 0). 원장 거래(ledger.version)가 바뀌면 다시 그린다 — 보충으로 팔레트가 줄어드는 게 보인다.
  */
 function Loads({ f }: { f: FloorLayout }) {
   const view = useView();
   const { backend } = useApp();
   const decks = useRef<THREE.InstancedMesh>(null);
   const loads = useRef<THREE.InstancedMesh>(null);
-  const filled = useMemo(() => {
+  const seen = useRef(-1);
+  useFrame(() => {
+    if (seen.current === backend.ledger.version) return;
+    seen.current = backend.ledger.version;
     const stock = backend.ledger.onHandByLocation();
-    return f.locations.filter((l) => (stock.get(l.code) ?? 0) > 0).map((l) => ({ l, ratio: Math.min(1, (stock.get(l.code) ?? 0) / l.capacity) }));
-  }, [f, backend]);
-  useEffect(() => {
     const color = new THREE.Color();
     const { w, d, deckH } = RACK.pallet;
-    filled.forEach(({ l, ratio }, i) => {
+    f.locations.forEach((l, i) => {
+      const q = stock.get(l.code) ?? 0;
+      const ratio = Math.min(1, q / l.capacity);
       const base = beamY(l.level) + BEAM_H / 2;
       tmp.position.set(l.pos.x, base + deckH / 2, l.pos.z);
-      tmp.scale.set(d, deckH, w);
+      tmp.scale.set(q ? d : 0, q ? deckH : 0, q ? w : 0);
       tmp.updateMatrix();
       decks.current!.setMatrixAt(i, tmp.matrix);
       const h = (LOAD_MAX - deckH) * (0.4 + 0.6 * ratio);
       tmp.position.set(l.pos.x, base + deckH + h / 2, l.pos.z);
-      tmp.scale.set(d * 0.96, h, w * 0.96);
+      tmp.scale.set(q ? d * 0.96 : 0, q ? h : 0, q ? w * 0.96 : 0);
       tmp.updateMatrix();
       loads.current!.setMatrixAt(i, tmp.matrix);
       color.setHex(SCENE.box).offsetHSL(((i * 37) % 11) / 400 - 0.012, 0, ((i * 13) % 7) / 120 - 0.02);
@@ -190,18 +194,18 @@ function Loads({ f }: { f: FloorLayout }) {
     decks.current!.instanceMatrix.needsUpdate = true;
     loads.current!.instanceMatrix.needsUpdate = true;
     if (loads.current!.instanceColor) loads.current!.instanceColor.needsUpdate = true;
-  }, [filled]);
+  });
   const onClick = (e: ThreeEvent<MouseEvent>) => {
     e.stopPropagation();
-    if (e.instanceId != null) view.select(filled[e.instanceId].l);
+    if (e.instanceId != null) view.select(f.locations[e.instanceId]);
   };
   return (
     <>
-      <instancedMesh ref={decks} args={[undefined, undefined, filled.length]} onClick={onClick} frustumCulled={false}>
+      <instancedMesh ref={decks} args={[undefined, undefined, f.locations.length]} onClick={onClick} frustumCulled={false}>
         <boxGeometry />
         <meshStandardMaterial color={SCENE.pallet} />
       </instancedMesh>
-      <instancedMesh ref={loads} args={[undefined, undefined, filled.length]} onClick={onClick} frustumCulled={false}>
+      <instancedMesh ref={loads} args={[undefined, undefined, f.locations.length]} onClick={onClick} frustumCulled={false}>
         <boxGeometry />
         <meshStandardMaterial roughness={0.45} />
       </instancedMesh>
@@ -305,6 +309,13 @@ function Selected() {
   const view = useView();
   const l: Location | null = view.selected;
   if (!l || l.floor !== view.floor) return null;
+  if (l.type === 'PICK_FACE')
+    return (
+      <mesh position={[l.pos.x, l.pos.y + 0.17, l.pos.z]}>
+        <boxGeometry args={[SHELF.depth * 1.1, 0.36, (SHELF.unitLen / SHELF.slots) * 0.95]} />
+        <meshBasicMaterial color={SCENE.selected} transparent opacity={0.5} depthWrite={false} />
+      </mesh>
+    );
   return (
     <mesh position={[l.pos.x, (l.level - 1) * RACK.levelH + RACK.levelH * 0.4, l.pos.z]}>
       <boxGeometry args={[RACK.depth * 1.05, RACK.levelH * 0.85, (RACK.bayW / RACK.slots) * 0.95]} />

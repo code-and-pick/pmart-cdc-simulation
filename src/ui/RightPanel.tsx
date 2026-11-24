@@ -6,14 +6,13 @@ export function RightPanel() {
   const view = useView();
   if (!view.rightView) return null;
   const locs = layout.floors.flatMap((f) => f.locations);
-  const pick = locs.filter((l) => l.type === 'PICK_FACE').length;
+  const shelves = layout.floors.flatMap((f) => f.shelves).length;
   const t = backend.ledger.totals();
   const stock = backend.ledger.onHandByLocation();
   const violations = backend.ledger.check();
   const kpis: [string, string][] = [
-    ['팔레트 칸', locs.length.toLocaleString()],
-    ['피킹면(1단)', pick.toLocaleString()],
-    ['리저브', (locs.length - pick).toLocaleString()],
+    ['팔레트 칸(보관)', locs.length.toLocaleString()],
+    ['피킹 선반 칸', shelves.toLocaleString()],
     ['오토스토어 빈', layout.autostore.bins.toLocaleString()],
     ['총 용량(유닛)', layout.totalCapacity.toLocaleString()],
     ['CDC 현물', t.onHand.toLocaleString()],
@@ -46,7 +45,7 @@ export function RightPanel() {
           <tbody>
             {layout.floors.flatMap((f) =>
               f.spec.zones.map((z) => {
-                const ls = f.locations.filter((l) => l.zone === z.letter);
+                const ls = [...f.locations, ...f.shelves].filter((l) => l.zone === z.letter);
                 return (
                   <tr key={`${f.floor}${z.letter}`}>
                     <td>{f.floor}F</td>

@@ -33,7 +33,7 @@ import {
 import type { Catalog } from '../../domain/catalog';
 import { stagingCodeFor } from '../../domain/layout';
 import type { ApiCallRecord, ApiListener, CdcOutboundPort, DomainEventRecord, EventListener } from '../port';
-import { CdcLedger, isRackLocation, LedgerError } from './ledger';
+import { CdcLedger, isPalletLocation, isRackLocation, isShelfLocation, LedgerError } from './ledger';
 
 interface TrfRec {
   intake: TransferIntake;
@@ -228,6 +228,40 @@ export class MockBackend implements CdcOutboundPort {
         this.emit('AllocationResult', `${body.trfId} → ${body.mfcId} 할당 ${got}/${want} (${alloc.state})`);
         return { status: 'APPLIED', requestId: idempotencyKey, resultId: alloc.allocationId, version: intake.version } satisfies CommandResponse;
       }),
+    );
+  }
+
+  // ══ cdc-inbound 역할 — 선반 보충(MOV). 실서버 cdc-inventory move-postings 는 아직 501(백엔드 회신 2026-11-25) ══
+
+  /** 아직 팔레트 랙에 있는 할당 예약 — 선반으로 보충해야 피킹할 수 있다 (MOCK 전용 조회, 보충 작업자가 본다) */
+  replenishmentNeeds(): { sku: string; lot: string; from: string; to: string; qty: number }[] {
+    const agg = new Map<string, { sku: string; lot: string; from: string; to: string; qty: number }>();
+    for (const r of this.trfs.values()) {
+      if (r.cancelled || r.departed || !r.intake.allocationId) continue;
+      for (const h of this.ledger.holdingsOf(r.intake.allocationId)) {
+        if (!isPalletLocation(h.locationCode)) continue;
+        const to = this.opt.catalog.bySku.get(h.sku)?.shelf.code;
+        if (!to) continue;
+        const k = `${h.sku}|${h.lot}|${h.locationCode}`;
+        const cur = agg.get(k) ?? { sku: h.sku, lot: h.lot, from: h.locationCode, to, qty: 0 };
+        cur.qty += h.qty;
+        agg.set(k, cur);
+      }
+    }
+    return [...agg.values()].sort((a, b) => (a.from < b.from ? -1 : 1));
+  }
+
+  /** POST /internal/move-postings (MOV 팔레트 → 선반) — 예약이 있으면 함께 옮긴다. 총현물 불변 */
+  replenishMove(body: { sku: string; lot: string; fromLocationCode: string; toLocationCode: string; qty: number; workerId: string }, idempotencyKey: string): CommandResponse {
+    return this.run('POST', '/internal/move-postings', 200, () =>
+      this.idempotent('move', idempotencyKey, body, () => {
+        const c = this.ledger.replenishMove(body.sku, body.lot, body.fromLocationCode, body.toLocationCode, body.qty, `REPL:${body.workerId}`);
+        // 새 박스를 진열했으니 그 선반 칸 차단(부족 보고)을 푼다 [시뮬 — 재계수를 대신함]
+        this.ledger.blocked.delete(`${body.sku}|${body.lot}|${body.toLocationCode}`);
+        for (const r of this.trfs.values()) this.spawnFollowUps(r);
+        return { status: 'APPLIED', requestId: idempotencyKey, resultId: c.commitId, appliedQty: body.qty } satisfies CommandResponse;
+      }),
+      'MOCK — 실서버 move-postings 501',
     );
   }
 
@@ -460,11 +494,17 @@ export class MockBackend implements CdcOutboundPort {
         const w = this.mustWave(waveId);
         this.checkVersion(w.version, expectedVersion);
         if (w.state !== 'PLANNED') throw problem(409, 'INVALID_STATE', `Wave ${w.state}`);
+        // 피킹은 선반에서만 — 팔레트 랙에 남은 예약은 선반 보충(MOV) 뒤에 배포한다(CDC-F-017 "필요 내부 보충이 유효할 때 릴리스") [시뮬]
+        const pending = w.trfIds.flatMap((id) => {
+          const r = this.trfs.get(id)!;
+          return r.cancelled ? [] : this.ledger.holdingsOf(r.intake.allocationId!).filter((h) => isPalletLocation(h.locationCode));
+        });
+        if (pending.length) throw problem(409, 'INVALID_STATE', `선반 보충 미완료 ${pending.length}칸 (${pending.reduce((a, h) => a + h.qty, 0)}개)`);
         let n = 0;
         for (const trfId of w.trfIds) {
           const r = this.trfs.get(trfId)!;
           if (r.cancelled) continue;
-          const holds = this.ledger.holdingsOf(r.intake.allocationId!).filter((h) => isRackLocation(h.locationCode));
+          const holds = this.ledger.holdingsOf(r.intake.allocationId!).filter((h) => isShelfLocation(h.locationCode));
           const groups = new Map<string, typeof holds>();
           for (const h of holds) {
             const [, zone, floor] = h.locationCode.split('-');
@@ -604,7 +644,6 @@ export class MockBackend implements CdcOutboundPort {
         }
         const stagingNo = this.mfcStagingNo(rec.intake.mfcId);
         let applied = 0;
-        const followUps: { sku: string; lot: string; locationCode: string; qty: number }[] = [];
         for (const l of body.lines) {
           const tl = t.lines.find((x) => x.sku === l.sku && x.lot === l.lot && x.locationCode === l.locationCode)!;
           if (l.pickedQty > 0) {
@@ -621,7 +660,6 @@ export class MockBackend implements CdcOutboundPort {
             this.ledger.blocked.add(`${l.sku}|${l.lot}|${l.locationCode}`);
             const re = this.ledger.reallocate(rec.intake.allocationId!, l.sku, short, this.minDays(l.sku), ALLOCATION.safetyQty);
             const got = re.reduce((s, x) => s + x.qty, 0);
-            followUps.push(...re.map((x) => ({ sku: l.sku, lot: x.lot, locationCode: x.locationCode, qty: x.qty })));
             this.emit('PickShortageReported', `${t.trfId} ${l.sku} 부족 ${short} (${l.shortReason}) → 재할당 ${got}${got < short ? ` · 남은 부족 ${short - got}` : ''}`);
           }
         }
@@ -629,19 +667,44 @@ export class MockBackend implements CdcOutboundPort {
         t.state = resolved ? (t.lines.some((x) => x.shortQty > 0) ? 'PARTIAL' : 'DONE') : 'IN_PROGRESS';
         if (resolved) t.completedAt = this.iso();
         t.version += 1;
-        if (followUps.length) {
-          // 재할당분 — 같은 층·구역끼리 새 Task (원 Task 는 끝난 그대로 남긴다)
-          const groups = new Map<string, typeof followUps>();
-          for (const f of followUps) {
-            const [, zone, floor] = f.locationCode.split('-');
-            groups.set(`${floor}${zone}`, [...(groups.get(`${floor}${zone}`) ?? []), f]);
-          }
-          for (const hs of groups.values()) this.newPickTask(t.waveId, t.trfId, hs);
-        }
+        // 재할당분이 선반에 있으면 바로 새 Task, 팔레트에 있으면 선반 보충 뒤에(replenishMove) 생긴다
+        this.spawnFollowUps(rec);
         this.refreshWave(this.mustWave(t.waveId));
         return { status: 'APPLIED', requestId: idempotencyKey, resultId: taskId, appliedQty: applied, version: t.version } satisfies CommandResponse;
       }),
     );
+  }
+
+  /**
+   * 배포된 TRF 의 선반 예약 중 아직 Task 가 없는 몫으로 새 피킹 Task 를 만든다(같은 층·구역끼리, 원 Task 는 그대로).
+   * 불변식: 선반 예약 = 끝나지 않은 Task 줄의 남은 지시량 합.
+   */
+  private spawnFollowUps(rec: TrfRec) {
+    const w = rec.intake.waveId ? this.waves.get(rec.intake.waveId) : undefined;
+    if (!w || w.state === 'PLANNED' || w.state === 'CANCELLED' || rec.cancelled || rec.departed) return;
+    const open = new Map<string, number>();
+    for (const t of this.tasks.values()) {
+      if (t.trfId !== rec.intake.trfId || TASK_TERMINAL.includes(t.state)) continue;
+      for (const l of t.lines) open.set(`${l.sku}|${l.lot}|${l.locationCode}`, (open.get(`${l.sku}|${l.lot}|${l.locationCode}`) ?? 0) + l.plannedQty - l.pickedQty - l.shortQty);
+    }
+    const extra = this.ledger
+      .holdingsOf(rec.intake.allocationId!)
+      .filter((h) => isShelfLocation(h.locationCode))
+      .map((h) => ({ ...h, qty: h.qty - (open.get(`${h.sku}|${h.lot}|${h.locationCode}`) ?? 0) }))
+      .filter((h) => h.qty > 0);
+    if (!extra.length) return;
+    const groups = new Map<string, typeof extra>();
+    for (const h of extra) {
+      const [, zone, floor] = h.locationCode.split('-');
+      groups.set(`${floor}${zone}`, [...(groups.get(`${floor}${zone}`) ?? []), h]);
+    }
+    for (const hs of groups.values()) this.newPickTask(w.waveId, rec.intake.trfId, hs);
+    if (w.state === 'WORK_DONE') {
+      w.state = 'IN_PROGRESS';
+      w.version += 1;
+      this.emit('WaveStateChanged', `${w.waveId} WORK_DONE → IN_PROGRESS (재할당 작업)`);
+    }
+    this.refreshWave(w);
   }
 
   // ── 분류·검품·상차 (시뮬레이터 = 가상 수행 모듈) ─────────────

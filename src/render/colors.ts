@@ -25,6 +25,9 @@ export const SCENE = {
   conveyor: 0x1f63d0,
   autostore: 0x3a3f4a,
   hazard: 0xf2c200,
+  /** 피킹 선반 — MFC 시뮬레이터처럼 회색 철제 선반 */
+  shelfPost: 0x5d6675,
+  shelfBoard: 0xc9ced8,
   pill: '#5b4fd6',
   selected: 0x8b5cf6,
 };

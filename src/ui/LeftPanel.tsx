@@ -75,7 +75,7 @@ function ZoneInfo() {
   return (
     <>
       {loc && (
-        <Sec title="고른 칸" aside={loc.type === 'PICK_FACE' ? '피킹면' : '리저브'}>
+        <Sec title="고른 칸" aside={loc.type === 'PICK_FACE' ? '피킹 선반' : '팔레트 보관'}>
           <Row k="위치 코드" v={loc.code} />
           <Row k="번호판" v={loc.short} />
           <Row k="통로·베이·단·슬롯" v={`${loc.aisle} · ${loc.bay} · ${loc.level} · ${loc.slot}`} />
@@ -94,7 +94,8 @@ function ZoneInfo() {
         {f.spec.zones.map((z) => (
           <Row key={z.letter} k={z.label} v={`통로 ${z.aisles} · ${z.levels}단`} />
         ))}
-        <Row k="칸" v={f.locations.length.toLocaleString()} />
+        <Row k="팔레트 칸" v={f.locations.length.toLocaleString()} />
+        <Row k="선반 칸" v={`${f.shelves.length.toLocaleString()} (통로 ${f.shelfAisles.map((a) => a.plate).join('·')})`} />
         <Row k="출고대기(91)" v={`${f.staging.length}자리`} />
         <Row k="승강기 문(92)" v={`${f.lifts.length}대`} />
         {f.equipment.map((e) => (

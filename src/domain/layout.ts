@@ -1,8 +1,9 @@
 // 칠곡 DC 층별 배치 — 센터 데이터(sites/chilgok.ts)를 받아 층·구역·랙·칸·비랙 위치를 만든다.
 // 좌표 단위 m, x = 동쪽, z = 남쪽(화면 아래), y = 높이. 층마다 같은 바닥(건물 한 층).
-// 북쪽 띠(z 0 ~ bandDepth) = 승강기·출고대기·분류 [가정], 그 남쪽 = 보관(통로가 남북으로 뻗는다).
+// 북쪽 띠(z 0 ~ bandDepth) = 승강기·출고대기 줄(z 0 ~ SHELF.northStrip) + 그 남쪽 피킹 선반(서쪽)·분류 설비(동쪽) [가정],
+// 그 남쪽 = 팔레트 랙 보관(통로가 남북으로 뻗는다). 팔레트 랙은 입고·적치 보관 자리이고 피킹은 선반에서 한다(사용자 2026-11-25).
 
-import { AISLE_PITCH, B1_DOCKS, CAPACITY, CDC_FACTS, CENTER_ID, FLOOR_PYEONG, LIFTS_PER_FLOOR, PYEONG_M2, RACK, STAGING_SLOTS } from '../config';
+import { AISLE_PITCH, B1_DOCKS, CAPACITY, CATALOG, CDC_FACTS, CENTER_ID, FLOOR_PYEONG, LIFTS_PER_FLOOR, PYEONG_M2, RACK, SHELF, STAGING_SLOTS } from '../config';
 import { CHILGOK_FLOORS, type EquipKind, type FloorNo, type FloorSpec, type Temp } from './sites/chilgok';
 
 export interface Rect {
@@ -12,6 +13,7 @@ export interface Rect {
   z1: number;
 }
 
+/** PICK_FACE = 피킹 선반 칸, RESERVE = 팔레트 랙 보관 칸 */
 export type LocationType = 'PICK_FACE' | 'RESERVE' | 'STAGING' | 'DOCK';
 
 /** 랙 칸 또는 비랙 위치. code 는 계약 LocationCode 7구간 [정본 CDC-3·5] */
@@ -58,7 +60,7 @@ export interface ZoneArea {
   id: string;
   label: string;
   temp: Temp | null;
-  kind: 'RACK' | 'BAND' | 'EQUIP';
+  kind: 'RACK' | 'BAND' | 'EQUIP' | 'SHELF';
   rect: Rect;
 }
 
@@ -75,6 +77,29 @@ export interface Lift {
   rect: Rect;
 }
 
+/** 피킹 선반 한 줄(통로 한쪽) — MFC 시뮬레이터 선반 모양 */
+export interface ShelfRow {
+  zone: string;
+  temp: Temp;
+  aisle: number;
+  side: 'E' | 'W';
+  /** 선반 앞뒤 중심 x */
+  cx: number;
+  z0: number;
+  z1: number;
+  units: number;
+}
+
+/** 걷는 길 — 사람·카트는 이 선들만 따라 움직인다(설계 §10 navgrid 대신 단순 통로망 [시뮬]) */
+export interface WalkNet {
+  /** 북쪽 통로(승강기·출고대기와 선반 사이) z */
+  northZ: number;
+  /** 랙 앞 가로 통로 z */
+  rackZ: number;
+  /** 서쪽 벽 쪽 남북 연결 통로 x */
+  westX: number;
+}
+
 export interface FloorLayout {
   floor: FloorNo;
   label: string;
@@ -84,6 +109,12 @@ export interface FloorLayout {
   aisles: Aisle[];
   locations: Location[];
   staging: Location[];
+  /** 피킹 선반 칸(PICK_FACE) */
+  shelves: Location[];
+  shelfRows: ShelfRow[];
+  /** 선반 통로 — 판 번호(예 C61)와 걷는 중심 x */
+  shelfAisles: Aisle[];
+  walk: WalkNet;
   lifts: Lift[];
   equipment: Equip[];
   /** 이 층에 쓴 배치 면적(평) — 문서 면적(spec.docPyeong)과 비교용 */
@@ -151,7 +182,7 @@ export function buildLayout(): Layout {
                   floor: spec.floor,
                   zone: z.letter,
                   temp: z.temp,
-                  type: level === 1 ? 'PICK_FACE' : 'RESERVE',
+                  type: 'RESERVE',
                   aisle: n,
                   bay,
                   level,
@@ -203,9 +234,61 @@ export function buildLayout(): Layout {
     });
     zones.push({ id: `${spec.floor}-BAND`, label: '승강기·출고대기·분류', temp: null, kind: 'BAND', rect: { x0: 0, z0: 0, x1: width, z1: bandDepth } });
 
+    // 피킹 선반 — 구역마다 SKU 수만큼 칸(칸 하나 = SKU 하나), 통로 번호 61 부터 [시뮬 R-13]
+    const shelves: Location[] = [];
+    const shelfRows: ShelfRow[] = [];
+    const shelfAisles: Aisle[] = [];
+    const sz0 = SHELF.northStrip;
+    const sz1 = bandDepth - 1;
+    const unitsPerSide = Math.floor((sz1 - sz0 - 2) / SHELF.unitLen);
+    const perAisle = unitsPerSide * 2 * SHELF.levels * SHELF.slots;
+    const shelfPitch = SHELF.depth * 2 + SHELF.aisleW + 0.6;
+    const quota = skuQuota();
+    let shx = 2.5;
+    for (const z of spec.zones) {
+      const need = quota.get(z.letter) ?? 0;
+      const nAisles = Math.max(1, Math.ceil(need / perAisle));
+      const zx0 = shx - 0.3;
+      for (let k = 0; k < nAisles; k++) {
+        const no = SHELF.aisleBase + k;
+        const cx = shx + shelfPitch / 2;
+        shelfAisles.push({ zone: z.letter, temp: z.temp, no, cx, plate: `${z.letter}${no}` });
+        for (const side of ['E', 'W'] as const) {
+          const rx = cx + (side === 'E' ? 1 : -1) * (SHELF.aisleW / 2 + SHELF.depth / 2);
+          const uz0 = sz0 + 1;
+          shelfRows.push({ zone: z.letter, temp: z.temp, aisle: no, side, cx: rx, z0: uz0, z1: uz0 + unitsPerSide * SHELF.unitLen, units: unitsPerSide });
+          for (let j = 0; j < unitsPerSide; j++) {
+            const bay = side === 'E' ? 2 * j + 1 : 2 * j + 2;
+            for (let level = 1; level <= SHELF.levels; level++) {
+              for (let slot = 1; slot <= SHELF.slots; slot++) {
+                shelves.push({
+                  code: locationCode(z.letter, spec.floor, no, bay, level, slot),
+                  short: `${z.letter}-${no}-${pad2(bay)}-${level}-${slot}`,
+                  floor: spec.floor,
+                  zone: z.letter,
+                  temp: z.temp,
+                  type: 'PICK_FACE',
+                  aisle: no,
+                  bay,
+                  level,
+                  slot,
+                  capacity: SHELF.slotUnits,
+                  pos: { x: rx, y: 0.15 + ((level - 1) * (SHELF.height - 0.25)) / SHELF.levels, z: uz0 + j * SHELF.unitLen + ((slot - 0.5) * SHELF.unitLen) / SHELF.slots },
+                });
+              }
+            }
+          }
+        }
+        shx += shelfPitch;
+      }
+      zones.push({ id: `${spec.floor}-${z.letter}-SHELF`, label: `${z.label} 피킹 선반`, temp: z.temp, kind: 'SHELF', rect: { x0: zx0, z0: sz0 + 0.4, x1: shx - 0.3, z1: sz1 } });
+      shx += 0.6;
+    }
+    const shelfEast = shx;
+
     const equipment: Equip[] = [];
     const band = spec.equipment.filter((e) => e.where === 'band');
-    const bandX0 = sx + 2;
+    const bandX0 = Math.max(sx, shelfEast) + 2;
     const bandW = (width - bandX0 - 1) / Math.max(1, band.length);
     band.forEach((e, i) => equipment.push({ kind: e.kind, label: e.label, rect: { x0: bandX0 + i * bandW, z0: 1, x1: bandX0 + (i + 1) * bandW - 1, z1: bandDepth - 1 } }));
     const east = spec.equipment.filter((e) => e.where === 'east');
@@ -226,6 +309,10 @@ export function buildLayout(): Layout {
       aisles,
       locations,
       staging,
+      shelves,
+      shelfRows,
+      shelfAisles,
+      walk: { northZ: sz0 - 0.6, rackZ: bandDepth + RACK.crossAisle / 2, westX: 1.2 },
       lifts,
       equipment,
       layoutPyeong: { storage: storageM2 / PYEONG_M2, band: (width * depth - storageM2) / PYEONG_M2 },
@@ -242,12 +329,31 @@ export function buildLayout(): Layout {
   }
 
   const autostoreCapacity = CAPACITY.autostoreBins * CAPACITY.unitsPerBin;
+  // 선반 칸은 고정 용량(SHELF.slotUnits), 팔레트 칸이 나머지를 나눠 합이 정확히 520만 [고정]
+  const shelfCapacity = floors.reduce((s, f) => s + f.shelves.reduce((a, l) => a + l.capacity, 0), 0);
   allocateCapacity(
     floors.flatMap((f) => f.locations),
-    CDC_FACTS.capacityUnits - autostoreCapacity,
+    CDC_FACTS.capacityUnits - autostoreCapacity - shelfCapacity,
   );
-  const totalCapacity = floors.reduce((s, f) => s + f.locations.reduce((a, l) => a + l.capacity, 0), 0) + autostoreCapacity;
+  const totalCapacity = floors.reduce((s, f) => s + f.locations.reduce((a, l) => a + l.capacity, 0), 0) + shelfCapacity + autostoreCapacity;
   return { width, depth, bandDepth, floors, docks, autostore: { bins: CAPACITY.autostoreBins, unitsPerBin: CAPACITY.unitsPerBin, capacity: autostoreCapacity }, totalCapacity };
+}
+
+/**
+ * 구역별 SKU 수 [시뮬] — 팔레트 통로 수에 비례, 최대 나머지 방식으로 합이 정확히 CATALOG.skus.
+ * 선반 칸 수와 가짜 상품 마스터(catalog.ts)가 함께 쓴다.
+ */
+export function skuQuota(): Map<string, number> {
+  const zs = CHILGOK_FLOORS.flatMap((f) => f.zones);
+  const total = zs.reduce((s, z) => s + z.aisles, 0);
+  const q = zs.map((z) => ({ z: z.letter, exact: (z.aisles / total) * CATALOG.skus }));
+  const out = new Map(q.map((x) => [x.z, Math.floor(x.exact)]));
+  let left = CATALOG.skus - [...out.values()].reduce((a, b) => a + b, 0);
+  for (const x of [...q].sort((a, b) => (b.exact % 1) - (a.exact % 1))) {
+    if (left-- <= 0) break;
+    out.set(x.z, out.get(x.z)! + 1);
+  }
+  return out;
 }
 
 /** 칸 용량 배분 — 무게대로 나누고 나머지는 큰 소수부부터 1씩(합이 정확히 total) [가정] */

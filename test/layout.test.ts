@@ -1,7 +1,7 @@
 // 칠곡 DC 배치 — 통로·칸 수, 위치 코드 계약 패턴, 용량 합 520만.
 import { describe, expect, it } from 'vitest';
 import { CDC_FACTS } from '../src/config';
-import { buildLayout, LOCATION_CODE_PATTERN } from '../src/domain/layout';
+import { buildLayout, LOCATION_CODE_PATTERN, skuQuota } from '../src/domain/layout';
 
 const L = buildLayout();
 const all = L.floors.flatMap((f) => f.locations);
@@ -24,8 +24,22 @@ describe('층·구역 배치 [정본 CDC-2, R-10]', () => {
     expect(all).toHaveLength(19_840);
   });
 
-  it('1단은 피킹면, 2단부터 리저브', () => {
-    expect(all.every((l) => (l.level === 1) === (l.type === 'PICK_FACE'))).toBe(true);
+  it('팔레트 랙은 모두 보관(RESERVE), 피킹은 MFC 같은 선반(PICK_FACE, 통로 61~) [사용자 2026-11-25]', () => {
+    expect(all.every((l) => l.type === 'RESERVE')).toBe(true);
+    const shelves = L.floors.flatMap((f) => f.shelves);
+    expect(shelves.every((l) => l.type === 'PICK_FACE' && l.aisle >= 61 && l.aisle < 90 && l.level <= 5 && l.slot <= 3)).toBe(true);
+    for (const [z, n] of skuQuota()) expect(shelves.filter((l) => l.zone === z).length).toBeGreaterThanOrEqual(n);
+    expect([...skuQuota().values()].reduce((a, b) => a + b, 0)).toBe(2000);
+  });
+
+  it('선반은 북쪽 띠 안, 승강기·출고대기 줄 남쪽, 설비와 겹치지 않는다', () => {
+    for (const f of L.floors) {
+      for (const r of f.shelfRows) {
+        expect(r.z0).toBeGreaterThan(f.walk.northZ);
+        expect(r.z1).toBeLessThan(L.bandDepth);
+        for (const e of f.equipment.filter((x) => x.rect.z0 < L.bandDepth)) expect(r.cx < e.rect.x0 || r.cx > e.rect.x1).toBe(true);
+      }
+    }
   });
 
   it('랙이 층 바닥 안에 있다', () => {
@@ -36,7 +50,7 @@ describe('층·구역 배치 [정본 CDC-2, R-10]', () => {
 
 describe('위치 코드 [정본 CDC-3·5]', () => {
   it('모든 칸·출고대기·승강기 문·지하 접안 코드가 계약 패턴에 맞고 겹치지 않는다', () => {
-    const codes = [...all, ...L.floors.flatMap((f) => f.staging), ...L.docks].map((l) => l.code).concat(L.floors.flatMap((f) => f.lifts.map((x) => x.code)));
+    const codes = [...all, ...L.floors.flatMap((f) => f.shelves), ...L.floors.flatMap((f) => f.staging), ...L.docks].map((l) => l.code).concat(L.floors.flatMap((f) => f.lifts.map((x) => x.code)));
     for (const c of codes) expect(c).toMatch(LOCATION_CODE_PATTERN);
     expect(new Set(codes).size).toBe(codes.length);
   });
@@ -58,7 +72,7 @@ describe('위치 코드 [정본 CDC-3·5]', () => {
 });
 
 describe('보관 용량 520만 유닛 [고정]', () => {
-  it('칸 용량 합 + 오토스토어 = 5,200,000', () => {
+  it('팔레트 칸 + 선반 칸 용량 합 + 오토스토어 = 5,200,000', () => {
     expect(L.totalCapacity).toBe(CDC_FACTS.capacityUnits);
     expect(all.every((l) => l.capacity > 0)).toBe(true);
   });

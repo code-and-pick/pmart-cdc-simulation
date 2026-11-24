@@ -80,30 +80,37 @@ async function throughInspection(trfId: string, waveId: string) {
   return lpns;
 }
 
+/** 주간조 선반 보충 — 팔레트 랙에 남은 할당 예약을 모두 선반으로 */
+function replenishAll() {
+  for (const n of mb.replenishmentNeeds()) mb.replenishMove({ sku: n.sku, lot: n.lot, fromLocationCode: n.from, toLocationCode: n.to, qty: n.qty, workerId: 'rp-01' }, key());
+}
+
 async function startDay(n = 5) {
-  const trfs = makeTransfers(catalog, BASE, 7).slice(0, n);
+  const trfs = makeTransfers(catalog, BASE, 7, 40).slice(0, n);
   for (const t of trfs) mb.intakeTransfer(t, key());
+  replenishAll();
   const wave = await mb.createWave({ cdcId: 'CDC01', trfIds: trfs.map((t) => t.trfId) }, key());
   await mb.releaseWave(wave.waveId, key(), wave.version);
   return { trfs, waveId: wave.waveId };
 }
 
 describe('가짜 상품 마스터·시작 재고', () => {
-  it('고회전 2,000 SKU — 계약 SKU 패턴, 랙 기둥 한 칸(1단 피킹면 · 2단 보충 대기 · 3단~ 리저브)', () => {
+  it('고회전 2,000 SKU — 계약 SKU 패턴, 피킹 선반 칸 하나 + 팔레트 기둥 1~4단', () => {
     expect(catalog.skus).toHaveLength(2000);
     expect(new Set(catalog.skus.map((s) => s.sku)).size).toBe(2000);
+    expect(new Set(catalog.skus.map((s) => s.shelf.code)).size).toBe(2000);
     for (const s of catalog.skus) {
       expect(s.sku).toMatch(SKU_PATTERN);
-      expect(s.pickFace.type).toBe('PICK_FACE');
-      expect(s.pickFace.level).toBe(1);
-      expect(s.reserve.level).toBe(3);
-      expect([s.reserve.zone, s.reserve.aisle, s.reserve.bay, s.reserve.slot]).toEqual([s.pickFace.zone, s.pickFace.aisle, s.pickFace.bay, s.pickFace.slot]);
+      expect(s.shelf.type).toBe('PICK_FACE');
+      expect(s.shelf.zone).toBe(s.zone);
+      expect(s.column.map((l) => l.level)).toEqual([1, 2, 3, 4]);
+      expect(s.column.every((l) => l.type === 'RESERVE' && l.aisle === s.column[0].aisle && l.bay === s.column[0].bay && l.slot === s.column[0].slot)).toBe(true);
       for (const l of s.seed) expect(l.locationCode).toMatch(LOCATION_CODE_PATTERN);
-      expect(s.column.map((l) => l.level)).toEqual(Array.from({ length: s.column.length }, (_, i) => i + 1));
-      expect(s.column.length).toBe(4);
-      expect(s.seed[0].expiresAt < s.seed[s.seed.length - 1].expiresAt).toBe(true); // 피킹면 LOT 이 먼저 끝난다
-      expect(s.seed[1].lot).toBe(s.seed[0].lot); // 보충 대기 = 피킹면 LOT
-      s.seed.forEach((l, i) => expect(l.qty).toBeLessThanOrEqual(s.column[i].capacity));
+      expect(s.seed[0].locationCode).toBe(s.shelf.code);
+      expect(s.seed[1].lot).toBe(s.seed[0].lot); // 선반 = 팔레트 1단 LOT(가장 먼저 끝남)
+      expect(s.seed[0].expiresAt < s.seed[s.seed.length - 1].expiresAt).toBe(true);
+      const locs = [s.shelf, ...s.column];
+      s.seed.forEach((l, i) => expect(l.qty).toBeLessThanOrEqual(locs[i].capacity));
     }
   });
 
@@ -117,8 +124,8 @@ describe('가짜 상품 마스터·시작 재고', () => {
 });
 
 describe('TRF 인수·할당 (CDC-F-016)', () => {
-  it('할당은 예약만 — 현물 변화 없음, FEFO 로 피킹면 LOT 먼저', async () => {
-    const [trf] = makeTransfers(catalog, BASE, 7);
+  it('할당은 예약만 — 현물 변화 없음, FEFO 로 같은 LOT 이면 피킹 선반 먼저', async () => {
+    const [trf] = makeTransfers(catalog, BASE, 7, 40);
     const before = mb.ledger.totals();
     const r = mb.intakeTransfer(trf, key());
     expect(r.status).toBe('APPLIED');
@@ -126,13 +133,13 @@ describe('TRF 인수·할당 (CDC-F-016)', () => {
     expect(after.onHand).toBe(before.onHand);
     expect(after.reserved).toBe(trf.lines.reduce((s, l) => s + l.approvedQty, 0));
     const alloc = mb.ledger.getAllocation(r.resultId!)!;
-    for (const l of alloc.lines) expect(l.lots[0].locationCode).toBe(catalog.bySku.get(l.sku)!.pickFace.code);
+    for (const l of alloc.lines) expect(l.lots[0].locationCode).toBe(catalog.bySku.get(l.sku)!.shelf.code);
     expect((await mb.getTransferIntake(trf.trfId)).state).toBe('ALLOCATED');
     expect(mb.ledger.check()).toEqual([]);
   });
 
   it('같은 키·같은 본문은 기존 결과, 같은 키·다른 본문은 IDEMPOTENCY_CONFLICT, 같은 버전·다른 본문은 TRANSFER_INTAKE_CONFLICT', () => {
-    const [trf] = makeTransfers(catalog, BASE, 7);
+    const [trf] = makeTransfers(catalog, BASE, 7, 40);
     const a = mb.intakeTransfer(trf, 'same');
     expect(mb.intakeTransfer(trf, 'same')).toEqual(a);
     const changed: TransferIntakeInput = { ...trf, lines: [{ ...trf.lines[0], approvedQty: trf.lines[0].approvedQty + 1 }, ...trf.lines.slice(1)] };
@@ -142,7 +149,7 @@ describe('TRF 인수·할당 (CDC-F-016)', () => {
   });
 
   it('새 버전은 기존 인수를 대체 — 옛 예약을 풀고 다시 할당', () => {
-    const [trf] = makeTransfers(catalog, BASE, 7);
+    const [trf] = makeTransfers(catalog, BASE, 7, 40);
     mb.intakeTransfer(trf, key());
     const v2: TransferIntakeInput = { ...trf, trfVersion: 2, lines: trf.lines.slice(0, 3) };
     mb.intakeTransfer(v2, key());
@@ -153,7 +160,7 @@ describe('TRF 인수·할당 (CDC-F-016)', () => {
   it('마지막 재고를 두 MFC 가 동시에 원해도 유효 확보 합은 적격 재고 이하 — 부분 할당', () => {
     const s = catalog.skus[0];
     const stock = s.seed.reduce((a, l) => a + l.qty, 0);
-    const [a, b] = makeTransfers(catalog, BASE, 7);
+    const [a, b] = makeTransfers(catalog, BASE, 7, 40);
     mb.intakeTransfer({ ...a, lines: [{ sku: s.sku, approvedQty: stock - 5 }] }, key());
     const r = mb.intakeTransfer({ ...b, lines: [{ sku: s.sku, approvedQty: 20 }] }, key());
     const alloc = mb.ledger.getAllocation(r.resultId!)!;
@@ -190,14 +197,28 @@ describe('Wave·Task·실피킹 (CDC-F-017·018)', () => {
     expect(mb.ledger.check()).toEqual([]);
   });
 
+  it('팔레트 랙에 예약이 남아 있으면 배포 거절(선반 보충 먼저), 보충은 총현물 그대로', async () => {
+    const trfs = makeTransfers(catalog, BASE, 7, 40).slice(0, 2);
+    for (const t of trfs) mb.intakeTransfer({ ...t, lines: t.lines.map((l) => ({ ...l, approvedQty: 150 })) }, key()); // 선반(최대 80)을 넘겨 팔레트까지 잡게
+    expect(mb.replenishmentNeeds().length).toBeGreaterThan(0);
+    const wave = await mb.createWave({ cdcId: 'CDC01', trfIds: trfs.map((t) => t.trfId) }, key());
+    expect(await code(mb.releaseWave(wave.waveId, key()))).toBe('INVALID_STATE');
+    const before = mb.ledger.totals();
+    replenishAll();
+    expect(mb.ledger.totals()).toEqual(before);
+    expect(mb.replenishmentNeeds()).toEqual([]);
+    expect(await code(mb.releaseWave(wave.waveId, key()))).toBe('OK');
+    expect(mb.ledger.check()).toEqual([]);
+  });
+
   it('이미 Wave 에 든 TRF 는 TRF_ALREADY_IN_WAVE, 미확보 TRF 는 INVALID_STATE', async () => {
     const { trfs } = await startDay(2);
     expect(await code(mb.createWave({ cdcId: 'CDC01', trfIds: [trfs[0].trfId] }, key()))).toBe('TRF_ALREADY_IN_WAVE');
-    const [, , c] = makeTransfers(catalog, BASE, 7);
+    const [, , c] = makeTransfers(catalog, BASE, 7, 40);
     const none = { ...c, lines: [{ sku: catalog.skus[1].sku, approvedQty: 1_000_000 }] };
     // 가진 만큼만 부분 할당되므로 다른 SKU 로 실패를 만든다: 재고를 먼저 다 가져간다
     mb.intakeTransfer(none, key());
-    const [, , , d] = makeTransfers(catalog, BASE, 7);
+    const [, , , d] = makeTransfers(catalog, BASE, 7, 40);
     mb.intakeTransfer({ ...d, lines: [{ sku: catalog.skus[1].sku, approvedQty: 3 }] }, key());
     expect((await mb.getTransferIntake(d.trfId)).state).toBe('ALLOCATION_FAILED');
     expect(await code(mb.createWave({ cdcId: 'CDC01', trfIds: [d.trfId] }, key()))).toBe('INVALID_STATE');
@@ -223,7 +244,7 @@ describe('Wave·Task·실피킹 (CDC-F-017·018)', () => {
     expect((await mb.getTask(t.taskId)).lines[0].pickedQty).toBe(2);
   });
 
-  it('부족 보고 → 그 칸 예약 해제·차단, 다음 FEFO 칸(2단 보충 대기)으로 재할당한 새 Task. 현물은 지우지 않는다', async () => {
+  it('부족 보고 → 선반 칸 예약 해제·차단, 팔레트로 재할당 → 선반 보충 뒤 새 Task. 현물은 지우지 않는다', async () => {
     const { waveId } = await startDay(1);
     const t = await claim('fc-01');
     const l = t.lines[0];
@@ -235,9 +256,14 @@ describe('Wave·Task·실피킹 (CDC-F-017·018)', () => {
     );
     expect((await mb.getTask(t.taskId)).state).toBe('PARTIAL');
     expect(mb.ledger.totals().onHand).toBe(before.onHand);
-    const follow = (await mb.listTasks(waveId)).filter((x) => x.taskId !== t.taskId && x.lines.some((y) => y.sku === l.sku));
+    const others = async () => (await mb.listTasks(waveId)).filter((x) => x.taskId !== t.taskId && x.lines.some((y) => y.sku === l.sku));
+    expect(await others()).toHaveLength(0); // 재할당분은 아직 팔레트에
+    const need = mb.replenishmentNeeds().filter((n) => n.sku === l.sku);
+    expect(need).toEqual([{ sku: l.sku, lot: l.lot, from: catalog.bySku.get(l.sku)!.column[0].code, to: catalog.bySku.get(l.sku)!.shelf.code, qty: 3 }]);
+    replenishAll();
+    const follow = await others();
     expect(follow).toHaveLength(1);
-    expect(follow[0].lines[0]).toMatchObject({ sku: l.sku, plannedQty: 3, locationCode: catalog.bySku.get(l.sku)!.buffer.code });
+    expect(follow[0].lines[0]).toMatchObject({ sku: l.sku, plannedQty: 3, locationCode: catalog.bySku.get(l.sku)!.shelf.code });
     expect(mb.ledger.check()).toEqual([]);
   });
 });
@@ -271,9 +297,10 @@ describe('다음 작업 받기·착수 (0.2.0 — 사용자 결정: PDA 자동 �
   });
 
   it('순서는 TRF 기한 이른 순, 층·구역으로 범위를 거른다, 다 받으면 NO_TASK_AVAILABLE', async () => {
-    const trfs = makeTransfers(catalog, BASE, 7).slice(0, 2);
+    const trfs = makeTransfers(catalog, BASE, 7, 40).slice(0, 2);
     trfs[1] = { ...trfs[1], dueAt: '2026-11-25T20:00:00.000Z' }; // 더 이른 기한
     for (const t of trfs) mb.intakeTransfer(t, key());
+    replenishAll();
     const wave = await mb.createWave({ cdcId: 'CDC01', trfIds: trfs.map((t) => t.trfId) }, key());
     await mb.releaseWave(wave.waveId, key());
     expect((await mb.pullNextTask('CDC01', 'fc-01', {}, key())).task.trfId).toBe(trfs[1].trfId);

@@ -6,6 +6,7 @@
 //   시작 H 합 = 지금 H 합 + 출발 합,  Transit = 출발 합 − 확인 수령 합 − 승인 손실
 // 할당 후보는 랙 칸(통로 01~89)의 적격 재고다. 출고대기(91)·접안(90)·승강기(92) 칸은 후보가 아니다.
 
+import { SHELF } from '../../config';
 import type { Allocation, AllocationLot, Availability, Bucket, Commit, PostingKind, Transit } from '../../domain/contract';
 
 export class LedgerError extends Error {
@@ -43,7 +44,12 @@ export interface LedgerOptions {
 
 const key = (sku: string, lot: string, loc: string) => `${sku}|${lot}|${loc}`;
 const aisleOf = (code: string) => Number(code.split('-')[3]);
+/** 보관·피킹 칸(팔레트 랙 01~ · 피킹 선반 61~) — 할당 후보. 90 접안·91 출고대기·92 승강기는 아니다 */
 export const isRackLocation = (code: string) => aisleOf(code) < 90;
+/** 피킹 선반 칸(통로 SHELF.aisleBase~89) [시뮬 R-13] */
+export const isShelfLocation = (code: string) => aisleOf(code) >= SHELF.aisleBase && aisleOf(code) < 90;
+/** 팔레트 랙 보관 칸 */
+export const isPalletLocation = (code: string) => aisleOf(code) < SHELF.aisleBase;
 
 function daysBetween(from: string, to: string): number {
   return Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000);
@@ -62,6 +68,8 @@ export class CdcLedger {
   readonly blocked = new Set<string>();
   /** 칸 수량이 바뀐 위치 코드(화면이 다시 그린다) */
   readonly dirty = new Set<string>();
+  /** 거래마다 1 오른다 — 화면이 바뀐 때만 다시 그린다 */
+  version = 0;
   private seq = 0;
   private initialTotal = 0;
   private departedTotal = 0;
@@ -87,6 +95,7 @@ export class CdcLedger {
   private commit(kind: PostingKind, sourceRef: string, deltas: Commit['deltas']): Commit {
     const c: Commit = { commitId: this.id('CMT'), requestId: sourceRef, postingKind: kind, status: 'APPLIED', sourceRef, appliedAt: this.opt.isoNow(), deltas };
     this.commits.set(c.commitId, c);
+    this.version += 1;
     for (const d of deltas) if (d.locationCode) this.dirty.add(d.locationCode);
     return c;
   }
@@ -153,9 +162,12 @@ export class CdcLedger {
         const ea = this.lotExpiry.get(`${a.sku}|${a.lot}`) ?? '';
         const eb = this.lotExpiry.get(`${b.sku}|${b.lot}`) ?? '';
         if (ea !== eb) return ea < eb ? -1 : 1; // FEFO
+        const sa = isShelfLocation(a.locationCode) ? 0 : 1;
+        const sb = isShelfLocation(b.locationCode) ? 0 : 1;
+        if (sa !== sb) return sa - sb; // 같은 기한이면 피킹 선반 먼저(보충 없이 바로 집는다)
         const la = Number(a.locationCode.split('-')[5]);
         const lb = Number(b.locationCode.split('-')[5]);
-        if (la !== lb) return la - lb; // 같은 기한이면 낮은 단(피킹면) 먼저
+        if (la !== lb) return la - lb; // 그다음 낮은 단
         return a.locationCode < b.locationCode ? -1 : 1;
       });
   }
@@ -354,6 +366,47 @@ export class CdcLedger {
     rec.holdings.set(tk, (rec.holdings.get(tk) ?? 0) + qty);
     const d = (loc: string, bucket: Bucket, delta: number) => ({ sku, lot, locationCode: loc, bucket, delta });
     return this.commit('MOVE', ref, [d(from, 'ON_HAND', -qty), d(from, 'RESERVED', -qty), d(to, 'ON_HAND', qty), d(to, 'RESERVED', qty)]);
+  }
+
+  // ── 선반 보충 MOV (팔레트 랙 → 피킹 선반, cdc-inbound → cdc-inventory move-postings 역할) ──
+  /**
+   * 한 칸의 qty 를 다른 칸으로 옮긴다(총현물 불변, WMS CDC-F-013). 그 칸에 예약이 있으면 예약부터 함께 옮기고(할당 보유가 따라감),
+   * 나머지는 자유 현물을 옮긴다. 막힌 칸·현물 부족은 거절.
+   */
+  replenishMove(sku: string, lot: string, from: string, to: string, qty: number, ref: string): Commit {
+    const fk = key(sku, lot, from);
+    const src = this.cells.get(fk);
+    if (!src || qty <= 0 || src.onHand < qty) throw new LedgerError(409, 'INVALID_STATE', `보충 ${qty} > 현물 ${src?.onHand ?? 0} (${fk})`);
+    if (this.blocked.has(fk)) throw new LedgerError(409, 'LOCATION_BLOCKED', fk);
+    const tk = key(sku, lot, to);
+    const dst = this.cell(sku, lot, to);
+    let left = qty;
+    let movedR = 0;
+    for (const r of this.allocations.values()) {
+      if (left <= 0) break;
+      const h = r.holdings.get(fk) ?? 0;
+      const take = Math.min(h, left);
+      if (take <= 0) continue;
+      r.holdings.set(fk, h - take);
+      r.holdings.set(tk, (r.holdings.get(tk) ?? 0) + take);
+      left -= take;
+      movedR += take;
+    }
+    if (src.onHand - src.reserved < left) throw new LedgerError(409, 'INVALID_STATE', `보충 자유 현물 부족 (${fk})`);
+    src.onHand -= qty;
+    src.reserved -= movedR;
+    dst.onHand += qty;
+    dst.reserved += movedR;
+    const d = (loc: string, bucket: Bucket, delta: number) => ({ sku, lot, locationCode: loc, bucket, delta });
+    const deltas = [d(from, 'ON_HAND', -qty), d(to, 'ON_HAND', qty)];
+    if (movedR) deltas.push(d(from, 'RESERVED', -movedR), d(to, 'RESERVED', movedR));
+    return this.commit('MOVE', ref, deltas);
+  }
+
+  /** 칸의 현물·예약 (sku·lot 한 칸) */
+  cellQty(sku: string, lot: string, loc: string): { onHand: number; reserved: number } {
+    const c = this.cells.get(key(sku, lot, loc));
+    return { onHand: c?.onHand ?? 0, reserved: c?.reserved ?? 0 };
   }
 
   // ── 출발 전기 TOUT (postDeparture) ────────────────────

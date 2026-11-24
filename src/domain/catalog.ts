@@ -1,11 +1,11 @@
 // 가짜 상품 마스터와 시작 재고(시드) [시뮬]. 실서버 모드에서는 백엔드 SKU·재고를 쓴다(설계 §4.3).
-// SKU 하나 = 랙 기둥 한 칸(같은 통로·베이·슬롯)의 모든 단: 1단 피킹면 · 2단 보충 대기(피킹면과 같은 LOT) · 3단~ 리저브(다음 LOT).
-// LOT 은 피킹면 쪽이 먼저 끝난다(FEFO 가 피킹면 → 보충 대기 → 리저브 순으로 고른다).
+// SKU 하나 = 피킹 선반 칸 하나(박스를 뜯어 낱개로 진열, MFC 처럼) + 팔레트 랙 기둥 한 칸(같은 통로·베이·슬롯의 1~4단, 입고·적치 보관).
+// LOT: 선반 = 가장 먼저 끝나는 LOT, 팔레트 1·2단 = 같은 LOT, 3·4단 = 다음 LOT → FEFO 가 선반 → 팔레트 순으로 고른다.
 // React·three 에 의존하지 않는다.
 
-import { CATALOG } from '../config';
+import { CATALOG, SHELF } from '../config';
 import { Rng } from '../util/rng';
-import type { Layout, Location } from './layout';
+import { skuQuota, type Layout, type Location } from './layout';
 import type { FloorNo, Temp } from './sites/chilgok';
 
 export interface SeedLot {
@@ -22,21 +22,18 @@ export interface SkuInfo {
   temp: Temp;
   zone: string;
   floor: FloorNo;
-  pickFace: Location;
-  /** 2단 보충 대기 [개념도 CDC-04] */
-  buffer: Location;
-  /** 3단 리저브(대표) — 위 단도 같은 LOT */
-  reserve: Location;
-  /** 이 SKU 가 쓰는 칸 전부(1단~맨 위) */
+  /** 피킹 선반 칸 — FC 가 집는 곳 */
+  shelf: Location;
+  /** 팔레트 랙 기둥 한 칸의 1~4단 — 보관(보충 출발지) */
   column: Location[];
-  /** 시작 재고 — FEFO 순(먼저 끝나는 LOT 먼저) */
+  /** 시작 재고 — [선반, 팔레트 1단 … 4단] */
   seed: SeedLot[];
 }
 
 export interface Catalog {
   skus: SkuInfo[];
   bySku: Map<string, SkuInfo>;
-  /** 위치 코드 → 그 칸의 SKU (피킹면·리저브) */
+  /** 위치 코드 → 그 칸의 SKU (선반·팔레트) */
   byLocation: Map<string, SkuInfo>;
 }
 
@@ -62,73 +59,73 @@ function addDays(baseDate: string, days: number): string {
 }
 
 /**
- * 시작 재고 만들기. 구역마다 피킹면 수에 비례해 SKU 를 나누고, 통로·베이에 골고루 흩는다.
+ * 시작 재고 만들기. 구역마다 SKU 수(skuQuota)만큼 선반 칸을 차례로 채우고, 팔레트 기둥은 그 구역 랙에 골고루 흩는다.
  * baseDate 는 시뮬레이션 첫날(유통기한 기준).
  */
 export function buildCatalog(layout: Layout, baseDate: string): Catalog {
   const rng = new Rng(CATALOG.seed);
-  const all = layout.floors.flatMap((f) => f.locations);
-  const byCode = new Map(all.map((l) => [l.code, l]));
-  const faces = all.filter((l) => l.type === 'PICK_FACE');
-  const zones = [...new Set(faces.map((l) => l.zone))];
-  const facesByZone = new Map(zones.map((z) => [z, faces.filter((l) => l.zone === z)]));
-
-  // 구역별 SKU 수 — 최대 나머지 방식으로 합이 정확히 CATALOG.skus
-  const quotas = zones.map((z) => ({ z, exact: (facesByZone.get(z)!.length / faces.length) * CATALOG.skus }));
-  const counts = new Map(quotas.map((q) => [q.z, Math.floor(q.exact)]));
-  let left = CATALOG.skus - [...counts.values()].reduce((a, b) => a + b, 0);
-  for (const q of [...quotas].sort((a, b) => (b.exact % 1) - (a.exact % 1))) {
-    if (left-- <= 0) break;
-    counts.set(q.z, counts.get(q.z)! + 1);
-  }
-
+  const pallets = layout.floors.flatMap((f) => f.locations);
+  const byCode = new Map(pallets.map((l) => [l.code, l]));
+  const shelves = layout.floors.flatMap((f) => f.shelves);
+  const quota = skuQuota();
   const fill = (r: readonly [number, number]) => rng.range(r[0], r[1]);
+
   const skus: SkuInfo[] = [];
   let serial = 0;
-  for (const z of zones) {
-    const zf = facesByZone.get(z)!;
-    const n = counts.get(z)!;
-    const words = WORDS[z] ?? ['상품'];
-    for (let i = 0; i < n; i++) {
-      // 피킹면을 고르게 흩는다(통로·베이 순서대로 늘어선 목록에서 일정 간격)
-      const face = zf[Math.floor((i * zf.length) / n)];
-      const at = (lv: number) => byCode.get(face.code.replace(/-1-(\d)$/, `-${lv}-$1`));
-      const column: Location[] = [];
-      for (let lv = 1; at(lv); lv++) column.push(at(lv)!);
-      const buffer = column[1];
-      const reserve = column[2];
-      serial += 1;
-      const sku = `E-${pad(10_000_000 + serial * 37, 8)}`;
-      const name = `${words[i % words.length]}${VARIANTS[Math.floor(i / words.length) % VARIANTS.length]}`;
-      const [lo, hi] = CATALOG.shelfLifeDays[face.temp];
-      const d1 = rng.int(lo, Math.max(lo, Math.floor((lo + hi) / 2)));
-      const d2 = rng.int(d1 + 1, hi + 1);
-      const e1 = addDays(baseDate, d1);
-      const e2 = addDays(baseDate, d2);
-      const lot1 = `L${e1.replace(/-/g, '').slice(2)}-${pad(serial, 4)}`;
-      const lot2 = `L${e2.replace(/-/g, '').slice(2)}-${pad(serial, 4)}`;
-      skus.push({
-        sku,
-        name,
-        barcode: `880${pad(serial, 10)}`,
-        temp: face.temp,
-        zone: z,
-        floor: face.floor as FloorNo,
-        pickFace: face,
-        buffer,
-        reserve,
-        column,
-        seed: column.map((loc) => ({
-          lot: loc.level <= 2 ? lot1 : lot2,
-          expiresAt: loc.level <= 2 ? e1 : e2,
-          locationCode: loc.code,
-          qty: Math.max(1, Math.round(loc.capacity * fill(loc.level === 1 ? CATALOG.pickFill : CATALOG.reserveFill))),
-        })),
-      });
+  for (const f of layout.floors) {
+    for (const zs of f.spec.zones) {
+      const z = zs.letter;
+      const n = quota.get(z) ?? 0;
+      const zShelves = shelves.filter((l) => l.zone === z);
+      const bases = pallets.filter((l) => l.zone === z && l.level === 1);
+      if (zShelves.length < n) throw new Error(`구역 ${z} 선반 칸 ${zShelves.length} < SKU ${n}`);
+      const words = WORDS[z] ?? ['상품'];
+      for (let i = 0; i < n; i++) {
+        const shelf = zShelves[i];
+        const base = bases[Math.floor((i * bases.length) / n)];
+        const column: Location[] = [];
+        for (let lv = 1; ; lv++) {
+          const loc = byCode.get(base.code.replace(/-1-(\d)$/, `-${lv}-$1`));
+          if (!loc) break;
+          column.push(loc);
+        }
+        serial += 1;
+        const sku = `E-${pad(10_000_000 + serial * 37, 8)}`;
+        const name = `${words[i % words.length]}${VARIANTS[Math.floor(i / words.length) % VARIANTS.length]}`;
+        const [lo, hi] = CATALOG.shelfLifeDays[shelf.temp];
+        const d1 = rng.int(lo, Math.max(lo, Math.floor((lo + hi) / 2)));
+        const d2 = rng.int(d1 + 1, hi + 1);
+        const e1 = addDays(baseDate, d1);
+        const e2 = addDays(baseDate, d2);
+        const lot1 = `L${e1.replace(/-/g, '').slice(2)}-${pad(serial, 4)}`;
+        const lot2 = `L${e2.replace(/-/g, '').slice(2)}-${pad(serial, 4)}`;
+        skus.push({
+          sku,
+          name,
+          barcode: `880${pad(serial, 10)}`,
+          temp: shelf.temp,
+          zone: z,
+          floor: f.floor,
+          shelf,
+          column,
+          seed: [
+            { lot: lot1, expiresAt: e1, locationCode: shelf.code, qty: Math.max(1, Math.round(SHELF.slotUnits * fill(SHELF.fill))) },
+            ...column.map((loc) => ({
+              lot: loc.level <= 2 ? lot1 : lot2,
+              expiresAt: loc.level <= 2 ? e1 : e2,
+              locationCode: loc.code,
+              qty: Math.max(1, Math.round(loc.capacity * fill(CATALOG.reserveFill))),
+            })),
+          ],
+        });
+      }
     }
   }
   const bySku = new Map(skus.map((s) => [s.sku, s]));
   const byLocation = new Map<string, SkuInfo>();
-  for (const s of skus) for (const l of s.column) byLocation.set(l.code, s);
+  for (const s of skus) {
+    byLocation.set(s.shelf.code, s);
+    for (const l of s.column) byLocation.set(l.code, s);
+  }
   return { skus, bySku, byLocation };
 }
