@@ -305,8 +305,8 @@ describe('다음 작업 받기·착수 (0.2.0 — 사용자 결정: PDA 자동 �
     const wave = await mb.createWave({ cdcId: 'CDC01', trfIds: trfs.map((t) => t.trfId) }, key());
     await mb.releaseWave(wave.waveId, key());
     expect((await mb.pullNextTask('CDC01', 'fc-01', {}, key())).task.trfId).toBe(trfs[1].trfId);
-    const b = await mb.pullNextTask('CDC01', 'fc-02', { floor: '6', zone: 'B' }, key());
-    expect(b.task.lines.every((l) => l.locationCode.startsWith('CDC01-B-6-'))).toBe(true);
+    const b = await mb.pullNextTask('CDC01', 'fc-02', { floor: '7' }, key());
+    expect(b.task.lines.every((l) => /^CDC01-[GH]-7-/.test(l.locationCode))).toBe(true);
     expect(await code(mb.pullNextTask('CDC01', 'fc-03', { zone: 'Z' }, key()))).toBe('NO_TASK_AVAILABLE');
     await drain();
     expect(await code(mb.pullNextTask('CDC01', 'fc-99', {}, key()))).toBe('NO_TASK_AVAILABLE');
@@ -333,7 +333,7 @@ describe('분류·검품·상차·출발 (CDC-F-019~022)', () => {
     const comps: { trfId: string; mfcId: string; lpns: string[] }[] = [];
     for (const trf of trfs) {
       const lpns = await throughInspection(trf.trfId, waveId);
-      await mb.reportLoadingResult({ trfId: trf.trfId, tripId: `TRIP-${trf.mfcId}`, vehicleId: `V-${trf.mfcId}`, workerId: 'jockey-01', action: 'LOADED', lpns: lpns.map((x) => ({ lpn: x.lpn })) }, key());
+      await mb.reportLoadingResult({ trfId: trf.trfId, tripId: `TRIP-${trf.trfId}`, vehicleId: `V-${trf.trfId}`, workerId: 'jockey-01', action: 'LOADED', lpns: lpns.map((x) => ({ lpn: x.lpn })) }, key());
       comps.push({ trfId: trf.trfId, mfcId: trf.mfcId, lpns: lpns.map((x) => x.lpn) });
       const p = await mb.getTransferIntake(trf.trfId);
       expect(p.state).toBe('LOADED');
@@ -351,7 +351,7 @@ describe('분류·검품·상차·출발 (CDC-F-019~022)', () => {
     clock = 23 * 3600;
     let shipped = 0;
     for (const c of comps) {
-      const v = mb.validateDeparture({ departureId: `DEP-${c.mfcId}`, tripId: `TRIP-${c.mfcId}`, vehicleId: `V-${c.mfcId}`, departedAt: new Date().toISOString(), source: 'SIMULATED', trfCompositions: [c] }, key());
+      const v = mb.validateDeparture({ departureId: `DEP-${c.trfId}`, tripId: `TRIP-${c.trfId}`, vehicleId: `V-${c.trfId}`, departedAt: new Date().toISOString(), source: 'SIMULATED', trfCompositions: [c] }, key());
       expect(v.overallResult).toBe('MATCHED');
       shipped += v.transfers[0].departedQty;
       expect((await mb.getShipmentManifest(c.trfId)).lines.reduce((s, l) => s + l.qty, 0)).toBe(v.transfers[0].departedQty);

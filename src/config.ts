@@ -221,8 +221,8 @@ export const OUTBOUND = {
   /** 층마다 검품원(석간) · 지하 상차 작업자(19~23시) 수 [가정] */
   inspectorsPerFloor: 1,
   loaders: 4,
-  /** 지하 상차 근무 22:00~24:00 [가정] — 22:00 R/T 카운팅, 22:30 상차 시작 [CDC-8] */
-  loaderShift: { start: 22 * 60, end: 24 * 60 },
+  /** 지하 상차 근무 22:00~다음 날 04:30 [가정] — 노선별 출차(01:50~03:40, TMS 출차 공식) 30분 전부터 싣는다 */
+  loaderShift: { start: 22 * 60, end: 28 * 60 + 30 },
   rtCountAt: 22 * 60,
   loadFrom: 22 * 60 + 30,
   /** 출차 — 23:00 부터, 그 MFC R/T 를 다 실은 차부터. 늦어도 이 시각(분)엔 실은 것만으로 출차 [가정] */
@@ -243,4 +243,45 @@ export const OUTBOUND = {
   liftRide: 60,
   /** 지하: 롤테이너 한 대 싣기(초) */
   loadPerRoll: 25,
+} as const;
+
+/**
+ * TMS — 고정 노선·주행 시간·차량 [정본 TMS 2.2 / 가정] (설계 §12 ⑦).
+ * 정규차는 고정 노선 × 온도대로 운송지시서를 만든다(§4.3). 차 한 대 = 온도대 하나(혼적 금지, §4.4). 5톤 기본 20 R/T·5,000kg [가정 TMS].
+ * 멀티드롭 최대 3곳, 방문 순서는 노선 마스터, 상차는 방문 역순(§7.4). 출차 = max(23:00, 첫 MFC 도착 목표 − 주행)(§3).
+ * 주행 시간: 칠곡→부산진구 110·진구→남구 20·남구→칠곡 115 은 TMS §22 사례 [가정], 나머지는 지도 거리로 잡은 [가정] — 행렬은 미정(§24).
+ */
+export const TMS = {
+  /** 고정 노선 — 4지역(사용자 2026-11-25) 그대로 */
+  routes: [
+    { routeId: 'RT-BUSAN', region: '부산권', stops: ['MFC-BJG-01', 'MFC-BNG-01'] },
+    { routeId: 'RT-HONAM', region: '호남권', stops: ['MFC-MOKPO-01'] },
+    { routeId: 'RT-CHUNGCHEONG', region: '충청권', stops: ['MFC-SEJ-01'] },
+    { routeId: 'RT-GANGWON', region: '강원권', stops: ['MFC-CHC-01'] },
+  ],
+  /** 주행 시간(분) — 'CDC01' 은 칠곡 */
+  travelMin: {
+    'CDC01>MFC-BJG-01': 110,
+    'MFC-BJG-01>MFC-BNG-01': 20,
+    'MFC-BNG-01>CDC01': 115,
+    'CDC01>MFC-MOKPO-01': 210,
+    'MFC-MOKPO-01>CDC01': 210,
+    'CDC01>MFC-SEJ-01': 120,
+    'MFC-SEJ-01>CDC01': 120,
+    'CDC01>MFC-CHC-01': 220,
+    'MFC-CHC-01>CDC01': 220,
+  } as Record<string, number>,
+  /** 첫 MFC 도착 목표(분, D일 0시 기준 — 다음 날 05:30) [가정, TMS §3 첫 도착 05:00~06:00] */
+  firstArrivalTarget: 24 * 60 + 5 * 60 + 30,
+  /** MFC 하차 30분, 한 MFC 동시 하차 최대 3대 [정본 TMS §3] */
+  unloadMin: 30,
+  unloadBaysPerMfc: 3,
+  /** 상차는 노선별 출차 30분 전부터 [정본 TMS §3] */
+  loadLeadMin: 30,
+  /** 출차가 늦어지면 기다리는 최대(분) — 그 뒤엔 실은 것만으로 출차하고 지연 사고를 남긴다 [가정] */
+  maxDepartDelayMin: 60,
+  /** 정규차 — 5톤, 20 R/T, 5,000kg [가정 TMS §4.4] */
+  vehicle: { vehicleClass: 'TRUCK_5T' as const, maxRt: 20, maxWeightKg: 5000 },
+  /** 기사 이름 [시뮬] — 실제 인물 아님 */
+  driverNames: ['김기사', '이기사', '박기사', '최기사', '정기사', '강기사', '조기사', '윤기사', '장기사', '임기사', '한기사', '오기사', '서기사', '신기사'],
 } as const;

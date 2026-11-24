@@ -40,7 +40,7 @@ export interface CameraRequest {
 }
 
 export type LabelMode = 'all' | 'rack' | 'off';
-export type RightView = 'summary' | 'inventory' | 'logs';
+export type RightView = 'summary' | 'inventory' | 'logs' | 'transport';
 export type LeftView = 'settings' | 'zone' | 'workers' | 'help';
 export type Theme = 'dark' | 'light';
 export type FloorKey = FloorNo | 'B1';

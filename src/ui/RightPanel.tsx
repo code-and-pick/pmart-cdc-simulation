@@ -1,6 +1,8 @@
 // 오른쪽 패널 — 지표(kpis) · 재고 · 현장 흐름. MFC 시뮬레이터 RightPanel 의 kpi 모양을 쓴다. 재고는 MOCK 원장(cdc-inventory 역할).
 import { useApp, useTick, useView } from '../app/context';
-import { OUTBOUND } from '../config';
+import { MFCS, OUTBOUND, TMS } from '../config';
+import { fmt } from '../backend/mock/MockTms';
+import { TEMP_KO } from '../sim/simulation';
 
 export function RightPanel() {
   const { layout, backend, catalog, sim } = useApp();
@@ -21,7 +23,9 @@ export function RightPanel() {
     ['검품 합격', day.inspected.toLocaleString()],
     ['상차(LOADED)', day.loaded.toLocaleString()],
     ['출발(TOUT)', day.departed.toLocaleString()],
-    ['차', [...sim.trucks.values()].map((t) => (t.state === 'DEPARTED' ? '출발' : `R/T ${Math.ceil(t.loaded.length / OUTBOUND.boxesPerRt)}`)).join(' · ')],
+    ['운행', `${day.tripsDone}/${day.trips} 복귀`],
+    ['MFC 수령', day.received.toLocaleString()],
+    ['Transit(미정산)', backend.ledger.totals().transit.toLocaleString()],
     ['팔레트 칸(보관)', locs.length.toLocaleString()],
     ['피킹 선반 칸', shelves.toLocaleString()],
     ['오토스토어 빈', layout.autostore.bins.toLocaleString()],
@@ -70,6 +74,8 @@ export function RightPanel() {
             )}
           </tbody>
         </table>
+      ) : view.rightView === 'transport' ? (
+        <Transport />
       ) : view.rightView === 'logs' ? (
         <div className="note" style={{ maxHeight: 'calc(100vh - 260px)', overflow: 'auto' }}>
           {[...sim.events].reverse().slice(0, 150).map((e, i) => (
@@ -84,5 +90,60 @@ export function RightPanel() {
         </div>
       )}
     </div>
+  );
+}
+
+const RUN_KO = { PLANNED: '배차', LOADING: '상차 중', IN_TRANSIT: '운송 중', RETURNING: '복귀 중', RETURNED: '복귀', CANCELLED: '결행' } as const;
+const hmSec = (sec?: number) => (sec === undefined ? '' : fmt(sec / 60));
+
+/** 운송 — 운행(노선 × 온도대)마다 차·기사·출차·정차별 도착·인계 [TMS 2.2] */
+function Transport() {
+  const { sim } = useApp();
+  const runs = [...sim.runs.values()].sort((a, b) => a.plan.plannedDepartMin - b.plan.plannedDepartMin);
+  if (!runs.length) return <div className="note">22:00 배차 전입니다. 배차는 고정 노선 × 온도대(차 한 대 = 온도대 하나, 5톤 {TMS.vehicle.maxRt} R/T)로 정하고, 출차는 max(23:00, 첫 MFC 도착 목표 − 주행)입니다.</div>;
+  return (
+    <table className="inv">
+      <thead>
+        <tr>
+          <th>노선</th>
+          <th>차·기사</th>
+          <th>출차</th>
+          <th>정차 (도착·인계)</th>
+          <th>상태</th>
+        </tr>
+      </thead>
+      <tbody>
+        {runs.map((r) => (
+          <tr key={r.plan.tripId} title={`${r.plan.tripId} · ${r.result ?? ''}`}>
+            <td>
+              {r.plan.region} {TEMP_KO[r.plan.temp]}
+            </td>
+            <td>
+              {r.plateNo}
+              <br />
+              {r.driverName}
+            </td>
+            <td>
+              {fmt(r.plan.plannedDepartMin)}
+              {r.departedAt !== undefined && <><br />실제 {hmSec(r.departedAt)}</>}
+            </td>
+            <td>
+              {r.stops.map((st, i) => (
+                <div key={st.mfcId}>
+                  {MFCS.find((m) => m.id === st.mfcId)?.name.replace(/^\d호점 /, '')} {fmt(r.plan.plannedArriveMin[i])}
+                  {st.arrivedAt !== undefined && ` → ${hmSec(st.arrivedAt)}`}
+                  {st.handedAt !== undefined && ` · 인계 ${(st.received ?? 0).toLocaleString()}`}
+                </div>
+              ))}
+            </td>
+            <td>
+              {RUN_KO[r.state]}
+              <br />
+              R/T {Math.ceil(r.loaded.length / OUTBOUND.boxesPerRt)}
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
   );
 }

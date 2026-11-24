@@ -6,6 +6,7 @@ const RIGHT: [RightView, string, string][] = [
   ['summary', '▤', '지표'],
   ['logs', '☰', '현장'],
   ['inventory', '▦', '재고'],
+  ['transport', '⛟', '운송'],
 ];
 const LEFT: [LeftView, string, string][] = [
   ['settings', '⚙', '설정'],

@@ -5,7 +5,8 @@ import { useEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { AppContext, useApp, useTick, useView, type AppCtx } from '../../app/context';
-import { MFCS, OUTBOUND, RACK, SHELF } from '../../config';
+import { MFCS, OUTBOUND, RACK, SHELF, TMS } from '../../config';
+import { TEMP_KO } from '../../sim/simulation';
 import { B1 } from '../../sim/site';
 import type { FloorLayout, Location, Rect } from '../../domain/layout';
 import { SCENE, ZONE_COLOR } from '../colors';
@@ -343,7 +344,7 @@ function Selected() {
 
 /**
  * 지하 B1 — 차량 접안 자리(90). 8,600평 밖 공용 시설. 북쪽에 승강기 착지(위층과 같은 승강기), 그 남쪽 상차 마당, 접안 문 남쪽에 차.
- * 차는 §12 ⑦ TMS 전까지 MFC 마다 한 대 [시뮬] — 실린 R/T 수를 차 위에, 출차하면 사라진다.
+ * 차는 운행(노선 × 온도대)마다 한 대 — 22:00 배차 뒤 접안 문에 서고, 실린 R/T 수를 차 위에, 출차하면 사라진다.
  */
 function Basement() {
   const { layout, sim } = useApp();
@@ -381,23 +382,23 @@ function Basement() {
           </sprite>
         </group>
       ))}
-      {[...sim.trucks.values()]
-        .filter((t) => t.state === 'DOCKED')
-        .map((t) => {
-          const rts = Math.ceil(t.loaded.length / OUTBOUND.boxesPerRt);
-          const name = MFCS.find((m) => m.id === t.mfcId)?.name ?? t.mfcId;
+      {[...sim.runs.values()]
+        .filter((r) => r.state === 'PLANNED' || r.state === 'LOADING')
+        .map((r) => {
+          const rts = Math.ceil(r.loaded.length / OUTBOUND.boxesPerRt);
+          const name = `${r.plan.region} ${TEMP_KO[r.plan.temp]} · ${r.plan.stops.map((st) => MFCS.find((m) => m.id === st.mfcId)?.name.replace(/^\d호점 /, '') ?? st.mfcId).join('→')}`;
           return (
-            <group key={t.vehicleId} position={[t.dock.pos.x, 0, 0]}>
+            <group key={r.plan.tripId} position={[r.dock.pos.x, 0, 0]}>
               <mesh position={[0, 1.7, (B1.truckZ0 + B1.truckZ1 - 2) / 2]}>
                 <boxGeometry args={[2.4, 2.6, B1.truckZ1 - B1.truckZ0 - 2]} />
-                <meshStandardMaterial color={0xf4f6fa} />
+                <meshStandardMaterial color={r.plan.temp === 'AMBIENT' ? 0xf4f6fa : r.plan.temp === 'CHILLED' ? 0xd8ecff : 0xcfe0f5} />
               </mesh>
               <mesh position={[0, 1.4, B1.truckZ1 - 0.8]}>
                 <boxGeometry args={[2.3, 2.2, 1.6]} />
                 <meshStandardMaterial color={0x2f6fd6} />
               </mesh>
-              <sprite position={[0, 4.2, (B1.truckZ0 + B1.truckZ1) / 2]} scale={[6, 1.2, 1]}>
-                <spriteMaterial map={plateTexture(`${name} R/T ${rts}`, { w: 640, h: 128 })} />
+              <sprite position={[0, 4.2, (B1.truckZ0 + B1.truckZ1) / 2]} scale={[8, 1.15, 1]}>
+                <spriteMaterial map={plateTexture(`${name} R/T ${rts}/${TMS.vehicle.maxRt}`, { w: 900, h: 128 })} />
               </sprite>
             </group>
           );

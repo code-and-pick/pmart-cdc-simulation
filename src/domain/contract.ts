@@ -332,3 +332,120 @@ export interface Commit {
   deltas: { sku: string; lot: string; locationCode: string; bucket: Bucket; delta: number }[];
   rejectReason?: string;
 }
+
+// ── fleet-service 0.1.0 (조회만 — 등록 API 없음, R-14) ─────────
+export type TempClass = TemperatureZone;
+export interface Vehicle {
+  vehicleId: string;
+  plateNo: string;
+  vehicleClass: 'VAN_1T' | 'TRUCK_2_5T' | 'TRUCK_3_5T' | 'TRUCK_5T' | 'TRUCK_11T';
+  status: 'AVAILABLE' | 'RESERVED' | 'IN_TRIP' | 'MAINTENANCE' | 'OUT_OF_SERVICE';
+  version: number;
+  depot: string;
+  maxWeightKg: number;
+  compartments: { compartmentId: string; tempClass: TempClass; maxWeightKg?: number; precoolRequiredMin?: number }[];
+  /** 계약에 없음 — TMS 문서 최대 R/T(20) [가정], R-14 */
+  maxRt?: number;
+}
+
+export interface Driver {
+  driverId: string;
+  displayName: string;
+  status: 'AVAILABLE' | 'RESERVED' | 'ON_DUTY' | 'RESTING' | 'OFF_DUTY' | 'SUSPENDED';
+  homeDepot?: string;
+}
+
+// ── transport-execution-service 0.1.0 ───────────────────
+export type TripState = 'DRAFT' | 'VALIDATING' | 'CONFIRMED' | 'LOADING' | 'READY' | 'IN_TRANSIT' | 'PHYSICAL_ENDED' | 'CLOSED';
+export type StopState = 'PLANNED' | 'ARRIVED' | 'WAITING' | 'UNLOADING' | 'HANDOVER_PENDING' | 'HANDOVER_RECORDED' | 'DEPARTED';
+
+export interface Stop {
+  stopId: string;
+  sequence: number;
+  centerId: string;
+  state: StopState;
+  trfIds: string[];
+  plannedArriveAt: string;
+  arrivedAt: string | null;
+  unloadingStartedAt: string | null;
+  departedAt: string | null;
+  handoverIds: string[];
+}
+
+export interface TrfComposition {
+  trfId: string;
+  trfVersion?: number;
+  lines: { lpn?: string; sku: string; lot?: string; qty: number; compartmentId?: string }[];
+}
+
+export interface DepartureInput {
+  departedAt: string;
+  source: 'REAL' | 'SIMULATED';
+  vehicleId: string;
+  driverId: string;
+  evidenceRef: string;
+  preDepartureCheckId?: string;
+  trfCompositions: TrfComposition[];
+  recordedBy?: string;
+}
+
+export interface Departure extends DepartureInput {
+  departureId: string;
+  tripId: string;
+  fromCdc: string;
+  recordedAt: string;
+}
+
+export interface PreDepartureCheckInput {
+  result: 'PASS' | 'FAIL';
+  checkedAt: string;
+  checkedBy: string;
+  manifestRef?: string;
+  findings?: { kind: 'WRONG_MFC_MIXED' | 'MISSING_LPN' | 'SEAL_MISMATCH' | 'COMPARTMENT_MISMATCH' | 'EXTRA_LPN'; lpn?: string; trfId?: string; detail?: string }[];
+}
+
+export interface StopEventInput {
+  occurredAt: string;
+  recordedBy?: string;
+  unloadingBayId?: string;
+  evidenceRef?: string;
+  note?: string;
+}
+
+export interface HandoverInput {
+  trfId: string;
+  handedAt: string;
+  handedBy: string;
+  receivedBy: string;
+  lines: { lpn?: string; sku: string; lot?: string; qty: number }[];
+  evidenceRef: string;
+  discrepancies?: { kind: 'SHORT' | 'OVER' | 'DAMAGED' | 'WRONG_LPN' | 'SEAL_BROKEN'; lpn?: string; sku?: string; expectedQty?: number; actualQty?: number }[];
+}
+
+export interface Handover extends HandoverInput {
+  handoverId: string;
+  tripId: string;
+  stopId: string;
+}
+
+export interface Trip {
+  tripId: string;
+  version: number;
+  state: TripState;
+  assignmentId?: string;
+  vehicleId?: string;
+  driverId?: string;
+  fromCdc: string;
+  preDepartureCheck?: { checkId: string; result: 'PASS' | 'FAIL'; checkedAt: string };
+  departure?: Departure;
+  stops: Stop[];
+  openIncidentIds: string[];
+  obligations: { trfId: string; departedQty: number; receivedQty: number | null; state: 'PENDING' | 'RECONCILED' | 'DISCREPANCY' }[];
+  physicallyEndedAt: string | null;
+}
+
+export interface IncidentInput {
+  kind: 'DELAY' | 'BREAKDOWN' | 'GPS_LOST' | 'TEMP' | 'QTY';
+  occurredAt: string;
+  note?: string;
+}

@@ -8,7 +8,7 @@ const LABEL_MODES: { mode: LabelMode; text: string }[] = [
   { mode: 'rack', text: '랙만' },
   { mode: 'off', text: '끔' },
 ];
-const VIEW_KO: Record<RightView, string> = { summary: '지표', inventory: '재고', logs: '현장 흐름' };
+const VIEW_KO: Record<RightView, string> = { summary: '지표', inventory: '재고', logs: '현장 흐름', transport: '운송' };
 const FLOORS: { key: FloorKey; text: string }[] = [
   { key: 5, text: '5F 상온·냉동' },
   { key: 6, text: '6F 냉장' },

@@ -47,7 +47,7 @@ describe('하루 돌리기', () => {
     const initial = backend.ledger.totals();
 
     await runUntil(sim, 12.9);
-    expect(backend.listTransfers()).toHaveLength(5);
+    expect(backend.listTransfers()).toHaveLength(15); // MFC 5곳 × 온도대 3 (TMS D-10)
     expect(backend.replenishmentNeeds()).toEqual([]); // 주간조가 13시 전에 보충을 끝냄
     expect(sim.agents.filter((a) => a.role === 'REPL' && a.shift === 'DAY').some((a) => a.done > 0)).toBe(true);
 
@@ -69,24 +69,34 @@ describe('하루 돌리기', () => {
     expect(sim.agents.filter((a) => a.role === 'FC').every((a) => a.distance > 0)).toBe(true);
     expect(sim.events.filter((e) => e.kind === 'warn' && !e.text.includes('결품') && !e.text.includes('검품 불합격'))).toEqual([]);
 
-    // 22:00 R/T 카운팅 → 22:30 상차 → 23:00~ 출차(이때만 TOUT: CDC −q · Transit +q)
-    await runUntil(sim, 24.5);
+    // 22:00 R/T 카운팅·배차 → 출차 30분 전 상차(방문 역순) → 노선별 출차(TOUT) → 도착·하차·인계 → MFC 수령 → 복귀
+    await runUntil(sim, 24 + 10.5);
     expect(sim.events.some((e) => e.text.startsWith('22:00 R/T 카운팅'))).toBe(true);
-    for (const t of sim.trucks.values()) {
-      expect(t.state).toBe('DEPARTED');
-      expect(t.result).toBe('MATCHED');
+    const runs = [...sim.runs.values()];
+    expect(runs.length).toBeGreaterThan(0);
+    for (const r of runs) {
+      expect(r.state).toBe('RETURNED');
+      expect(r.result).toBe('MATCHED');
+      expect(r.departedAt! / 60).toBeGreaterThanOrEqual(23 * 60); // 첫 출차 23:00 이후
+      expect(Math.ceil(r.loaded.length / 10)).toBeLessThanOrEqual(20); // 5톤 20 R/T
+      expect(new Set(r.loaded.map((b) => b.temp)).size).toBe(1); // 차 한 대 = 온도대 하나
+      for (const st of r.stops) expect(st.handedAt! / 60).toBeLessThanOrEqual(24 * 60 + 8 * 60); // 인계 08:00 까지
+      const trip = sim.tms.getTrip(r.plan.tripId);
+      expect(trip.state).toBe('CLOSED'); // 출발 q = 수령 r
     }
+    // 부산권 멀티드롭: 진구 → 남구 순서로 도착, 상차는 방문 역순(남구 R/T 먼저)
+    const busan = runs.find((r) => r.plan.routeId === 'RT-BUSAN' && r.plan.temp === 'AMBIENT')!;
+    expect(busan.stops.map((s) => s.mfcId)).toEqual(['MFC-BJG-01', 'MFC-BNG-01']);
+    expect(busan.stops[0].arrivedAt!).toBeLessThan(busan.stops[1].arrivedAt!);
+    expect(busan.loaded[0].mfcId).toBe('MFC-BNG-01');
     const after = sim.summary();
-    expect(after.departed).toBe(after.sorted); // 분류한 것은 모두 검품·하강·상차되어 출발
-    for (const t of backend.listTransfers()) {
-      expect(t.state).toBe('DEPARTED');
-      const m = await backend.getShipmentManifest(t.trfId);
-      expect(m.lines.reduce((a, l) => a + l.qty, 0)).toBe(t.progress.reduce((a, p) => a + p.departedQty, 0));
-    }
+    expect(after.departed).toBe(after.sorted);
+    for (const t of backend.listTransfers()) expect(t.state).toBe('DEPARTED');
     const tot = backend.ledger.totals();
     expect(tot.onHand).toBe(initial.onHand - after.departed);
-    expect(tot.transit).toBe(after.departed);
-    expect(tot.reserved).toBe(0); // 결품 잔량 등은 잔량 정리로 해제
+    expect(tot.acked).toBe(after.departed); // MFC 가 다 받음
+    expect(tot.transit).toBe(0);
+    expect(tot.reserved).toBe(0);
     expect(backend.ledger.check()).toEqual([]);
     expect(sim.events.filter((e) => e.kind === 'warn' && !e.text.includes('결품') && !e.text.includes('검품 불합격'))).toEqual([]);
   }, 120_000);
