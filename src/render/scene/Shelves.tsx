@@ -2,7 +2,7 @@
 // 팔레트 랙에서 박스를 뜯어 낱개로 진열해 두는 곳(사용자 2026-11-25). FC 피커가 여기서 MFC 주문(TRF)별로 집는다.
 // 칸 재고는 원장(ledger.version)이 바뀔 때만 다시 그린다.
 
-import { useFrame, type ThreeEvent } from '@react-three/fiber';
+import { useFrame } from '@react-three/fiber';
 import { useEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { useApp, useView } from '../../app/context';
@@ -71,9 +71,8 @@ function Frames({ f }: { f: FloorLayout }) {
   );
 }
 
-/** 칸마다 진열한 낱개 상품(작은 상자 묶음) — 높이 = 칸 용량 대비 현물. 누르면 그 칸을 고른다 */
+/** 칸마다 진열한 낱개 상품(작은 상자 묶음) — 높이 = 칸 용량 대비 현물. 누르기는 Core.Picker(빈 칸 포함) */
 function ShelfStock({ f }: { f: FloorLayout }) {
-  const view = useView();
   const { backend } = useApp();
   const ref = useRef<THREE.InstancedMesh>(null);
   const seen = useRef(-1);
@@ -97,12 +96,8 @@ function ShelfStock({ f }: { f: FloorLayout }) {
     ref.current!.instanceMatrix.needsUpdate = true;
     if (ref.current!.instanceColor) ref.current!.instanceColor.needsUpdate = true;
   });
-  const onClick = (e: ThreeEvent<MouseEvent>) => {
-    e.stopPropagation();
-    if (e.instanceId != null) view.select(f.shelves[e.instanceId]);
-  };
   return (
-    <instancedMesh ref={ref} args={[undefined, undefined, f.shelves.length]} onClick={onClick} frustumCulled={false}>
+    <instancedMesh ref={ref} args={[undefined, undefined, f.shelves.length]} frustumCulled={false}>
       <boxGeometry />
       <meshStandardMaterial roughness={0.6} />
     </instancedMesh>

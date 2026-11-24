@@ -1,8 +1,8 @@
 // 현장 사람 — 보는 층의 작업자만. 위치·방향·짐은 useFrame 에서 three 객체를 직접 바꾼다(React 상태로 올리지 않음).
 // 색: FC 파랑 · 분배/라인 초록 · 자키 주황 · 지게차 노랑 · 검품 보라 · 지하 상차 청록. 누르면 PDA 카드.
 
-import { useFrame, type ThreeEvent } from '@react-three/fiber';
-import { useRef } from 'react';
+import { useFrame } from '@react-three/fiber';
+import { useEffect, useRef } from 'react';
 import * as THREE from 'three';
 import { useApp, useView } from '../../app/context';
 import type { Agent, Role } from '../../sim/agent';
@@ -46,6 +46,14 @@ function Person({ a, selected }: { a: Agent; selected: boolean }) {
   const pallet = useRef<THREE.Mesh>(null);
   const forklift = useRef<THREE.Mesh>(null);
   const cartMat = useRef<THREE.MeshStandardMaterial>(null);
+  // 클릭 판정(Core.Picker)이 사람을 먼저 잡도록 등록
+  useEffect(() => {
+    const o = g.current!;
+    view.people.set(a.id, o);
+    return () => {
+      view.people.delete(a.id);
+    };
+  }, [a.id, view]);
   useFrame(() => {
     const o = g.current;
     if (!o) return;
@@ -56,13 +64,9 @@ function Person({ a, selected }: { a: Agent; selected: boolean }) {
     pallet.current!.visible = a.carrying === 'PALLET';
     forklift.current!.visible = a.role === 'REPL';
   });
-  const onClick = (e: ThreeEvent<MouseEvent>) => {
-    e.stopPropagation();
-    view.selectWorker(a.id);
-  };
   const color = ROLE_COLOR[a.role];
   return (
-    <group ref={g} onClick={onClick}>
+    <group ref={g}>
       {/* 지게차 몸체 */}
       <mesh ref={forklift} position={[0, 0.6, -0.4]}>
         <boxGeometry args={[1.0, 1.2, 1.6]} />

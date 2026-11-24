@@ -1,9 +1,8 @@
 // 3D 가상 현장 — 한 번에 한 층을 그린다(층 버튼으로 전환, 설계 §9). MFC 시뮬레이터 render/scene/SiteScene.tsx 와 같은 틀.
 // 매 프레임 바뀌는 값은 useFrame 안에서 three 객체를 직접 바꾼다(CLAUDE.md).
-import { Canvas, useFrame, useThree, type ThreeEvent } from '@react-three/fiber';
+import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { useEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
-import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { AppContext, useApp, useTick, useView, type AppCtx } from '../../app/context';
 import { MFCS, OUTBOUND, RACK, SHELF, TMS } from '../../config';
 import { TEMP_KO } from '../../sim/simulation';
@@ -12,7 +11,9 @@ import type { FloorLayout, Location, Rect } from '../../domain/layout';
 import { SCENE, ZONE_COLOR } from '../colors';
 import { plateTexture } from '../sprites';
 import { Agents, SimDriver } from './Agents';
+import { CameraRig, CellLabels, Picker } from './Core';
 import { Shelves } from './Shelves';
+import { BEAM_H, beamY, LOAD_MAX } from '../rackGeom';
 
 export function SiteScene({ app }: { app: AppCtx }) {
   return (
@@ -25,6 +26,8 @@ export function SiteScene({ app }: { app: AppCtx }) {
         <Agents />
         <SimDriver />
         <CameraRig />
+        <Picker />
+        <CellLabels />
       </AppContext.Provider>
     </Canvas>
   );
@@ -83,11 +86,6 @@ function Tint({ r, color, opacity = SCENE.zoneTint }: { r: Rect; color: number; 
 
 const tmp = new THREE.Object3D();
 
-/** 빔 높이(윗면 아래 중심) — 1단은 사진처럼 바닥 가까운 낮은 빔, 2~4단은 2·4·6m [사용자 랙 규격] */
-const BEAM_H = 0.12;
-const beamY = (lv: number) => (lv === 1 ? 0.15 : (lv - 1) * RACK.levelH);
-/** 팔레트 짐 최대 높이 — 단 2m 에서 빔·여유를 뺀 만큼(맨 위 단도 같게) */
-const LOAD_MAX = Math.min(RACK.pallet.h, RACK.levelH - 0.3);
 /** 기둥 옆 가새 한 칸 높이 */
 const BRACE_STEP = 1.0;
 
@@ -169,7 +167,6 @@ function Racks({ f }: { f: FloorLayout }) {
  * 칸마다 인스턴스 하나(빈 칸은 크기 0). 원장 거래(ledger.version)가 바뀌면 다시 그린다 — 보충으로 팔레트가 줄어드는 게 보인다.
  */
 function Loads({ f }: { f: FloorLayout }) {
-  const view = useView();
   const { backend } = useApp();
   const decks = useRef<THREE.InstancedMesh>(null);
   const loads = useRef<THREE.InstancedMesh>(null);
@@ -200,17 +197,13 @@ function Loads({ f }: { f: FloorLayout }) {
     loads.current!.instanceMatrix.needsUpdate = true;
     if (loads.current!.instanceColor) loads.current!.instanceColor.needsUpdate = true;
   });
-  const onClick = (e: ThreeEvent<MouseEvent>) => {
-    e.stopPropagation();
-    if (e.instanceId != null) view.select(f.locations[e.instanceId]);
-  };
   return (
     <>
-      <instancedMesh ref={decks} args={[undefined, undefined, f.locations.length]} onClick={onClick} frustumCulled={false}>
+      <instancedMesh ref={decks} args={[undefined, undefined, f.locations.length]} frustumCulled={false}>
         <boxGeometry />
         <meshStandardMaterial color={SCENE.pallet} />
       </instancedMesh>
-      <instancedMesh ref={loads} args={[undefined, undefined, f.locations.length]} onClick={onClick} frustumCulled={false}>
+      <instancedMesh ref={loads} args={[undefined, undefined, f.locations.length]} frustumCulled={false}>
         <boxGeometry />
         <meshStandardMaterial roughness={0.45} />
       </instancedMesh>
@@ -335,7 +328,7 @@ function Selected() {
       </mesh>
     );
   return (
-    <mesh position={[l.pos.x, (l.level - 1) * RACK.levelH + RACK.levelH * 0.4, l.pos.z]}>
+    <mesh position={[l.pos.x, (l.level === 1 ? 0 : beamY(l.level)) + RACK.levelH * 0.45, l.pos.z]}>
       <boxGeometry args={[RACK.depth * 1.05, RACK.levelH * 0.85, (RACK.bayW / RACK.slots) * 0.95]} />
       <meshBasicMaterial color={SCENE.selected} transparent opacity={0.45} depthWrite={false} />
     </mesh>
@@ -407,32 +400,3 @@ function Basement() {
   );
 }
 
-/** 카메라 — 마우스로 돌리고, 층·구역 버튼을 누르면 그쪽으로 부드럽게 옮긴다 */
-function CameraRig() {
-  const { controller } = useApp();
-  const { camera, gl } = useThree();
-  const controls = useRef<OrbitControls | null>(null);
-  const anim = useRef<{ pos: THREE.Vector3; target: THREE.Vector3; t: number } | null>(null);
-  useEffect(() => {
-    const c = new OrbitControls(camera, gl.domElement);
-    c.enableDamping = true;
-    c.maxPolarAngle = Math.PI / 2.05;
-    controls.current = c;
-    return () => c.dispose();
-  }, [camera, gl]);
-  useFrame((_, dt) => {
-    const c = controls.current;
-    if (!c) return;
-    const req = controller.takeCameraRequest();
-    if (req) anim.current = { pos: req.pos, target: req.target, t: req.animate ? 0 : 1 };
-    const a = anim.current;
-    if (a) {
-      a.t = Math.min(1, a.t + dt * 2.2);
-      camera.position.lerp(a.pos, a.t);
-      c.target.lerp(a.target, a.t);
-      if (a.t >= 1) anim.current = null;
-    }
-    c.update();
-  });
-  return null;
-}

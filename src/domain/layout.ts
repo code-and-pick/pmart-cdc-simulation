@@ -31,6 +31,8 @@ export interface Location {
   slot: number;
   /** 유닛 용량 — 모든 칸 합 + 오토스토어 = 520만 [고정] */
   capacity: number;
+  /** 랙·선반 칸이 통로를 보는 쪽(x 방향 ±1) — 통로는 남북으로 뻗으니 칸 앞면은 늘 x 쪽. 정면 보기·칸 번호 붙이기용 */
+  face?: 1 | -1;
   /** 칸 중심(표시용) */
   pos: { x: number; y: number; z: number };
 }
@@ -188,6 +190,7 @@ export function buildLayout(): Layout {
                   level,
                   slot,
                   capacity: 0,
+                  face: side === 'E' ? -1 : 1,
                   pos: { x: rx, y: (level - 0.5) * RACK.levelH, z: rackZ0 + j * RACK.bayW + (slot - 0.5) * (RACK.bayW / RACK.slots) },
                 });
               }
@@ -273,6 +276,7 @@ export function buildLayout(): Layout {
                   level,
                   slot,
                   capacity: SHELF.slotUnits,
+                  face: side === 'E' ? -1 : 1,
                   pos: { x: rx, y: 0.15 + ((level - 1) * (SHELF.height - 0.25)) / SHELF.levels, z: uz0 + j * SHELF.unitLen + ((slot - 0.5) * SHELF.unitLen) / SHELF.slots },
                 });
               }

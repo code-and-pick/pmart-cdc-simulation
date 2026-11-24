@@ -19,7 +19,7 @@ function Sec({ title, aside, children }: { title: string; aside?: ReactNode; chi
 
 function Row({ k, v }: { k: string; v: ReactNode }) {
   return (
-    <div className="srow">
+    <div className="srow kv">
       <span className="srow-l">{k}</span>
       <b className="srow-v">{v}</b>
     </div>
@@ -58,7 +58,7 @@ function Settings() {
           const w = WORKFORCE[fl];
           return <Row key={fl} k={`${fl}F`} v={`지게차 ${w.replDay}+${w.replEve} · FC ${w.fc} · 분배·라인 ${w.sort} · 자키 ${w.jockey} · 검품 ${OUTBOUND.inspectorsPerFloor}`} />;
         })}
-        <Row k="B1" v={`상차 ${OUTBOUND.loaders} (22:00~24:00)`} />
+        <Row k="B1" v={`상차 ${OUTBOUND.loaders} (${hm(OUTBOUND.loaderShift.start)}~${hm(OUTBOUND.loaderShift.end % (24 * 60))})`} />
       </Sec>
       <Sec title="공급 MFC" aside={`${MFCS.length}곳`}>
         {MFCS.map((m) => (
@@ -163,7 +163,7 @@ function Workers() {
             {people.map((a) => (
               <button
                 key={a.id}
-                className="srow"
+                className="srow kv"
                 style={{ width: '100%', background: view.selectedWorker === a.id ? 'var(--hi-bg, rgba(139,92,246,.18))' : 'none', border: 0, cursor: 'pointer', color: 'inherit', textAlign: 'left' }}
                 onClick={() => view.selectWorker(a.id, fl)}
                 title={`${ROLE_KO[a.role]} · ${Math.round(a.distance / WORK.stepLen).toLocaleString()}보`}
@@ -183,7 +183,8 @@ function Help() {
   return (
     <Sec title="도움말">
       <div className="help">
-        <p>위 칩으로 층(5F·6F·7F·B1)과 구역을 고릅니다. 랙 칸을 누르면 위치 코드가 나옵니다.</p>
+        <p>조작(MFC 와 같음): 왼쪽 끌기 = 이동, 오른쪽 끌기 = 돌리기, 휠 = 마우스가 가리킨 곳으로 확대, 화살표·WASD = 이동, Esc = 나가기. 가까이 확대하면 빔 앞에 칸 번호(위치 코드)가 붙습니다(번호 · 랙만 · 끔).</p>
+        <p>칸(빈 칸도)을 누르면 멀리서는 그 구역 위로, 가까이서는 그 칸 정면으로 가고 왼쪽에 위치 코드·상품·LOT·현물·예약이 나옵니다. 사람을 누르면 PDA.</p>
         <p>위치 코드: 센터-구역-층-통로-베이-단-슬롯 (예 CDC01-C-5-02-24-3-1). 구역 글자 A 냉동 · B 냉장 · C~H 상온.</p>
         <p>91 = 출고대기 롤테이너 자리, 92 = 승강기 반출 문, 90 = 지하 차량 접안.</p>
         <p>밤: 22:00 배차(노선 × 온도대, 차 한 대 = 온도대 하나) → 출차 30분 전 지하 상차(방문 역순) → 노선별 출차(01:50~03:40) → MFC 도착·하차·인계 → MFC 수령 → 복귀. 오른쪽 ⛟ 운송에서 차마다 봅니다.</p>
