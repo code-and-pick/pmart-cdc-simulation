@@ -1,7 +1,7 @@
 // 칠곡 DC 배치 — 통로·칸 수, 위치 코드 계약 패턴, 용량 합 520만.
 import { describe, expect, it } from 'vitest';
 import { CDC_FACTS } from '../src/config';
-import { buildLayout, LOCATION_CODE_PATTERN, skuQuota } from '../src/domain/layout';
+import { buildLayout, LOCATION_CODE_PATTERN, shelfTargets, skuQuota } from '../src/domain/layout';
 
 const L = buildLayout();
 const all = L.floors.flatMap((f) => f.locations);
@@ -30,6 +30,17 @@ describe('층·구역 배치 [정본 CDC-2, R-10]', () => {
     expect(shelves.every((l) => l.type === 'PICK_FACE' && l.aisle >= 61 && l.aisle < 90 && l.level <= 5 && l.slot <= 3)).toBe(true);
     for (const [z, n] of skuQuota()) expect(shelves.filter((l) => l.zone === z).length).toBeGreaterThanOrEqual(n);
     expect([...skuQuota().values()].reduce((a, b) => a + b, 0)).toBe(2000);
+  });
+
+  it('피킹 선반 칸 — MFC 10,900 SKU 설계에 맞춤: 냉동 ≥ 2,180 · 냉장 ≥ 3,270 · 상온 ≥ 5,450, 통로 61~89 [사용자 2026-11-25, 백엔드 B-1]', () => {
+    const shelves = L.floors.flatMap((f) => f.shelves);
+    const by = (t: string) => shelves.filter((l) => l.temp === t).length;
+    expect(by('FROZEN')).toBeGreaterThanOrEqual(2180);
+    expect(by('CHILLED')).toBeGreaterThanOrEqual(3270);
+    expect(by('AMBIENT')).toBeGreaterThanOrEqual(5450);
+    expect(shelves.length).toBeGreaterThanOrEqual(10_900);
+    expect(Math.max(...shelves.map((l) => l.aisle))).toBeLessThanOrEqual(89);
+    for (const [z, n] of shelfTargets()) expect(shelves.filter((l) => l.zone === z).length).toBeGreaterThanOrEqual(n);
   });
 
   it('선반은 북쪽 띠 안, 승강기·출고대기 줄 남쪽, 설비와 겹치지 않는다', () => {

@@ -247,9 +247,10 @@ export function buildLayout(): Layout {
     const perAisle = unitsPerSide * 2 * SHELF.levels * SHELF.slots;
     const shelfPitch = SHELF.depth * 2 + SHELF.aisleW + 0.6;
     const quota = skuQuota();
+    const shelfTarget = shelfTargets();
     let shx = 2.5;
     for (const z of spec.zones) {
-      const need = quota.get(z.letter) ?? 0;
+      const need = Math.max(quota.get(z.letter) ?? 0, shelfTarget.get(z.letter) ?? 0);
       const nAisles = Math.max(1, Math.ceil(need / perAisle));
       const zx0 = shx - 0.3;
       for (let k = 0; k < nAisles; k++) {
@@ -341,6 +342,27 @@ export function buildLayout(): Layout {
   );
   const totalCapacity = floors.reduce((s, f) => s + f.locations.reduce((a, l) => a + l.capacity, 0), 0) + shelfCapacity + autostoreCapacity;
   return { width, depth, bandDepth, floors, docks, autostore: { bins: CAPACITY.autostoreBins, unitsPerBin: CAPACITY.unitsPerBin, capacity: autostoreCapacity }, totalCapacity };
+}
+
+/**
+ * 구역별 피킹 선반 칸 목표(SHELF.targetSlots) — 냉동·냉장은 그 구역 하나, 상온은 C~H 를 팔레트 통로 수 비율로(최대 나머지).
+ */
+export function shelfTargets(): Map<string, number> {
+  const zs = CHILGOK_FLOORS.flatMap((f) => f.zones);
+  const out = new Map<string, number>();
+  for (const temp of ['FROZEN', 'CHILLED', 'AMBIENT'] as const) {
+    const group = zs.filter((z) => z.temp === temp);
+    const total = group.reduce((s, z) => s + z.aisles, 0);
+    const want = SHELF.targetSlots[temp];
+    const q = group.map((z) => ({ z: z.letter, exact: (z.aisles / total) * want }));
+    for (const x of q) out.set(x.z, Math.floor(x.exact));
+    let left = want - q.reduce((s, x) => s + Math.floor(x.exact), 0);
+    for (const x of [...q].sort((a, b) => (b.exact % 1) - (a.exact % 1))) {
+      if (left-- <= 0) break;
+      out.set(x.z, out.get(x.z)! + 1);
+    }
+  }
+  return out;
 }
 
 /**

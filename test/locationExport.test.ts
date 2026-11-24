@@ -8,7 +8,7 @@ const ex = buildLocationExport(buildLayout());
 describe('위치 목록 내보내기 [CDC-7, cdc-location 0.2.0]', () => {
   it('랙·선반·출고대기·승강기 문·지하 접안이 다 있고 코드가 겹치지 않는다', () => {
     expect(ex.counts.RESERVE).toBe(19_840);
-    expect(ex.counts.PICK_FACE).toBeGreaterThanOrEqual(2000);
+    expect(ex.counts.PICK_FACE).toBeGreaterThanOrEqual(10_900);
     expect(ex.counts.STAGING).toBe(30 * 3 + 4 * 3);
     expect(ex.counts.DOCK).toBe(14);
     expect(new Set(ex.items.map((i) => i.locationCode)).size).toBe(ex.items.length);
