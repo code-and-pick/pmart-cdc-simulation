@@ -9,7 +9,19 @@ Vite 6 + TypeScript 5 (strict) + React 19 + react-three-fiber 9 (Three.js 0.169)
 - 시뮬레이션 엔진(`src/sim`)·백엔드 어댑터(`src/backend` — `port.ts` + `mock/` + `http/`)·도메인(`src/domain`)은 React 에 의존하지 않는다(테스트가 화면 없이 돈다).
 - 매 프레임 바뀌는 값(위치·수량)은 `useFrame` 안에서 three 객체를 직접 바꾸고 React 상태로 올리지 않는다.
 - 설정·스크립트·폴더 구조(`package.json`, `tsconfig.json`, `vite.config.ts`, `server/`, `test/**/*.test.ts`)는 MFC 시뮬레이터를 따른다. 버전을 올리거나 라이브러리를 더하려면 먼저 사용자에게 묻는다.
+- 화면 UI/UX 는 MFC 시뮬레이터를 그대로 따른다(사용자 2026-11-24). 다른 점은 설계 §9.
 - 개발 서버 포트: **5182**. 이미 쓰는 포트 — 백오피스 5173~5176, MFC 시뮬레이터 5180, 라이더 시뮬레이터 5181, rider-backoffice 목 모드 5186.
+
+## 센터 고정값 — 절대 바꾸지 않는다 (사용자 2026-11-24)
+- **칠곡 중앙물류센터(칠곡 DC)**, 경상북도 칠곡군 지천면 산단터널로 240.
+- **8,600평**, **건물 5층~7층** 사용, **보관 520만 유닛**.
+- 코드에서는 `src/config.ts` `CDC_FACTS` 한 곳에만 두고 시험으로 지킨다. 설계 전체는 `docs/design/cdc-design.md`.
+
+## 실제 DC 자료 — 거스르지 않는다 (사용자 2026-11-24)
+- 알바몬 후기 https://community.albamon.com/post/detail/929845 (석간 13~22시, FC·분배·라인 작업 방식)
+- 우아한청년들 https://www.woowayouths.com/story/culture/view/5/24 (실제 내부: DAS·DPS·휠소터·오토스토어, 보냉 커버 롤테이너)
+- 확인한 내용은 `docs/design/cdc-design.md` §2. 작업 방식·장비·시간을 정할 때 이 자료와 어긋나면 안 된다.
+- 사용자 개념도·DC Wave 초안은 `docs/design/ref/`(원본, 수정하지 않음).
 
 ## 비즈니스 로직 근거 (`../pmart-backend/docs`, 읽기 전용)
 - **CDC 업무 정본: `../pmart-backend/docs/business/WMS-business-logic.md`** — 특히 §12 이관 할당·Wave·실제 피킹(CDC-F-016~018), §13 가상 분류·검품·상차와 단일 출발(CDC-F-019~022), §14 운송 결과·MFC 원수령·수량 대사(CDC-F-023~025).
