@@ -2,13 +2,14 @@
 // 할 일은 async 함수(simulation.ts 의 역할별 루프)가 walk/wait/untilDuty 를 차례로 기다리며 진행한다.
 // 수량·상태 변화는 계약 API 응답으로만 확정한다 — 화면 표시는 응답을 받은 뒤 바꾼다(MFC 시뮬레이터 worker.ts 와 같은 원칙).
 
-import type { FloorNo } from '../domain/sites/chilgok';
+import type { FloorKey } from '../domain/sites/chilgok';
 import type { P, WalkPoint } from './site';
 
-export type Role = 'FC' | 'SORT' | 'JOCKEY' | 'REPL';
-export type Shift = 'DAY' | 'EVENING';
+export type Role = 'FC' | 'SORT' | 'JOCKEY' | 'REPL' | 'INSPECT' | 'LOADER';
+/** DAY 주간조 08~17 · EVENING 석간 13~22 · NIGHT 지하 상차 19~23 [가정] */
+export type Shift = 'DAY' | 'EVENING' | 'NIGHT';
 
-export const ROLE_KO: Record<Role, string> = { FC: 'FC 피커', SORT: '분배·라인', JOCKEY: '자키', REPL: '지게차 보충' };
+export const ROLE_KO: Record<Role, string> = { FC: 'FC 피커', SORT: '분배·라인', JOCKEY: '자키', REPL: '지게차 보충', INSPECT: '검품', LOADER: '상차' };
 
 /** PDA 화면 — 작업자가 손에 든 단말에 보이는 것 */
 export interface PdaView {
@@ -36,6 +37,8 @@ export class Agent {
   done = 0;
   activity = '근무 전';
   carrying: 'CART' | 'PALLET' | 'ROLL' | null = null;
+  /** 실은 짐이 보냉 커버(저온)인지 — 화면 색 */
+  cold = false;
   pda: PdaView | null = null;
   private mode: 'walk' | 'wait' | 'duty' | null = null;
   private waitLeft = 0;
@@ -45,7 +48,7 @@ export class Agent {
     readonly id: string,
     readonly name: string,
     readonly role: Role,
-    readonly floor: FloorNo,
+    readonly floor: FloorKey,
     readonly shift: Shift,
     start: WalkPoint,
     private readonly clock: DutyClock,

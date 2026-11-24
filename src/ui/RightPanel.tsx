@@ -1,5 +1,6 @@
 // 오른쪽 패널 — 지표(kpis) · 재고 · 현장 흐름. MFC 시뮬레이터 RightPanel 의 kpi 모양을 쓴다. 재고는 MOCK 원장(cdc-inventory 역할).
 import { useApp, useTick, useView } from '../app/context';
+import { OUTBOUND } from '../config';
 
 export function RightPanel() {
   const { layout, backend, catalog, sim } = useApp();
@@ -17,6 +18,10 @@ export function RightPanel() {
     ['실피킹 / 승인', `${day.picked.toLocaleString()} / ${day.approved.toLocaleString()}`],
     ['분류(BOX)', day.sorted.toLocaleString()],
     ['보충 남은 칸', day.replNeeds.toLocaleString()],
+    ['검품 합격', day.inspected.toLocaleString()],
+    ['상차(LOADED)', day.loaded.toLocaleString()],
+    ['출발(TOUT)', day.departed.toLocaleString()],
+    ['차', [...sim.trucks.values()].map((t) => (t.state === 'DEPARTED' ? '출발' : `R/T ${Math.ceil(t.loaded.length / OUTBOUND.boxesPerRt)}`)).join(' · ')],
     ['팔레트 칸(보관)', locs.length.toLocaleString()],
     ['피킹 선반 칸', shelves.toLocaleString()],
     ['오토스토어 빈', layout.autostore.bins.toLocaleString()],
@@ -75,7 +80,7 @@ export function RightPanel() {
         </div>
       ) : (
         <div className="note">
-          {violations.length ? `원장 불변식 위반 ${violations.length}건: ${violations[0]}` : '원장 불변식 정상 (0 ≤ 예약 ≤ 현물, 시작 = 현물 + 출발, Transit = 출발 − 수령).'} 현장 흐름(☰)에서 TRF 인수·보충·Wave·피킹·분류 사건을 봅니다. 검품·상차·출발은 설계 §12 ⑥~⑦.
+          {violations.length ? `원장 불변식 위반 ${violations.length}건: ${violations[0]}` : '원장 불변식 정상 (0 ≤ 예약 ≤ 현물, 시작 = 현물 + 출발, Transit = 출발 − 수령).'} 현장 흐름(☰)에서 TRF 인수·보충·Wave·피킹·분류·검품·R/T 카운팅·출발 사건을 봅니다. 차·기사·배차는 설계 §12 ⑦.
         </div>
       )}
     </div>

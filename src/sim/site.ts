@@ -93,3 +93,44 @@ export function pathLength(from: P, pts: P[]): number {
   return d;
 }
 
+
+/**
+ * 지하 B1 — 차량 접안(90). 접안 문은 z = 2 줄(차는 그 남쪽 z 3~14 에 선다), 문 북쪽이 상차 마당, 맨 북쪽에 승강기 착지(위층과 같은 승강기 4대) [가정].
+ * 사람은 마당 가로 통로(z = B1.corridorZ)만 따라 승강기 착지 ↔ 접안 문을 오간다.
+ */
+export const B1 = { liftZ: -7, corridorZ: -2, doorZ: 0.8, truckZ0: 3, truckZ1: 14 } as const;
+
+export class B1Site {
+  constructor(readonly layout: Layout) {}
+
+  /** 승강기 착지 — 위층 승강기와 같은 x */
+  liftLanding(no: number): WalkPoint {
+    const l = this.layout.floors[0].lifts[(no - 1) % this.layout.floors[0].lifts.length];
+    return { x: (l.rect.x0 + l.rect.x1) / 2, z: B1.liftZ + 2, lane: 'N' };
+  }
+
+  /** 접안 문 앞(차 뒷문) */
+  dock(loc: Location): WalkPoint {
+    return { x: loc.pos.x, z: B1.doorZ, lane: 'N' };
+  }
+
+  home(): WalkPoint {
+    return { ...this.liftLanding(1), z: B1.corridorZ };
+  }
+
+  route(from: WalkPoint, to: WalkPoint): P[] {
+    const c = B1.corridorZ;
+    const pts: P[] = [
+      { x: from.x, z: c },
+      { x: to.x, z: c },
+      { x: to.x, z: to.z },
+    ];
+    return pts.filter((p, i) => (i === 0 ? p.x !== from.x || p.z !== from.z : p.x !== pts[i - 1].x || p.z !== pts[i - 1].z));
+  }
+}
+
+/** 층 승강기 문(92) 앞 — 롤테이너를 승강기에 싣는 자리 */
+export function liftDoor(f: FloorLayout, no: number): WalkPoint {
+  const l = f.lifts[(no - 1) % f.lifts.length];
+  return { x: (l.rect.x0 + l.rect.x1) / 2, z: f.walk.northZ, lane: 'N' };
+}

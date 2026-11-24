@@ -5,6 +5,7 @@ import { RACK } from '../../config';
 
 export type Temp ='AMBIENT' | 'CHILLED' | 'FROZEN';
 export type FloorNo = 5 | 6 | 7;
+export type FloorKey = FloorNo | 'B1';
 
 /** 랙 구역 — 글자는 MFC 시뮬레이터 체계(A 냉동·B 냉장·C~H 상온 계열, 사용자 2026-11-24) */
 export interface RackZoneSpec {

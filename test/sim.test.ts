@@ -60,15 +60,34 @@ describe('하루 돌리기', () => {
     expect(s.sorted).toBe(s.picked);
     const wave = await backend.getWave(s.waveId);
     expect(wave.state).toBe('WORK_DONE');
-    for (const t of backend.listTransfers()) expect(t.state).toBe('SORTED');
-    // 자키가 분류한 박스를 모두 출고대기로
-    const staged = [...sim.staged.values()].reduce((a, b) => a + b.units, 0);
-    expect(staged).toBe(s.sorted);
-    // 피킹·분류는 총현물을 바꾸지 않는다(WMS 0.3)
+    for (const t of backend.listTransfers()) expect(['SORTED', 'INSPECTED', 'LOADED']).toContain(t.state);
+    // 피킹·분류·검품·상차는 총현물을 바꾸지 않는다(WMS 0.3) — 22:30 은 아직 출차 전
     expect(backend.ledger.totals().onHand).toBe(initial.onHand);
+    expect(backend.ledger.totals().transit).toBe(0);
     expect(backend.ledger.check()).toEqual([]);
     // 석간 FC 는 걸었다 — 걸음 수 표시용 거리
     expect(sim.agents.filter((a) => a.role === 'FC').every((a) => a.distance > 0)).toBe(true);
-    expect(sim.events.filter((e) => e.kind === 'warn' && !e.text.includes('결품'))).toEqual([]);
-  }, 60_000);
+    expect(sim.events.filter((e) => e.kind === 'warn' && !e.text.includes('결품') && !e.text.includes('검품 불합격'))).toEqual([]);
+
+    // 22:00 R/T 카운팅 → 22:30 상차 → 23:00~ 출차(이때만 TOUT: CDC −q · Transit +q)
+    await runUntil(sim, 24.5);
+    expect(sim.events.some((e) => e.text.startsWith('22:00 R/T 카운팅'))).toBe(true);
+    for (const t of sim.trucks.values()) {
+      expect(t.state).toBe('DEPARTED');
+      expect(t.result).toBe('MATCHED');
+    }
+    const after = sim.summary();
+    expect(after.departed).toBe(after.sorted); // 분류한 것은 모두 검품·하강·상차되어 출발
+    for (const t of backend.listTransfers()) {
+      expect(t.state).toBe('DEPARTED');
+      const m = await backend.getShipmentManifest(t.trfId);
+      expect(m.lines.reduce((a, l) => a + l.qty, 0)).toBe(t.progress.reduce((a, p) => a + p.departedQty, 0));
+    }
+    const tot = backend.ledger.totals();
+    expect(tot.onHand).toBe(initial.onHand - after.departed);
+    expect(tot.transit).toBe(after.departed);
+    expect(tot.reserved).toBe(0); // 결품 잔량 등은 잔량 정리로 해제
+    expect(backend.ledger.check()).toEqual([]);
+    expect(sim.events.filter((e) => e.kind === 'warn' && !e.text.includes('결품') && !e.text.includes('검품 불합격'))).toEqual([]);
+  }, 120_000);
 });

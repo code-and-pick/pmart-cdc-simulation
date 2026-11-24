@@ -84,11 +84,11 @@ export const CAPACITY = {
 
 /** [정본 CDC-6] 공급 대상 MFC 와 지역(PDA 지역 바코드 단위). 출고대기 91 기본 자리. */
 export const MFCS = [
-  { id: 'MFC-BJG-01', name: '1호점 부산진구', region: '부산권', staging: 1 },
-  { id: 'MFC-BNG-01', name: '5호점 부산남구', region: '부산권', staging: 2 },
-  { id: 'MFC-MOKPO-01', name: '2호점 목포', region: '호남권', staging: 3 },
-  { id: 'MFC-SEJ-01', name: '3호점 세종', region: '충청권', staging: 4 },
-  { id: 'MFC-CHC-01', name: '4호점 춘천', region: '강원권', staging: 5 },
+  { id: 'MFC-BJG-01', name: '1호점 부산진구', region: '부산', staging: 1 },
+  { id: 'MFC-BNG-01', name: '5호점 부산남구', region: '부산', staging: 2 },
+  { id: 'MFC-MOKPO-01', name: '2호점 목포', region: '광주·목포', staging: 3 },
+  { id: 'MFC-SEJ-01', name: '3호점 세종', region: '대전·세종', staging: 4 },
+  { id: 'MFC-CHC-01', name: '4호점 춘천', region: '강원', staging: 5 },
 ] as const;
 
 /** 하루 시간표(분, 0시 기준) [현장] 알바몬 후기·우아한청년들 하루 일정 / [가정] 주간조 */
@@ -170,9 +170,9 @@ export const SHELF = {
  * repl = 지게차 선반 보충(주간조 08~17 + 석간 1명 — 부족 재할당분 보충), fc = FC 피커, sort = 분배·라인(DAS·DPS·분류기 앞), jockey = 자키(롤테이너를 출고대기로).
  */
 export const WORKFORCE: Record<5 | 6 | 7, { fc: number; sort: number; jockey: number; replDay: number; replEve: number }> = {
-  5: { fc: 6, sort: 2, jockey: 1, replDay: 3, replEve: 1 },
-  6: { fc: 5, sort: 2, jockey: 1, replDay: 3, replEve: 1 },
-  7: { fc: 5, sort: 2, jockey: 1, replDay: 3, replEve: 1 },
+  5: { fc: 6, sort: 2, jockey: 2, replDay: 3, replEve: 1 },
+  6: { fc: 5, sort: 2, jockey: 2, replDay: 3, replEve: 1 },
+  7: { fc: 5, sort: 2, jockey: 2, replDay: 3, replEve: 1 },
 };
 
 /** 작업 시간·속도 [가정] — 라인 1인 하루 약 2만 걸음 [현장] 을 보정 목표로 */
@@ -210,4 +210,34 @@ export const SIM_START = 7 * 3600 + 55 * 60;
 /** 피킹 Task 크기 [시뮬] — 카트 한 대에 싣는 줄 수(TRF·층·구역 안에서 동선 순으로 자름) */
 export const TASK = {
   maxLines: 20,
+} as const;
+
+/**
+ * 검품·하강·상차·출발 (설계 §5.1 #7~10, §12 ⑥). 차량·기사·배차·멀티드롭은 §12 ⑦ TMS — 그 전까지 MFC 마다 차 한 대를 상온 접안(C)에 둔다 [시뮬].
+ * 하루 시간표 [정본 CDC-8, PR #447 — TMS-business-logic 2.1]: 21:30 WMS 출고 작업 완료 · 22:00 PDA R/T 카운팅(박스 스캔 → R/T, 온도대별)
+ * · 22:00~22:30 TMS 배차 · 22:30~ 방문 역순 상차 · 23:00~ 첫 출차(이때만 TOUT). 적재 = 롤테이너(R/T), 수량 검증 = 박스 바코드, 간선에 팔레트 없음.
+ */
+export const OUTBOUND = {
+  /** 층마다 검품원(석간) · 지하 상차 작업자(19~23시) 수 [가정] */
+  inspectorsPerFloor: 1,
+  loaders: 4,
+  /** 지하 상차 근무 22:00~24:00 [가정] — 22:00 R/T 카운팅, 22:30 상차 시작 [CDC-8] */
+  loaderShift: { start: 22 * 60, end: 24 * 60 },
+  rtCountAt: 22 * 60,
+  loadFrom: 22 * 60 + 30,
+  /** 출차 — 23:00 부터, 그 MFC R/T 를 다 실은 차부터. 늦어도 이 시각(분)엔 실은 것만으로 출차 [가정] */
+  departLatest: 24 * 60,
+  /** 검품: 박스 하나(초) · 불합격 확률 · 재포장 뒤 재검품(초) */
+  inspectPerBox: 20,
+  inspectFailRate: 0.005,
+  rework: 90,
+  /** R/T 승강기 하강 — 21:30(WMS 출고 작업 완료 [CDC-8])부터, 그 MFC 의 층 일이 다 끝났으면 더 일찍 */
+  lowerFrom: 21 * 60 + 30,
+  /** R/T 한 대에 싣는 박스 수 [가정] */
+  boxesPerRt: 10,
+  /** 분류 박스 하나에 담는 최대 낱개 수 [가정] — 넘으면 박스를 나눈다 */
+  boxMaxUnits: 120,
+  liftRide: 60,
+  /** 지하: 롤테이너 한 대 싣기(초) */
+  loadPerRoll: 25,
 } as const;

@@ -1,7 +1,7 @@
 // 왼쪽 패널 — 설정(센터 고정값·시간표) · 구역(층·칸 정보) · 도움말. MFC 시뮬레이터 LeftPanel 의 sec/srow 모양을 쓴다.
 import type { ReactNode } from 'react';
 import { useApp, useTick, useView } from '../app/context';
-import { CDC_FACTS, MFCS, SHIFT, WORK, WORKFORCE } from '../config';
+import { CDC_FACTS, MFCS, OUTBOUND, SHIFT, WORK, WORKFORCE } from '../config';
 import { ROLE_KO, type Role } from '../sim/agent';
 
 function Sec({ title, aside, children }: { title: string; aside?: ReactNode; children: ReactNode }) {
@@ -47,17 +47,19 @@ function Settings() {
         <Row k="주간조" v={`${hm(SHIFT.day.start)}~${hm(SHIFT.day.end)}`} />
         <Row k="석간조" v={`${hm(SHIFT.evening.start)}~${hm(SHIFT.evening.end)}`} />
         <Row k="휴식" v={SHIFT.breaks.map((b) => hm(b.start)).join(' · ')} />
-        <Row k="차량 출발" v={hm(SHIFT.departure)} />
+        <Row k="R/T 카운팅·상차" v={`${hm(OUTBOUND.rtCountAt)} · ${hm(OUTBOUND.loadFrom)}~`} />
+        <Row k="차량 출발" v={`${hm(SHIFT.departure)}~`} />
       </Sec>
       <Sec title="작업자 (층마다)" aside="[가정]">
         {([5, 6, 7] as const).map((fl) => {
           const w = WORKFORCE[fl];
-          return <Row key={fl} k={`${fl}F`} v={`지게차 ${w.replDay}+${w.replEve} · FC ${w.fc} · 분배·라인 ${w.sort} · 자키 ${w.jockey}`} />;
+          return <Row key={fl} k={`${fl}F`} v={`지게차 ${w.replDay}+${w.replEve} · FC ${w.fc} · 분배·라인 ${w.sort} · 자키 ${w.jockey} · 검품 ${OUTBOUND.inspectorsPerFloor}`} />;
         })}
+        <Row k="B1" v={`상차 ${OUTBOUND.loaders} (22:00~24:00)`} />
       </Sec>
       <Sec title="공급 MFC" aside={`${MFCS.length}곳`}>
         {MFCS.map((m) => (
-          <Row key={m.id} k={`${m.region} · PPC-${String(m.staging).padStart(2, '0')}`} v={m.name} />
+          <Row key={m.id} k={`${m.region} 그룹 · PPC-${String(m.staging).padStart(2, '0')}`} v={m.name} />
         ))}
       </Sec>
     </>
@@ -114,7 +116,7 @@ function ZoneInfo() {
   );
 }
 
-const ROLE_ORDER: Role[] = ['FC', 'SORT', 'JOCKEY', 'REPL'];
+const ROLE_ORDER: Role[] = ['FC', 'SORT', 'JOCKEY', 'INSPECT', 'REPL', 'LOADER'];
 
 /** 작업자 목록 — 누르면 그 층으로 가서 PDA 카드를 연다 */
 function Workers() {
@@ -123,11 +125,11 @@ function Workers() {
   useTick();
   return (
     <>
-      {([5, 6, 7] as const).map((fl) => {
+      {([5, 6, 7, 'B1'] as const).map((fl) => {
         const people = sim.agents.filter((a) => a.floor === fl).sort((a, b) => ROLE_ORDER.indexOf(a.role) - ROLE_ORDER.indexOf(b.role));
         const busy = people.filter((a) => !a.idle).length;
         return (
-          <Sec key={fl} title={`${fl}F`} aside={`일하는 사람 ${busy}/${people.length}`}>
+          <Sec key={fl} title={fl === 'B1' ? 'B1 지하 상차' : `${fl}F`} aside={`일하는 사람 ${busy}/${people.length}`}>
             {people.map((a) => (
               <button
                 key={a.id}
@@ -154,7 +156,7 @@ function Help() {
         <p>위 칩으로 층(5F·6F·7F·B1)과 구역을 고릅니다. 랙 칸을 누르면 위치 코드가 나옵니다.</p>
         <p>위치 코드: 센터-구역-층-통로-베이-단-슬롯 (예 CDC01-C-5-02-24-3-1). 구역 글자 A 냉동 · B 냉장 · C~H 상온.</p>
         <p>91 = 출고대기 롤테이너 자리, 92 = 승강기 반출 문, 90 = 지하 차량 접안.</p>
-        <p>하루: 07:55 시작 → 08:00 주간조가 TRF 를 받아 할당하고 지게차로 팔레트 랙 → 피킹 선반 보충 → 13:00 석간 Wave 배포 → FC 가 PDA 로 다음 작업을 받아 선반에서 피킹 → 분배·라인이 MFC 칸에 담기 → 자키가 출고대기(91)로. 검품·상차·출발은 다음 단계입니다.</p>
+        <p>하루: 07:55 시작 → 08:00 주간조가 TRF 를 받아 할당하고 지게차로 팔레트 랙 → 피킹 선반 보충 → 13:00 석간 Wave 배포 → FC 가 PDA 로 다음 작업을 받아 선반에서 피킹 → 분배·라인이 MFC 칸에 박스로 담기 → 자키가 출고대기(91)로 → 검품 → 21:30 부터 R/T 를 승강기로 지하에 → 22:00 R/T 카운팅 → 22:30 지하 상차 → 23:00~ 다 실은 차부터 출차(이때만 CDC −q · Transit +q). 차·기사·배차는 다음 단계(TMS)입니다.</p>
         <p>위 오른쪽 배속(1×~120×)으로 시간을 빠르게, ❚❚ 로 멈춥니다. 왼쪽 ☺ 작업자에서 사람을 누르면 PDA 화면이 나옵니다.</p>
       </div>
     </Sec>

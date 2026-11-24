@@ -5,7 +5,8 @@ import { useEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { AppContext, useApp, useTick, useView, type AppCtx } from '../../app/context';
-import { RACK, SHELF } from '../../config';
+import { MFCS, OUTBOUND, RACK, SHELF } from '../../config';
+import { B1 } from '../../sim/site';
 import type { FloorLayout, Location, Rect } from '../../domain/layout';
 import { SCENE, ZONE_COLOR } from '../colors';
 import { plateTexture } from '../sprites';
@@ -258,7 +259,7 @@ function Lifts({ f }: { f: FloorLayout }) {
 
 /**
  * 출고대기 롤테이너 자리(91) — 01~05 는 MFC 기본 배정. 저온은 은색 보냉 커버 [현장 사진].
- * 자키가 옮겨 온 박스 수만큼 롤테이너가 늘어난다(한 대 = 박스 [시뮬] 8개, 자리에 최대 4대까지 겹쳐 보임).
+ * 자키가 옮겨 온 박스 수만큼 R/T 가 늘어난다(한 대 = 박스 OUTBOUND.boxesPerRt 개 [가정], 자리에 최대 4대까지 보임).
  */
 function Staging({ f }: { f: FloorLayout }) {
   const { sim } = useApp();
@@ -268,8 +269,8 @@ function Staging({ f }: { f: FloorLayout }) {
       {f.staging.map((s) => {
         const used = s.bay <= 5;
         const cold = s.temp !== 'AMBIENT';
-        const boxes = sim.staged.get(s.code)?.boxes ?? 0;
-        const rolls = Math.min(4, Math.ceil(boxes / 8));
+        const boxes = sim.staged.get(s.code)?.length ?? 0;
+        const rolls = Math.min(4, Math.ceil(boxes / OUTBOUND.boxesPerRt));
         return (
           <group key={s.code} position={[s.pos.x, 0, s.pos.z]}>
             <mesh rotation-x={-Math.PI / 2} position={[0, 0.01, 0]}>
@@ -340,24 +341,67 @@ function Selected() {
   );
 }
 
-/** 지하 B1 — 차량 접안 자리(90). 8,600평 밖 공용 시설 */
+/**
+ * 지하 B1 — 차량 접안 자리(90). 8,600평 밖 공용 시설. 북쪽에 승강기 착지(위층과 같은 승강기), 그 남쪽 상차 마당, 접안 문 남쪽에 차.
+ * 차는 §12 ⑦ TMS 전까지 MFC 마다 한 대 [시뮬] — 실린 R/T 수를 차 위에, 출차하면 사라진다.
+ */
 function Basement() {
-  const { layout } = useApp();
-  const w = 6 + layout.docks.length * 4.5 + 4;
+  const { layout, sim } = useApp();
+  useTick();
+  const w = Math.max(6 + layout.docks.length * 4.5 + 4, layout.floors[0].lifts[layout.floors[0].lifts.length - 1].rect.x1 + 4);
   return (
     <group>
-      <Slab w={w} d={30} />
+      <mesh rotation-x={-Math.PI / 2} position={[w / 2, -0.01, 4]}>
+        <planeGeometry args={[w, 30]} />
+        <meshStandardMaterial color={SCENE.floor} />
+      </mesh>
+      <mesh rotation-x={-Math.PI / 2} position={[w / 2, 0.004, B1.corridorZ]}>
+        <planeGeometry args={[w, 1.4]} />
+        <meshBasicMaterial color={SCENE.hazard} transparent opacity={0.25} />
+      </mesh>
+      {layout.floors[0].lifts.map((l) => (
+        <group key={l.no}>
+          <mesh position={[(l.rect.x0 + l.rect.x1) / 2, 2, B1.liftZ]}>
+            <boxGeometry args={[l.rect.x1 - l.rect.x0, 4, 3.5]} />
+            <meshStandardMaterial color={SCENE.lift} />
+          </mesh>
+          <sprite position={[(l.rect.x0 + l.rect.x1) / 2, 5, B1.liftZ]} scale={[2.6, 1.3, 1]}>
+            <spriteMaterial map={plateTexture(`승강기 ${l.no}`)} />
+          </sprite>
+        </group>
+      ))}
       {layout.docks.map((d) => (
-        <group key={d.code} position={[d.pos.x, 0, d.pos.z]}>
-          <mesh rotation-x={-Math.PI / 2} position={[0, 0.01, 8]}>
-            <planeGeometry args={[3.6, 16]} />
+        <group key={d.code} position={[d.pos.x, 0, 0]}>
+          <mesh rotation-x={-Math.PI / 2} position={[0, 0.01, (B1.truckZ0 + B1.truckZ1) / 2]}>
+            <planeGeometry args={[3.6, B1.truckZ1 - B1.truckZ0 + 2]} />
             <meshBasicMaterial color={ZONE_COLOR[d.temp]} transparent opacity={0.3} />
           </mesh>
-          <sprite position={[0, 3, 0]} scale={[3, 1.5, 1]}>
+          <sprite position={[0, 3, B1.doorZ]} scale={[2.4, 1.2, 1]}>
             <spriteMaterial map={plateTexture(d.short)} />
           </sprite>
         </group>
       ))}
+      {[...sim.trucks.values()]
+        .filter((t) => t.state === 'DOCKED')
+        .map((t) => {
+          const rts = Math.ceil(t.loaded.length / OUTBOUND.boxesPerRt);
+          const name = MFCS.find((m) => m.id === t.mfcId)?.name ?? t.mfcId;
+          return (
+            <group key={t.vehicleId} position={[t.dock.pos.x, 0, 0]}>
+              <mesh position={[0, 1.7, (B1.truckZ0 + B1.truckZ1 - 2) / 2]}>
+                <boxGeometry args={[2.4, 2.6, B1.truckZ1 - B1.truckZ0 - 2]} />
+                <meshStandardMaterial color={0xf4f6fa} />
+              </mesh>
+              <mesh position={[0, 1.4, B1.truckZ1 - 0.8]}>
+                <boxGeometry args={[2.3, 2.2, 1.6]} />
+                <meshStandardMaterial color={0x2f6fd6} />
+              </mesh>
+              <sprite position={[0, 4.2, (B1.truckZ0 + B1.truckZ1) / 2]} scale={[6, 1.2, 1]}>
+                <spriteMaterial map={plateTexture(`${name} R/T ${rts}`, { w: 640, h: 128 })} />
+              </sprite>
+            </group>
+          );
+        })}
     </group>
   );
 }
