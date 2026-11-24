@@ -1,4 +1,4 @@
-// cdc-outbound-service.yaml 0.2.0(PR #443 — 다음 작업 받기·착수) 의 의미를 브라우저 안에서 흉내 내는 백엔드 [시뮬]. 실서버를 대신하지 않는다.
+// cdc-outbound-service.yaml 0.3.0(PR #452 — Task 경로 /cdcs/{cdcId}/tasks…, 다음 작업 받기·착수) 의 의미를 브라우저 안에서 흉내 내는 백엔드 [시뮬]. 실서버를 대신하지 않는다.
 // 수량은 CdcLedger(cdc-inventory 역할)에만 둔다. 이 파일은 TRF·Wave·Task·LPN·출발의 상태와 계약 검증을 맡는다.
 // 규칙 근거: WMS-business-logic.md 0.3(원장)·§12 CDC-F-016~018·§13 CDC-F-019~022.
 // 계약에 없어 MOCK 이 정한 것은 docs/backend-requests.md "시뮬레이터가 정한 값"에 적는다.
@@ -541,7 +541,7 @@ export class MockBackend implements CdcOutboundPort {
 
   async listTasks(waveId: string, filter: { state?: TaskState; assigneeId?: string } = {}): Promise<Task[]> {
     const q = new URLSearchParams({ waveId, ...(filter.state ? { state: filter.state } : {}), ...(filter.assigneeId ? { assigneeId: filter.assigneeId } : {}) });
-    return this.call('GET', `/tasks?${q}`, 200, () =>
+    return this.call('GET', `/cdcs/${CENTER_ID}/tasks?${q}`, 200, () =>
       [...this.tasks.values()]
         .filter((t) => t.waveId === waveId && (!filter.state || t.state === filter.state) && (!filter.assigneeId || t.assigneeId === filter.assigneeId))
         .map((t) => this.publicTask(t)),
@@ -558,7 +558,7 @@ export class MockBackend implements CdcOutboundPort {
   }
 
   async getTask(taskId: string): Promise<Task> {
-    return this.call('GET', `/tasks/${taskId}`, 200, () => this.publicTask(this.mustTask(taskId)));
+    return this.call('GET', `/cdcs/${CENTER_ID}/tasks/${taskId}`, 200, () => this.publicTask(this.mustTask(taskId)));
   }
 
   /** 작업의 층·구역 — 같은 Task 의 줄은 모두 한 층·구역(배포 규칙) */
@@ -606,7 +606,7 @@ export class MockBackend implements CdcOutboundPort {
 
   /** 착수 (0.2.0 startTask) — 담당만 ACCEPTED → IN_PROGRESS. workerId = 토큰 주체(MOCK 은 인자로 받는다). 이미 IN_PROGRESS 면 그대로 */
   async startTask(taskId: string, workerId: string, idempotencyKey: string, expectedVersion?: number): Promise<Task> {
-    return this.call('POST', `/tasks/${taskId}/starts`, 200, () =>
+    return this.call('POST', `/cdcs/${CENTER_ID}/tasks/${taskId}/starts`, 200, () =>
       this.idempotent(`start:${taskId}:${workerId}`, idempotencyKey, { expectedVersion }, () => {
         const t = this.mustTask(taskId);
         if (t.assigneeId !== workerId) throw problem(409, 'NOT_ASSIGNEE', `담당 ${t.assigneeId ?? '없음'}`);
@@ -627,7 +627,7 @@ export class MockBackend implements CdcOutboundPort {
    * (0.2.0) 담당(workerId = assigneeId)의 IN_PROGRESS 작업에만 — 아니면 409 NOT_ASSIGNEE / INVALID_STATE.
    */
   async reportPickResult(taskId: string, body: PickResultRequest, idempotencyKey: string, expectedVersion?: number): Promise<CommandResponse> {
-    return this.call('POST', `/tasks/${taskId}/pick-results`, 202, () =>
+    return this.call('POST', `/cdcs/${CENTER_ID}/tasks/${taskId}/pick-results`, 202, () =>
       this.idempotent(`pick:${taskId}`, idempotencyKey, { body, expectedVersion }, () => {
         const t = this.mustTask(taskId);
         this.checkVersion(t.version, expectedVersion);

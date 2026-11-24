@@ -1,5 +1,6 @@
 // 왼쪽 패널 — 설정(센터 고정값·시간표) · 구역(층·칸 정보) · 도움말. MFC 시뮬레이터 LeftPanel 의 sec/srow 모양을 쓴다.
-import type { ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
+import { checkReadiness, READINESS_KO, type ProbeResult } from '../backend/http/readiness';
 import { useApp, useTick, useView } from '../app/context';
 import { CDC_FACTS, MFCS, OUTBOUND, SHIFT, WORK, WORKFORCE } from '../config';
 import { ROLE_KO, type Role } from '../sim/agent';
@@ -34,8 +35,10 @@ export function LeftPanel() {
 }
 
 function Settings() {
+  const { real } = useApp();
   return (
     <>
+      {real && <RealCheck />}
       <Sec title="센터" aside="고정값">
         <Row k="이름" v={CDC_FACTS.name} />
         <Row k="주소" v={CDC_FACTS.address} />
@@ -113,6 +116,33 @@ function ZoneInfo() {
         <Row k="배치 면적" v={`보관 ${Math.round(f.layoutPyeong.storage).toLocaleString()} · 그 밖 ${Math.round(f.layoutPyeong.band).toLocaleString()}평`} />
       </Sec>
     </>
+  );
+}
+
+/** 실서버 연결 점검 — 서비스마다 조회 하나(서버 상태를 바꾸지 않음) */
+function RealCheck() {
+  const { real } = useApp();
+  const [rows, setRows] = useState<ProbeResult[] | null>(null);
+  const [busy, setBusy] = useState(false);
+  const run = () => {
+    if (!real) return;
+    setBusy(true);
+    void checkReadiness(real.backend.client)
+      .then(setRows)
+      .finally(() => setBusy(false));
+  };
+  useEffect(run, [real]);
+  if (!real) return null;
+  return (
+    <Sec title="실서버 연결 점검" aside={busy ? '점검 중…' : <button onClick={run}>다시</button>}>
+      <div className="help">
+        <p>실서버 모드에서는 시뮬레이션 엔진을 돌리지 않습니다 — 백엔드에 cdc-outbound·TMS 서비스가 아직 없고(2026-11-25), CDC 시험 계정도 없습니다(R-16). 아래는 조회만 해 보는 연결 점검입니다.</p>
+        {real.tokens.lastError && <p>토큰: {real.tokens.lastError}</p>}
+      </div>
+      {(rows ?? []).map((r) => (
+        <Row key={r.service} k={`${r.service} · ${r.use}`} v={`${READINESS_KO[r.state]} (${r.detail})`} />
+      ))}
+    </Sec>
   );
 }
 

@@ -5,6 +5,10 @@ import { MockBackend } from './backend/mock/MockBackend';
 import { buildCatalog } from './domain/catalog';
 import { buildLayout } from './domain/layout';
 import { Simulation } from './sim/simulation';
+import { HttpBackend } from './backend/http/HttpBackend';
+import { HttpTms } from './backend/http/HttpTms';
+import { TokenSource } from './backend/http/tokens';
+import { CDC_OPERATOR_ACCOUNT } from './backend/http/accounts';
 import { Ticker, ViewController } from './render/controller';
 import './ui/styles.css';
 import './ui/console.css';
@@ -50,12 +54,24 @@ const app: AppCtx = {
   controller: new ViewController(layout),
   ticker: new Ticker(),
   settings,
+  real: settings.mode === 'http' ? makeReal() : undefined,
   restart: (next) => {
     save(next);
     location.reload();
   },
 };
 app.controller.focusZone('ALL');
+// 실서버 모드: 백엔드에 cdc-outbound·TMS 가 아직 없어(2026-11-25) 엔진을 돌리지 않는다 — 설정 탭의 연결 점검만
+if (app.real) {
+  app.sim.speed = 0;
+  app.controller.leftView = 'settings';
+}
+
+function makeReal() {
+  const tokens = new TokenSource(CDC_OPERATOR_ACCOUNT, 90);
+  const opt = { baseUrl: settings.http.baseUrl, token: () => tokens.get(), sourceSystem: 'pmart-cdc-simulation', now: () => sim?.time ?? 0, timeoutMs: 8000, retries: 2 };
+  return { backend: new HttpBackend(opt), tms: new HttpTms(opt), tokens };
+}
 
 createRoot(document.getElementById('root')!).render(<App app={app} />);
 

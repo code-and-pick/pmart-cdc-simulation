@@ -1,4 +1,5 @@
 import react from '@vitejs/plugin-react';
+import { simAuthPlugin } from './server/simAuth';
 import { Agent } from 'node:http';
 import { defineConfig } from 'vitest/config';
 
@@ -8,7 +9,8 @@ import { defineConfig } from 'vitest/config';
 const gateway = process.env.PMART_GATEWAY ?? 'http://192.168.0.40:8080';
 
 export default defineConfig({
-  plugins: [react()],
+  // simAuthPlugin: 개발 서버가 LAN 시험 계정 토큰을 브라우저에 준다(MFC SIM-11 과 같은 자리) — CDC 계정은 R-16 대기
+  plugins: [react(), simAuthPlugin()],
   server: {
     port: 5182,
     host: true,

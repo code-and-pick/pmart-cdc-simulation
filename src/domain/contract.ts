@@ -1,5 +1,5 @@
 // 계약 타입 사본 — 이름·상태값은 pmart-backend/contracts/openapi 를 그대로 따른다(CLAUDE.md "계약이 정본").
-// cdc-outbound-service.yaml 0.2.0(PR #443, 병합 전) · cdc-inventory-service.yaml(할당·출발 전기·Transit·Commit) · _common.yaml.
+// cdc-outbound-service.yaml 0.3.0(PR #452, 병합 전 — 0.2.0 과 스키마 같고 Task 경로만 옮김) · cdc-inventory-service.yaml(할당·출발 전기·Transit·Commit) · _common.yaml.
 // 계약이 바뀌면 여기를 먼저 고치고 MockBackend·HttpBackend 를 맞춘다.
 
 // ── _common.yaml ─────────────────────────────────────
