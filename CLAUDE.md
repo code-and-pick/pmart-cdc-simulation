@@ -9,7 +9,7 @@ Vite 6 + TypeScript 5 (strict) + React 19 + react-three-fiber 9 (Three.js 0.169)
 - 시뮬레이션 엔진(`src/sim`)·백엔드 어댑터(`src/backend` — `port.ts` + `mock/` + `http/`)·도메인(`src/domain`)은 React 에 의존하지 않는다(테스트가 화면 없이 돈다).
 - 매 프레임 바뀌는 값(위치·수량)은 `useFrame` 안에서 three 객체를 직접 바꾸고 React 상태로 올리지 않는다.
 - 설정·스크립트·폴더 구조(`package.json`, `tsconfig.json`, `vite.config.ts`, `server/`, `test/**/*.test.ts`)는 MFC 시뮬레이터를 따른다. 버전을 올리거나 라이브러리를 더하려면 먼저 사용자에게 묻는다.
-- 개발 서버 포트는 MFC(5180)와 겹치지 않게 정한다(정하면 여기 적는다).
+- 개발 서버 포트: **5182**. 이미 쓰는 포트 — 백오피스 5173~5176, MFC 시뮬레이터 5180, 라이더 시뮬레이터 5181, rider-backoffice 목 모드 5186.
 
 ## 비즈니스 로직 근거 (`../pmart-backend/docs`, 읽기 전용)
 - **CDC 업무 정본: `../pmart-backend/docs/business/WMS-business-logic.md`** — 특히 §12 이관 할당·Wave·실제 피킹(CDC-F-016~018), §13 가상 분류·검품·상차와 단일 출발(CDC-F-019~022), §14 운송 결과·MFC 원수령·수량 대사(CDC-F-023~025).
