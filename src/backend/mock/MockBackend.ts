@@ -1,4 +1,4 @@
-// cdc-outbound-service.yaml 0.1.0 의 의미를 브라우저 안에서 흉내 내는 백엔드 [시뮬]. 실서버를 대신하지 않는다.
+// cdc-outbound-service.yaml 0.2.0(PR #443 — 다음 작업 받기·착수) 의 의미를 브라우저 안에서 흉내 내는 백엔드 [시뮬]. 실서버를 대신하지 않는다.
 // 수량은 CdcLedger(cdc-inventory 역할)에만 둔다. 이 파일은 TRF·Wave·Task·LPN·출발의 상태와 계약 검증을 맡는다.
 // 규칙 근거: WMS-business-logic.md 0.3(원장)·§12 CDC-F-016~018·§13 CDC-F-019~022.
 // 계약에 없어 MOCK 이 정한 것은 docs/backend-requests.md "시뮬레이터가 정한 값"에 적는다.
@@ -13,6 +13,7 @@ import {
   type InspectionResultRequest,
   type LoadingResultRequest,
   type LpnComposition,
+  type NextTaskRequest,
   type OutboundReadiness,
   type PickResultRequest,
   type PreDepartureCancellation,
@@ -399,7 +400,8 @@ export class MockBackend implements CdcOutboundPort {
     const ts = [...this.tasks.values()].filter((t) => t.waveId === w.waveId);
     w.taskSummary = { total: ts.length, done: ts.filter((t) => t.state === 'DONE' || t.state === 'PARTIAL').length, exception: ts.filter((t) => t.state === 'EXCEPTION').length };
     const prev = w.state;
-    if ((w.state === 'RELEASED' || w.state === 'IN_PROGRESS') && ts.some((t) => t.assigneeId)) w.state = 'IN_PROGRESS';
+    // 첫 착수(IN_PROGRESS 이상) 때 RELEASED → IN_PROGRESS (0.2.0 startTask)
+    if (w.state === 'RELEASED' && ts.some((t) => t.state !== 'CREATED' && t.state !== 'ACCEPTED' && t.state !== 'ASSIGNED')) w.state = 'IN_PROGRESS';
     if ((w.state === 'RELEASED' || w.state === 'IN_PROGRESS') && ts.length > 0 && ts.every((t) => TASK_TERMINAL.includes(t.state))) {
       w.state = ts.every((t) => t.state === 'CANCELLED') ? 'CANCELLED' : 'WORK_DONE';
     }
@@ -516,18 +518,78 @@ export class MockBackend implements CdcOutboundPort {
     return this.call('GET', `/tasks/${taskId}`, 200, () => this.publicTask(this.mustTask(taskId)));
   }
 
+  /** 작업의 층·구역 — 같은 Task 의 줄은 모두 한 층·구역(배포 규칙) */
+  private taskScope(t: Task): { floor: string; zone: string } {
+    const [, zone, floor] = (t.lines[0]?.locationCode ?? '--').split('-');
+    return { floor, zone };
+  }
+
+  /**
+   * 다음 작업 받기 (0.2.0 pullNextTask) — 들고 있는 ACCEPTED·IN_PROGRESS 가 있으면 그것(200),
+   * 없으면 RELEASED·IN_PROGRESS Wave 의 담당 없는 CREATED 작업 하나를 ACCEPTED 로 배정(201).
+   * 순서: TRF 기한 이른 순 → 만든 순. 근무·자격·온도대 검사는 계약대로 아직 하지 않는다.
+   */
+  async pullNextTask(cdcId: string, workerId: string, body: NextTaskRequest, idempotencyKey: string): Promise<{ status: 200 | 201; task: Task }> {
+    return this.call('POST', `/cdcs/${cdcId}/workers/${workerId}/next-tasks`, 201, () =>
+      this.idempotent(`next:${cdcId}:${workerId}`, idempotencyKey, body, () => {
+        if (cdcId !== CENTER_ID) throw problem(403, 'FORBIDDEN', `다른 센터 ${cdcId}`);
+        const held = [...this.tasks.values()].find((t) => t.assigneeId === workerId && (t.state === 'ACCEPTED' || t.state === 'IN_PROGRESS'));
+        if (held) return { status: 200 as const, task: this.publicTask(held) };
+        const cands = [...this.tasks.values()].filter((t) => {
+          if (t.state !== 'CREATED' || t.assigneeId) return false;
+          const w = this.waves.get(t.waveId);
+          if (!w || (w.state !== 'RELEASED' && w.state !== 'IN_PROGRESS')) return false;
+          const r = this.trfs.get(t.trfId);
+          if (!r || r.cancelled || r.departed) return false;
+          const sc = this.taskScope(t);
+          return (!body.kind || t.kind === body.kind) && (!body.zone || sc.zone === body.zone) && (!body.floor || sc.floor === String(body.floor));
+        });
+        cands.sort((a, b) => {
+          const da = this.trfs.get(a.trfId)!.intake.dueAt;
+          const db = this.trfs.get(b.trfId)!.intake.dueAt;
+          if (da !== db) return da < db ? -1 : 1;
+          if (a.createdAt !== b.createdAt) return a.createdAt < b.createdAt ? -1 : 1;
+          return a.taskId < b.taskId ? -1 : 1;
+        });
+        const t = cands[0];
+        if (!t) throw problem(409, 'NO_TASK_AVAILABLE', '받을 작업 없음');
+        t.assigneeId = workerId;
+        t.state = 'ACCEPTED';
+        t.version += 1;
+        return { status: 201 as const, task: this.publicTask(t) };
+      }),
+    );
+  }
+
+  /** 착수 (0.2.0 startTask) — 담당만 ACCEPTED → IN_PROGRESS. workerId = 토큰 주체(MOCK 은 인자로 받는다). 이미 IN_PROGRESS 면 그대로 */
+  async startTask(taskId: string, workerId: string, idempotencyKey: string, expectedVersion?: number): Promise<Task> {
+    return this.call('POST', `/tasks/${taskId}/starts`, 200, () =>
+      this.idempotent(`start:${taskId}:${workerId}`, idempotencyKey, { expectedVersion }, () => {
+        const t = this.mustTask(taskId);
+        if (t.assigneeId !== workerId) throw problem(409, 'NOT_ASSIGNEE', `담당 ${t.assigneeId ?? '없음'}`);
+        if (t.state === 'IN_PROGRESS') return this.publicTask(t);
+        this.checkVersion(t.version, expectedVersion);
+        if (t.state !== 'ACCEPTED') throw problem(409, 'INVALID_STATE', `Task ${t.state}`);
+        t.state = 'IN_PROGRESS';
+        t.version += 1;
+        this.refreshWave(this.mustWave(t.waveId));
+        return this.publicTask(t);
+      }),
+    );
+  }
+
   /**
    * 실피킹 결과 — 실피킹 ≤ 유효할당. 피킹한 수량은 랙 칸 → 출고대기(91) 로 위치만 옮긴다(총현물 불변).
    * 부족은 그 칸 예약을 풀고(PICK_SHORTAGE) 다른 적격 LOT·칸으로 재할당해 새 Task 를 만든다. 못 하면 부족으로 남긴다.
-   * 계약에 배정·착수 API 가 없어 첫 실적에서 assigneeId 를 정하고 IN_PROGRESS 로 둔다 [시뮬, R-11].
+   * (0.2.0) 담당(workerId = assigneeId)의 IN_PROGRESS 작업에만 — 아니면 409 NOT_ASSIGNEE / INVALID_STATE.
    */
   async reportPickResult(taskId: string, body: PickResultRequest, idempotencyKey: string, expectedVersion?: number): Promise<CommandResponse> {
     return this.call('POST', `/tasks/${taskId}/pick-results`, 202, () =>
       this.idempotent(`pick:${taskId}`, idempotencyKey, { body, expectedVersion }, () => {
         const t = this.mustTask(taskId);
         this.checkVersion(t.version, expectedVersion);
-        if (TASK_TERMINAL.includes(t.state)) throw problem(409, 'INVALID_STATE', `Task ${t.state}`);
-        if (t.assigneeId && t.assigneeId !== body.workerId) throw problem(409, 'INVALID_STATE', `다른 작업자 ${t.assigneeId} 가 수행 중`);
+        if (t.assigneeId !== body.workerId) throw problem(409, 'NOT_ASSIGNEE', `담당 ${t.assigneeId ?? '없음'}`);
+        if (t.state !== 'IN_PROGRESS') throw problem(409, 'INVALID_STATE', `Task ${t.state} — 착수 뒤에만 실적`);
         const rec = this.mustTrf(t.trfId);
         if (rec.cancelled || rec.departed) throw problem(409, 'INVALID_STATE', `TRF ${rec.cancelled ? '취소' : '출발'}`);
         if (!body.lines.length) throw problem(422, 'VALIDATION_FAILED', '행 없음');
@@ -563,7 +625,6 @@ export class MockBackend implements CdcOutboundPort {
             this.emit('PickShortageReported', `${t.trfId} ${l.sku} 부족 ${short} (${l.shortReason}) → 재할당 ${got}${got < short ? ` · 남은 부족 ${short - got}` : ''}`);
           }
         }
-        t.assigneeId = body.workerId;
         const resolved = t.lines.every((x) => x.pickedQty + x.shortQty === x.plannedQty);
         t.state = resolved ? (t.lines.some((x) => x.shortQty > 0) ? 'PARTIAL' : 'DONE') : 'IN_PROGRESS';
         if (resolved) t.completedAt = this.iso();

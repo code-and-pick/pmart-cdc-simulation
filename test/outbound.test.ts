@@ -39,13 +39,35 @@ function codeSync(f: () => unknown): string {
   }
 }
 
-async function pickAll(t: Task, worker = 'fc-01') {
+/** (0.2.0) 다음 작업 받기 → 착수. 받은 작업(IN_PROGRESS) */
+async function claim(worker: string, filter: { kind?: 'PICK'; zone?: string; floor?: string } = {}): Promise<Task> {
+  const { task } = await mb.pullNextTask('CDC01', worker, filter, key());
+  return mb.startTask(task.taskId, worker, key());
+}
+
+let workerSeq = 0;
+/** 줄 작업이 없을 때까지 작업자가 받아 전량 피킹 */
+async function drain() {
+  for (;;) {
+    const w = `fc-${++workerSeq}`;
+    let t: Task;
+    try {
+      t = await claim(w);
+    } catch (e) {
+      if (e instanceof ApiProblem && e.problem.code === 'NO_TASK_AVAILABLE') return;
+      throw e;
+    }
+    await pickAll(t, w);
+  }
+}
+
+async function pickAll(t: Task, worker: string) {
   await mb.reportPickResult(t.taskId, { workerId: worker, lines: t.lines.map((l) => ({ sku: l.sku, lot: l.lot, locationCode: l.locationCode, pickedQty: l.plannedQty - l.pickedQty - l.shortQty })) }, key());
 }
 
 /** TRF 하나를 실피킹 → 분류(작업마다 BOX 하나) → 검품 합격까지 */
 async function throughInspection(trfId: string, waveId: string) {
-  for (const t of (await mb.listTasks(waveId)).filter((x) => x.trfId === trfId)) await pickAll(t);
+  await drain();
   const tasks = (await mb.listTasks(waveId)).filter((x) => x.trfId === trfId);
   const lpns: LpnComposition[] = tasks.map((t, i) => ({
     lpn: `LPN-${trfId}-${i + 1}`,
@@ -154,15 +176,16 @@ describe('Wave·Task·실피킹 (CDC-F-017·018)', () => {
       expect(new Set(t.lines.map((l) => l.locationCode.split('-').slice(1, 3).join('-'))).size).toBe(1);
     }
     const before = mb.ledger.totals();
-    await pickAll(tasks[0]);
+    const t0 = await claim('fc-01');
+    await pickAll(t0, 'fc-01');
     const after = mb.ledger.totals();
     expect(after.onHand).toBe(before.onHand);
     expect(after.reserved).toBe(before.reserved);
-    const staged = tasks[0].lines.reduce((s, l) => s + l.plannedQty, 0);
-    const stagingCode = mb.ledger.holdingsOf((await mb.getTransferIntake(tasks[0].trfId)).allocationId!).find((h) => h.locationCode.includes('-91-'))!.locationCode;
+    const staged = t0.lines.reduce((s, l) => s + l.plannedQty, 0);
+    const stagingCode = mb.ledger.holdingsOf((await mb.getTransferIntake(t0.trfId)).allocationId!).find((h) => h.locationCode.includes('-91-'))!.locationCode;
     expect(stagingCode).toMatch(LOCATION_CODE_PATTERN);
     expect(mb.ledger.onHandAt(stagingCode)).toBe(staged);
-    expect((await mb.getTask(tasks[0].taskId)).state).toBe('DONE');
+    expect((await mb.getTask(t0.taskId)).state).toBe('DONE');
     expect((await mb.getWave(waveId)).state).toBe('IN_PROGRESS');
     expect(mb.ledger.check()).toEqual([]);
   });
@@ -180,19 +203,19 @@ describe('Wave·Task·실피킹 (CDC-F-017·018)', () => {
     expect(await code(mb.createWave({ cdcId: 'CDC01', trfIds: [d.trfId] }, key()))).toBe('INVALID_STATE');
   });
 
-  it('지시보다 많이 피킹하면 PICK_EXCEEDS_ALLOCATION, 다른 작업자는 INVALID_STATE', async () => {
-    const { waveId } = await startDay(1);
-    const [t] = await mb.listTasks(waveId);
+  it('지시보다 많이 피킹하면 PICK_EXCEEDS_ALLOCATION, 담당 아닌 작업자는 NOT_ASSIGNEE', async () => {
+    await startDay(1);
+    const t = await claim('fc-01');
     const l = t.lines[0];
     expect(await code(mb.reportPickResult(t.taskId, { workerId: 'fc-01', lines: [{ sku: l.sku, lot: l.lot, locationCode: l.locationCode, pickedQty: l.plannedQty + 1 }] }, key()))).toBe('PICK_EXCEEDS_ALLOCATION');
     await mb.reportPickResult(t.taskId, { workerId: 'fc-01', lines: [{ sku: l.sku, lot: l.lot, locationCode: l.locationCode, pickedQty: 1 }] }, key());
-    expect(await code(mb.reportPickResult(t.taskId, { workerId: 'fc-02', lines: [{ sku: l.sku, lot: l.lot, locationCode: l.locationCode, pickedQty: 1 }] }, key()))).toBe('INVALID_STATE');
+    expect(await code(mb.reportPickResult(t.taskId, { workerId: 'fc-02', lines: [{ sku: l.sku, lot: l.lot, locationCode: l.locationCode, pickedQty: 1 }] }, key()))).toBe('NOT_ASSIGNEE');
     expect(await code(mb.reportPickResult(t.taskId, { workerId: 'fc-01', lines: [{ sku: l.sku, lot: l.lot, locationCode: l.locationCode, pickedQty: 0 }] }, key(), 0))).toBe('VERSION_CONFLICT');
   });
 
   it('응답 유실 뒤 같은 키 재전송은 한 번만 반영된다', async () => {
-    const { waveId } = await startDay(1);
-    const [t] = await mb.listTasks(waveId);
+    await startDay(1);
+    const t = await claim('fc-01');
     const l = t.lines[0];
     const body = { workerId: 'fc-01', lines: [{ sku: l.sku, lot: l.lot, locationCode: l.locationCode, pickedQty: 2 }] };
     await mb.reportPickResult(t.taskId, body, 'retry-1');
@@ -202,7 +225,7 @@ describe('Wave·Task·실피킹 (CDC-F-017·018)', () => {
 
   it('부족 보고 → 그 칸 예약 해제·차단, 다음 FEFO 칸(2단 보충 대기)으로 재할당한 새 Task. 현물은 지우지 않는다', async () => {
     const { waveId } = await startDay(1);
-    const [t] = await mb.listTasks(waveId);
+    const t = await claim('fc-01');
     const l = t.lines[0];
     const before = mb.ledger.totals();
     await mb.reportPickResult(
@@ -219,12 +242,55 @@ describe('Wave·Task·실피킹 (CDC-F-017·018)', () => {
   });
 });
 
+describe('다음 작업 받기·착수 (0.2.0 — 사용자 결정: PDA 자동 배정)', () => {
+  it('받기가 곧 수락(ACCEPTED, 201), 들고 있으면 같은 작업(200), 한 작업은 한 사람에게만', async () => {
+    await startDay(2);
+    const a = await mb.pullNextTask('CDC01', 'fc-01', {}, key());
+    expect(a.status).toBe(201);
+    expect(a.task).toMatchObject({ state: 'ACCEPTED', assigneeId: 'fc-01' });
+    const again = await mb.pullNextTask('CDC01', 'fc-01', {}, key());
+    expect(again.status).toBe(200);
+    expect(again.task.taskId).toBe(a.task.taskId);
+    const b = await mb.pullNextTask('CDC01', 'fc-02', {}, key());
+    expect(b.task.taskId).not.toBe(a.task.taskId);
+    const same = await mb.pullNextTask('CDC01', 'fc-03', {}, 'dup');
+    expect(await mb.pullNextTask('CDC01', 'fc-03', {}, 'dup')).toEqual(same);
+  });
+
+  it('착수는 담당만(NOT_ASSIGNEE), 착수 전 실적은 INVALID_STATE, 착수 때 Wave IN_PROGRESS', async () => {
+    const { waveId } = await startDay(1);
+    const { task } = await mb.pullNextTask('CDC01', 'fc-01', {}, key());
+    const l = task.lines[0];
+    expect(await code(mb.reportPickResult(task.taskId, { workerId: 'fc-01', lines: [{ sku: l.sku, lot: l.lot, locationCode: l.locationCode, pickedQty: 1 }] }, key()))).toBe('INVALID_STATE');
+    expect(await code(mb.startTask(task.taskId, 'fc-02', key()))).toBe('NOT_ASSIGNEE');
+    expect((await mb.getWave(waveId)).state).toBe('RELEASED');
+    const started = await mb.startTask(task.taskId, 'fc-01', key(), task.version);
+    expect(started.state).toBe('IN_PROGRESS');
+    expect((await mb.startTask(task.taskId, 'fc-01', key())).state).toBe('IN_PROGRESS'); // 이미 착수 → 그대로
+    expect((await mb.getWave(waveId)).state).toBe('IN_PROGRESS');
+  });
+
+  it('순서는 TRF 기한 이른 순, 층·구역으로 범위를 거른다, 다 받으면 NO_TASK_AVAILABLE', async () => {
+    const trfs = makeTransfers(catalog, BASE, 7).slice(0, 2);
+    trfs[1] = { ...trfs[1], dueAt: '2026-11-25T20:00:00.000Z' }; // 더 이른 기한
+    for (const t of trfs) mb.intakeTransfer(t, key());
+    const wave = await mb.createWave({ cdcId: 'CDC01', trfIds: trfs.map((t) => t.trfId) }, key());
+    await mb.releaseWave(wave.waveId, key());
+    expect((await mb.pullNextTask('CDC01', 'fc-01', {}, key())).task.trfId).toBe(trfs[1].trfId);
+    const b = await mb.pullNextTask('CDC01', 'fc-02', { floor: '6', zone: 'B' }, key());
+    expect(b.task.lines.every((l) => l.locationCode.startsWith('CDC01-B-6-'))).toBe(true);
+    expect(await code(mb.pullNextTask('CDC01', 'fc-03', { zone: 'Z' }, key()))).toBe('NO_TASK_AVAILABLE');
+    await drain();
+    expect(await code(mb.pullNextTask('CDC01', 'fc-99', {}, key()))).toBe('NO_TASK_AVAILABLE');
+  });
+});
+
 describe('분류·검품·상차·출발 (CDC-F-019~022)', () => {
   it('분류 > 실피킹은 SORT_EXCEEDS_PICKED, 같은 LPN 두 번은 LPN_ALREADY_SEALED, 불합격 LPN 상차는 LPN_NOT_PASSED', async () => {
     const { trfs, waveId } = await startDay(1);
     const trfId = trfs[0].trfId;
-    const [t] = await mb.listTasks(waveId);
-    await pickAll(t);
+    const t = await claim('fc-01');
+    await pickAll(t, 'fc-01');
     const l = t.lines[0];
     const box = (lpn: string, qty: number): LpnComposition => ({ lpn, unitType: 'BOX', state: 'SEALED', contents: [{ sku: l.sku, lot: l.lot, qty }] });
     expect(await code(mb.reportSortingResult({ waveId, trfId, workerId: 'w', lpns: [box('X1', l.plannedQty + 1)] }, key()))).toBe('SORT_EXCEEDS_PICKED');

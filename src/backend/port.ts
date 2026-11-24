@@ -4,6 +4,7 @@ import type {
   InspectionResultRequest,
   LoadingResultRequest,
   OutboundReadiness,
+  NextTaskRequest,
   PickResultRequest,
   PreDepartureCancellation,
   PreDepartureCancelRequest,
@@ -30,7 +31,11 @@ export interface CdcOutboundPort {
   getWave(waveId: string): Promise<Wave>;
   releaseWave(waveId: string, idempotencyKey: string, expectedVersion?: number): Promise<CommandResponse>;
 
-  // tasks — FC 작업자 PDA
+  // tasks — FC 작업자 PDA. (0.2.0) 다음 작업 받기 = 시스템 자동 배정(받기가 곧 수락) → 착수 → 실적
+  /** 들고 있으면 200, 새로 배정하면 201(ACCEPTED). 없으면 409 NO_TASK_AVAILABLE */
+  pullNextTask(cdcId: string, workerId: string, body: NextTaskRequest, idempotencyKey: string): Promise<{ status: 200 | 201; task: Task }>;
+  /** 담당만 ACCEPTED → IN_PROGRESS (그 밖 409 NOT_ASSIGNEE). workerId = 토큰 주체 — HttpBackend 는 본문에 넣지 않는다 */
+  startTask(taskId: string, workerId: string, idempotencyKey: string, expectedVersion?: number): Promise<Task>;
   listTasks(waveId: string, filter?: { state?: TaskState; assigneeId?: string }): Promise<Task[]>;
   getTask(taskId: string): Promise<Task>;
   reportPickResult(taskId: string, body: PickResultRequest, idempotencyKey: string, expectedVersion?: number): Promise<CommandResponse>;
