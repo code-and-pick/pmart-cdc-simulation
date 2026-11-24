@@ -4,6 +4,7 @@ import { checkReadiness, READINESS_KO, type ProbeResult } from '../backend/http/
 import { useApp, useTick, useView } from '../app/context';
 import { CDC_FACTS, MFCS, OUTBOUND, SHIFT, WORK, WORKFORCE } from '../config';
 import { ROLE_KO, type Role } from '../sim/agent';
+import type { ZoneArea } from '../domain/layout';
 
 function Sec({ title, aside, children }: { title: string; aside?: ReactNode; children: ReactNode }) {
   return (
@@ -84,8 +85,10 @@ function ZoneInfo() {
   }
   const f = view.floorLayout()!;
   const stock = loc ? backend.ledger.cellsAt(loc.code) : [];
+  const zone = f.zones.find((z) => z.id === view.focusedZone);
   return (
     <>
+      {zone && <ZoneCard zone={zone} />}
       {loc && (
         <Sec title="고른 칸" aside={loc.type === 'PICK_FACE' ? '피킹 선반' : '팔레트 보관'}>
           <Row k="위치 코드" v={loc.code} />
@@ -176,6 +179,45 @@ function Workers() {
         );
       })}
     </>
+  );
+}
+
+const TEMP_NAME = { AMBIENT: '상온', CHILLED: '냉장', FROZEN: '냉동' } as const;
+
+/** 고른 구역 카드 — MFC "구역을 고르면 왼쪽 구역 화면에 그 구역 정보를 고정해 보인다" */
+function ZoneCard({ zone }: { zone: ZoneArea }) {
+  const { backend, sim } = useApp();
+  const view = useView();
+  useTick();
+  const f = view.floorLayout()!;
+  const letter = zone.id.split('-')[1];
+  const kindKo = zone.kind === 'RACK' ? '팔레트 보관 랙' : zone.kind === 'SHELF' ? '피킹 선반' : zone.kind === 'BAND' ? '승강기·출고대기' : '분류 설비';
+  const stock = backend.ledger.onHandByLocation();
+  const cells = zone.kind === 'RACK' ? f.locations.filter((l) => l.zone === letter) : zone.kind === 'SHELF' ? f.shelves.filter((l) => l.zone === letter) : [];
+  const onHand = cells.reduce((a, l) => a + (stock.get(l.code) ?? 0), 0);
+  const cap = cells.reduce((a, l) => a + l.capacity, 0);
+  const filled = cells.filter((l) => (stock.get(l.code) ?? 0) > 0).length;
+  const w = zone.rect.x1 - zone.rect.x0;
+  const d = zone.rect.z1 - zone.rect.z0;
+  return (
+    <Sec title={zone.kind === 'SHELF' ? `${letter} 피킹 선반` : zone.label} aside={kindKo}>
+      {zone.temp && <Row k="온도대" v={TEMP_NAME[zone.temp]} />}
+      {zone.kind === 'RACK' && <Row k="통로" v={f.aisles.filter((a) => a.zone === letter).map((a) => a.plate).join(' · ')} />}
+      {zone.kind === 'SHELF' && <Row k="통로" v={f.shelfAisles.filter((a) => a.zone === letter).map((a) => a.plate).join(' · ')} />}
+      {cells.length > 0 && (
+        <>
+          <Row k="칸" v={`${cells.length.toLocaleString()} (재고 있는 칸 ${filled.toLocaleString()})`} />
+          <Row k="현물 / 용량" v={`${onHand.toLocaleString()} / ${cap.toLocaleString()} 유닛 (${cap ? Math.round((onHand / cap) * 100) : 0}%)`} />
+        </>
+      )}
+      {zone.kind === 'BAND' && (
+        <>
+          <Row k="승강기" v={`${f.lifts.length}대 (92)`} />
+          <Row k="출고대기 R/T" v={`${f.staging.reduce((a, s) => a + (sim.staged.get(s.code)?.length ?? 0), 0)}박스 · 자리 ${f.staging.length}`} />
+        </>
+      )}
+      <Row k="넓이" v={`${w.toFixed(1)} × ${d.toFixed(1)} m · ${Math.round((w * d) / 3.3058).toLocaleString()}평`} />
+    </Sec>
   );
 }
 

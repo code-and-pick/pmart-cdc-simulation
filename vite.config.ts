@@ -8,15 +8,16 @@ import { defineConfig } from 'vitest/config';
 // MFC 의 시험 계정·라벨·실주문 플러그인(server/)은 CDC 계약이 생기면 그때 옮긴다.
 const gateway = process.env.PMART_GATEWAY ?? 'http://192.168.0.40:8080';
 // 내부 경로(/internal/*)는 게이트웨이를 거치지 않고 LAN 서비스로 직접(백엔드 CDC-9, 사용자 2026-11-25 "LAN 서비스 직접 호출").
-// 포트는 백엔드 pc1-todo(cdc-inventory 8601 · cdc-outbound 8603). 주소는 PC1 배치 뒤 안내 — 그 전엔 [가정] 게이트웨이와 같은 호스트.
-const svcHost = process.env.PMART_CDC_HOST ?? new URL(gateway).hostname;
+// 주소: PC1 백엔드 안내(2026-11-25) — 192.168.0.222, cdc-inventory :8601 · cdc-location :8602 · cdc-outbound :8603(배치 뒤). 직접 호출엔 CORS 가 없어 개발 서버 프록시로.
+const svcHost = process.env.PMART_CDC_HOST ?? '192.168.0.222';
 const cdcOutbound = process.env.PMART_CDC_OUTBOUND ?? `http://${svcHost}:8603`;
 const cdcInventory = process.env.PMART_CDC_INVENTORY ?? `http://${svcHost}:8601`;
 const direct = (target: string, prefix: string) => ({
   target,
   changeOrigin: true,
   agent: new Agent({ family: 4, keepAlive: true }),
-  rewrite: (path: string) => path.replace(prefix, ''),
+  // 서비스는 계약 servers 대로 /api/v1 아래에 있다(2026-11-25 192.168.0.222:8601 로 확인)
+  rewrite: (path: string) => path.replace(prefix, '/api/v1'),
   configure: (proxy: { on: (ev: 'proxyReq', fn: (req: { removeHeader: (h: string) => void }) => void) => void }) => {
     proxy.on('proxyReq', (req) => {
       req.removeHeader('origin');

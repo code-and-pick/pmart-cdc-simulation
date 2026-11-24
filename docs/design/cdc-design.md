@@ -388,3 +388,12 @@ test/                         고정값·용량 합·원장 불변식·1요청1�
 - 만든 것: `src/backend/http/client.ts`(계약 헤더 Idempotency-Key ≤128·X-Source-System·X-Expected-Version·Bearer, 응답 불명은 같은 키로 재전송 → 끝까지 모르면 ResultUnknown, 501 은 확정 답), `HttpBackend`(CdcOutboundPort, cdc-outbound 0.3.0 경로 — Task 는 `/cdcs/{cdcId}/tasks…`), `HttpTms`(fleet 조회·transport-execution), `tokens.ts`(메모리만)·`accounts.ts`(계정 없음)·`server/simAuth.ts`(계정이 없어 503 CDC_ACCOUNTS_PENDING), `readiness.ts`.
 - R-16 답(CDC-9, 사용자 "LAN 서비스 직접 호출"): 보충 승인·TMS 역할의 `/internal/*` 은 **LAN 서비스로 직접**(토큰 없음, X-Source-System, 멱등 키) — 개발 서버 프록시 `/svc/cdc-outbound`(:8603)·`/svc/cdc-inventory`(:8601), 주소는 `PMART_CDC_HOST`·`PMART_CDC_OUTBOUND`·`PMART_CDC_INVENTORY`(기본 게이트웨이 호스트 [가정]). 공개 경로는 게이트웨이 + 직원 토큰. 계정 이름 제안 `claude-cdc-sup`·`cdcw-fc/dl/qc/ld/fk-NN`(PC1 이 만들면 확정).
 - 남은 것(백엔드 R-16 뒤): CDC 시험 계정으로 토큰 → 시작 재고·위치 시드(백엔드 스크립트) → 엔진이 MockBackend 대신 HttpBackend 를 쓰도록 Simulation 을 포트에 맞춤(TRF 인수·보충 필요 목록·배차는 서버 쪽 사실을 읽는 방식으로 바뀜).
+
+### 9.1 층 안 화면 — MFC 시뮬레이터와 같게 (2026-11-25)
+
+- MFC `render/scene/Facility.tsx`·`ZoneNames.tsx` 를 DC 에 맞게 옮김(`src/render/scene/Facility.tsx`):
+  - 구역마다 불투명 바닥색 + 흰 실선 경계: 냉동 옅은 하늘, 냉장 옅은 연두, 상온 팔레트 보관 옅은 나무빛, 피킹 선반 밝은 회백, 승강기·출고대기 띠 옅은 회보라, 설비 옅은 회청.
+  - 높은 투명벽: 건물 둘레 + 5F 냉동 방. 전체 보기 0.32, 구역에 들어가면 0.07, 칸 정면이면 0.
+  - 구역 카드: MFC 알약 판(아이콘 + 짧은 이름 + 둘째 말). 랙 구역은 북쪽 끝 랙 위(예 "상온 E · 통로 3 · 960칸"), 피킹 선반은 선반 구역 전체에 하나, 승강기·출고대기·설비는 북쪽에 세움.
+  - 빛: MFC 반구광 + 해(그림자는 DC 가 넓어 끔). 선반 상품 색은 MFC 처럼 상온 흰 상자·저온 바닥색 진하게.
+  - 구역을 누르거나 고르면 왼쪽 구역 탭에 그 구역 카드(온도대·통로·칸·현물/용량·넓이).

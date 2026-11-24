@@ -7,10 +7,11 @@ import { AppContext, useApp, useTick, useView, type AppCtx } from '../../app/con
 import { OUTBOUND, RACK, SHELF, TMS } from '../../config';
 import { TEMP_KO } from '../../sim/simulation';
 import { B1 } from '../../sim/site';
-import type { FloorLayout, Location, Rect } from '../../domain/layout';
+import type { FloorLayout, Location } from '../../domain/layout';
 import { SCENE, ZONE_COLOR } from '../colors';
 import { plateTexture } from '../sprites';
 import { Agents, SimDriver } from './Agents';
+import { Facility, Lights } from './Facility';
 import { CameraRig, CellLabels, Picker } from './Core';
 import { Shelves } from './Shelves';
 import { BEAM_H, beamY, LOAD_MAX } from '../rackGeom';
@@ -20,8 +21,7 @@ export function SiteScene({ app }: { app: AppCtx }) {
     <Canvas shadows={false} flat dpr={[1, 2]} gl={{ antialias: true }} camera={{ fov: 45, near: 0.1, far: 900, position: [60, 120, 140] }}>
       <AppContext.Provider value={app}>
         <Backdrop />
-        <ambientLight intensity={0.85} />
-        <directionalLight position={[60, 120, 40]} intensity={1.1} />
+        <Lights />
         <FloorContent />
         <Agents />
         <SimDriver />
@@ -50,10 +50,7 @@ function FloorContent() {
   const f = layout.floors.find((x) => x.floor === view.floor)!;
   return (
     <group key={f.floor}>
-      <Slab w={layout.width} d={layout.depth} />
-      {f.zones.map((z) =>
-        z.kind === 'RACK' ? <Tint key={z.id} r={z.rect} color={ZONE_COLOR[z.temp!]} /> : z.kind === 'BAND' ? <Tint key={z.id} r={z.rect} color={SCENE.band} opacity={0.6} /> : z.kind === 'SHELF' ? <Tint key={z.id} r={z.rect} color={ZONE_COLOR[z.temp!]} opacity={0.3} /> : null,
-      )}
+      <Facility f={f} L={layout} />
       <Racks f={f} />
       <Loads f={f} />
       <Shelves f={f} />
@@ -63,24 +60,6 @@ function FloorContent() {
       <Equipment f={f} />
       <Selected />
     </group>
-  );
-}
-
-function Slab({ w, d }: { w: number; d: number }) {
-  return (
-    <mesh rotation-x={-Math.PI / 2} position={[w / 2, -0.01, d / 2]}>
-      <planeGeometry args={[w, d]} />
-      <meshStandardMaterial color={SCENE.floor} />
-    </mesh>
-  );
-}
-
-function Tint({ r, color, opacity = SCENE.zoneTint }: { r: Rect; color: number; opacity?: number }) {
-  return (
-    <mesh rotation-x={-Math.PI / 2} position={[(r.x0 + r.x1) / 2, 0.005, (r.z0 + r.z1) / 2]}>
-      <planeGeometry args={[r.x1 - r.x0, r.z1 - r.z0]} />
-      <meshBasicMaterial color={color} transparent opacity={opacity} depthWrite={false} />
-    </mesh>
   );
 }
 
@@ -292,7 +271,7 @@ function Staging({ f }: { f: FloorLayout }) {
 
 const EQUIP_COLOR: Record<string, number> = { WHEEL_SORTER: SCENE.conveyor, DPS: SCENE.conveyor, DAS: SCENE.conveyor, SPLIT: 0x3aa35a, AUTOSTORE: SCENE.autostore };
 
-/** 설비 자리 — 지금은 높이 있는 판과 이름표만(설비 모양은 다음 단계) */
+/** 설비 자리 — 높이 있는 판(설비 모양은 다음 단계). 이름은 구역 카드 */
 function Equipment({ f }: { f: FloorLayout }) {
   return (
     <>
@@ -306,9 +285,7 @@ function Equipment({ f }: { f: FloorLayout }) {
               <boxGeometry args={[(e.rect.x1 - e.rect.x0) * 0.9, h, (e.rect.z1 - e.rect.z0) * (e.kind === 'AUTOSTORE' ? 0.8 : 0.35)]} />
               <meshStandardMaterial color={EQUIP_COLOR[e.kind]} transparent opacity={0.85} />
             </mesh>
-            <sprite position={[cx, h + 1.6, cz]} scale={[7, 1.4, 1]}>
-              <spriteMaterial map={plateTexture(e.label, { bg: SCENE.pill, fg: '#ffffff', w: 640, h: 128 })} />
-            </sprite>
+            {/* 이름은 구역 카드(Facility.ZoneCards)로 */}
           </group>
         );
       })}

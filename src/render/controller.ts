@@ -109,6 +109,7 @@ export class ViewController extends Emitter {
   focusZone(key: string, animate = true) {
     if (key === 'ALL') this.homeView = null;
     this.focusedZone = key;
+    if (key !== 'ALL' && this.leftView !== null) this.leftView = 'zone';
     this.nearCut = 0;
     const v = this.zoneViews().find((z) => z.key === key) ?? this.zoneViews()[0];
     const r = v.rect;
@@ -200,6 +201,12 @@ export class ViewController extends Emitter {
       this.selected = null;
     }
     this.emit();
+  }
+
+  /** 벽 투명도 — MFC 와 같음: 전체 보기 0.32, 구역에 들어가면 0.07(안이 보이게), 칸 정면이면 0 */
+  get wallOpacity(): number {
+    if (this.nearCut > 0) return 0;
+    return this.focusedZone === 'ALL' ? 0.32 : 0.07;
   }
 
   setLabelMode(m: LabelMode) {

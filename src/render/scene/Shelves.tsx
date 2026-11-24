@@ -8,7 +8,7 @@ import * as THREE from 'three';
 import { useApp, useView } from '../../app/context';
 import { SHELF } from '../../config';
 import type { FloorLayout } from '../../domain/layout';
-import { SCENE } from '../colors';
+import { SCENE, zoneBoxColor } from '../colors';
 import { plateTexture } from '../sprites';
 
 const tmp = new THREE.Object3D();
@@ -90,7 +90,9 @@ function ShelfStock({ f }: { f: FloorLayout }) {
       tmp.scale.set(q ? SHELF.depth * 0.85 : 0, h, q ? slotW * 0.8 : 0);
       tmp.updateMatrix();
       ref.current!.setMatrixAt(i, tmp.matrix);
-      color.setHSL(((i * 47) % 360) / 360, 0.45, 0.62);
+      // MFC 선반 상품 색: 상온 흰 상자, 저온은 구역 바닥색을 진하게 + 조금씩 다르게
+      zoneBoxColor(l.temp, color);
+      color.offsetHSL(0, 0, (((i * 13) % 7) - 3) / 120);
       ref.current!.setColorAt(i, color);
     });
     ref.current!.instanceMatrix.needsUpdate = true;
