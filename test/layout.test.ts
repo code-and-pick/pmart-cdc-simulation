@@ -17,11 +17,11 @@ describe('층·구역 배치 [정본 CDC-2, R-10]', () => {
     expect(aisles(7)).toEqual([...Array.from({ length: 10 }, (_, i) => `G${String(i + 1).padStart(2, '0')}`), ...Array.from({ length: 10 }, (_, i) => `H${String(i + 1).padStart(2, '0')}`)]);
   });
 
-  it('팔레트 위치 22,400 (상온 32×40×5×2 · 냉장 18×40×4×2 · 냉동 12×40×4×2)', () => {
-    expect(all.filter((l) => l.temp === 'AMBIENT')).toHaveLength(12_800);
+  it('팔레트 위치 19,840 (상온 32×40×4×2 · 냉장 18×40×4×2 · 냉동 12×40×4×2) — 모두 4단 [사용자 랙 규격]', () => {
+    expect(all.filter((l) => l.temp === 'AMBIENT')).toHaveLength(10_240);
     expect(all.filter((l) => l.temp === 'CHILLED')).toHaveLength(5_760);
     expect(all.filter((l) => l.temp === 'FROZEN')).toHaveLength(3_840);
-    expect(all).toHaveLength(22_400);
+    expect(all).toHaveLength(19_840);
   });
 
   it('1단은 피킹면, 2단부터 리저브', () => {
@@ -52,8 +52,8 @@ describe('위치 코드 [정본 CDC-3·5]', () => {
     expect(L.docks.some((d) => d.code.startsWith('CDC01-B-B1-90-'))).toBe(true);
   });
 
-  it('냉장·냉동에는 5단 칸이 없다 [개념도]', () => {
-    expect(all.some((l) => l.temp !== 'AMBIENT' && l.level === 5)).toBe(false);
+  it('모든 랙은 4단 — 5단 칸이 없다 [사용자 랙 규격]', () => {
+    expect(Math.max(...all.map((l) => l.level))).toBe(4);
   });
 });
 

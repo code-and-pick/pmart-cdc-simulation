@@ -1,7 +1,9 @@
 // 칠곡 DC 배치 데이터 — 코드에 배치를 박지 않고 센터별 데이터로 둔다(ADR-0050, 설계 §3.3).
 // 근거: 백엔드 docs/simulator/cdc/chilgok-dc.md CDC-2(R-09 확정 + R-10 사용자 교환 2026-11-24), 설계 docs/design/cdc-design.md §3.2·§4.1.
 
-export type Temp = 'AMBIENT' | 'CHILLED' | 'FROZEN';
+import { RACK } from '../../config';
+
+export type Temp ='AMBIENT' | 'CHILLED' | 'FROZEN';
 export type FloorNo = 5 | 6 | 7;
 
 /** 랙 구역 — 글자는 MFC 시뮬레이터 체계(A 냉동·B 냉장·C~H 상온 계열, 사용자 2026-11-24) */
@@ -10,7 +12,7 @@ export interface RackZoneSpec {
   temp: Temp;
   label: string;
   aisles: number;
-  /** 단 수 — 상온 5(1 피킹·2 보충 대기·3~5 리저브), 냉장·냉동 4 [개념도] */
+  /** 단 수 — 모든 구역 4(1 피킹·2 보충 대기·3~4 리저브) [사용자 2026-11-25 랙 규격] */
   levels: number;
 }
 
@@ -31,7 +33,7 @@ export interface FloorSpec {
   equipment: { kind: EquipKind; label: string; where: 'band' | 'east' }[];
 }
 
-const amb = (letter: RackZoneSpec['letter'], label: string, aisles: number): RackZoneSpec => ({ letter, temp: 'AMBIENT', label, aisles, levels: 5 });
+const amb = (letter: RackZoneSpec['letter'], label: string, aisles: number): RackZoneSpec => ({ letter, temp: 'AMBIENT', label, aisles, levels: RACK.levels });
 
 export const CHILGOK_FLOORS: FloorSpec[] = [
   {
@@ -42,7 +44,7 @@ export const CHILGOK_FLOORS: FloorSpec[] = [
       amb('D', '상온 D (무거운 상자)', 3),
       amb('E', '상온 E', 3),
       amb('F', '상온 F (인기상품)', 3),
-      { letter: 'A', temp: 'FROZEN', label: '냉동 A', aisles: 12, levels: 4 },
+      { letter: 'A', temp: 'FROZEN', label: '냉동 A', aisles: 12, levels: RACK.levels },
     ],
     docPyeong: { storage: { 상온: 1233, 냉동: 1000 }, dt: 633 },
     stagingLetters: ['C', 'A'],
@@ -57,7 +59,7 @@ export const CHILGOK_FLOORS: FloorSpec[] = [
   {
     floor: 6,
     label: '6F 냉장',
-    zones: [{ letter: 'B', temp: 'CHILLED', label: '냉장 B', aisles: 18, levels: 4 }],
+    zones: [{ letter: 'B', temp: 'CHILLED', label: '냉장 B', aisles: 18, levels: RACK.levels }],
     docPyeong: { storage: { 냉장: 1700 }, dt: 1167 },
     stagingLetters: ['B'],
     liftLetter: 'B',

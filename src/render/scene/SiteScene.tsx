@@ -76,47 +76,76 @@ function Tint({ r, color, opacity = SCENE.zoneTint }: { r: Rect; color: number; 
 
 const tmp = new THREE.Object3D();
 
-/** 랙 기둥(파랑)·빔(주황) — 사진처럼 */
+/** 빔 높이(윗면 아래 중심) — 1단은 사진처럼 바닥 가까운 낮은 빔, 2~4단은 2·4·6m [사용자 랙 규격] */
+const BEAM_H = 0.12;
+const beamY = (lv: number) => (lv === 1 ? 0.15 : (lv - 1) * RACK.levelH);
+/** 팔레트 짐 최대 높이 — 단 2m 에서 빔·여유를 뺀 만큼(맨 위 단도 같게) */
+const LOAD_MAX = Math.min(RACK.pallet.h, RACK.levelH - 0.3);
+/** 기둥 옆 가새 한 칸 높이 */
+const BRACE_STEP = 1.0;
+
+/**
+ * 랙 — 사진처럼 파란 기둥 + 옆면 지그재그 가새, 주황 빔.
+ * 규격 [사용자]: 6m × 2.6m × 1m, 4단(바닥 + 2·4·6m 빔), 단 2m.
+ */
 function Racks({ f }: { f: FloorLayout }) {
   const posts = useRef<THREE.InstancedMesh>(null);
   const beams = useRef<THREE.InstancedMesh>(null);
+  const braces = useRef<THREE.InstancedMesh>(null);
+  const uprights = RACK.baysPerSide + 1;
+  const panels = Math.round(RACK.height / BRACE_STEP);
   const counts = useMemo(() => {
-    let p = 0;
     let b = 0;
-    for (const r of f.rows) {
-      p += (RACK.baysPerSide + 1) * 2;
-      b += r.levels * 2;
-    }
-    return { p, b };
-  }, [f]);
+    for (const r of f.rows) b += r.levels * 2;
+    return { p: f.rows.length * uprights * 2, b, br: f.rows.length * uprights * panels };
+  }, [f, uprights, panels]);
   useEffect(() => {
     let i = 0;
     let j = 0;
+    let q = 0;
+    const diag = Math.hypot(RACK.depth, BRACE_STEP);
+    const ang = Math.atan2(RACK.depth, BRACE_STEP);
     for (const r of f.rows) {
-      const h = r.levels * RACK.levelH;
-      for (let k = 0; k <= RACK.baysPerSide; k++) {
+      for (let k = 0; k < uprights; k++) {
+        const z = r.z0 + k * RACK.bayW;
         for (const dx of [-RACK.depth / 2, RACK.depth / 2]) {
-          tmp.position.set(r.cx + dx, h / 2, r.z0 + k * RACK.bayW);
-          tmp.scale.set(0.09, h, 0.09);
+          tmp.position.set(r.cx + dx, RACK.height / 2, z);
+          tmp.rotation.set(0, 0, 0);
+          tmp.scale.set(0.09, RACK.height, 0.09);
           tmp.updateMatrix();
           posts.current!.setMatrixAt(i++, tmp.matrix);
+        }
+        // 옆면 가새: 앞뒤 기둥 사이를 1m 마다 번갈아 비스듬히
+        for (let n = 0; n < panels; n++) {
+          tmp.position.set(r.cx, (n + 0.5) * BRACE_STEP, z);
+          tmp.rotation.set(0, 0, n % 2 ? ang : -ang);
+          tmp.scale.set(0.04, diag, 0.04);
+          tmp.updateMatrix();
+          braces.current!.setMatrixAt(q++, tmp.matrix);
         }
       }
       for (let lv = 1; lv <= r.levels; lv++) {
         for (const dx of [-RACK.depth / 2, RACK.depth / 2]) {
-          tmp.position.set(r.cx + dx, lv * RACK.levelH - 0.08, (r.z0 + r.z1) / 2);
-          tmp.scale.set(0.1, 0.12, r.z1 - r.z0);
+          tmp.position.set(r.cx + dx, beamY(lv), (r.z0 + r.z1) / 2);
+          tmp.rotation.set(0, 0, 0);
+          tmp.scale.set(0.08, BEAM_H, r.z1 - r.z0);
           tmp.updateMatrix();
           beams.current!.setMatrixAt(j++, tmp.matrix);
         }
       }
     }
+    tmp.rotation.set(0, 0, 0);
     posts.current!.instanceMatrix.needsUpdate = true;
     beams.current!.instanceMatrix.needsUpdate = true;
-  }, [f]);
+    braces.current!.instanceMatrix.needsUpdate = true;
+  }, [f, uprights, panels]);
   return (
     <>
       <instancedMesh ref={posts} args={[undefined, undefined, counts.p]} frustumCulled={false}>
+        <boxGeometry />
+        <meshStandardMaterial color={SCENE.rackPost} />
+      </instancedMesh>
+      <instancedMesh ref={braces} args={[undefined, undefined, counts.br]} frustumCulled={false}>
         <boxGeometry />
         <meshStandardMaterial color={SCENE.rackPost} />
       </instancedMesh>
@@ -129,42 +158,54 @@ function Racks({ f }: { f: FloorLayout }) {
 }
 
 /**
- * 칸마다 팔레트 짐(갈색 상자) — 재고 원장이 붙기 전이라 시드 모양만 [시뮬]. 누르면 그 칸을 고른다.
- * 1단은 사진처럼 바닥 피킹면.
+ * 칸마다 팔레트(1.1 × 1.1m 나무 받침) + 랩 씌운 박스 짐 — 사진처럼 단마다 2개.
+ * 원장에 현물이 있는 칸만, 짐 높이 = 칸 용량 대비 현물. 누르면 그 칸을 고른다.
  */
 function Loads({ f }: { f: FloorLayout }) {
   const view = useView();
   const { backend } = useApp();
-  const ref = useRef<THREE.InstancedMesh>(null);
-  // 원장에 현물이 있는 칸만 그린다(시작 재고 시드). 상자 높이 = 칸 용량 대비 현물
+  const decks = useRef<THREE.InstancedMesh>(null);
+  const loads = useRef<THREE.InstancedMesh>(null);
   const filled = useMemo(() => {
     const stock = backend.ledger.onHandByLocation();
     return f.locations.filter((l) => (stock.get(l.code) ?? 0) > 0).map((l) => ({ l, ratio: Math.min(1, (stock.get(l.code) ?? 0) / l.capacity) }));
   }, [f, backend]);
   useEffect(() => {
-    const m = ref.current!;
     const color = new THREE.Color();
+    const { w, d, deckH } = RACK.pallet;
     filled.forEach(({ l, ratio }, i) => {
-      const h = RACK.levelH * 0.72 * (0.35 + 0.65 * ratio);
-      tmp.position.set(l.pos.x, (l.level - 1) * RACK.levelH + h / 2 + 0.12, l.pos.z);
-      tmp.scale.set(RACK.depth * 0.9, h, (RACK.bayW / RACK.slots) * 0.82);
+      const base = beamY(l.level) + BEAM_H / 2;
+      tmp.position.set(l.pos.x, base + deckH / 2, l.pos.z);
+      tmp.scale.set(d, deckH, w);
       tmp.updateMatrix();
-      m.setMatrixAt(i, tmp.matrix);
+      decks.current!.setMatrixAt(i, tmp.matrix);
+      const h = (LOAD_MAX - deckH) * (0.4 + 0.6 * ratio);
+      tmp.position.set(l.pos.x, base + deckH + h / 2, l.pos.z);
+      tmp.scale.set(d * 0.96, h, w * 0.96);
+      tmp.updateMatrix();
+      loads.current!.setMatrixAt(i, tmp.matrix);
       color.setHex(SCENE.box).offsetHSL(((i * 37) % 11) / 400 - 0.012, 0, ((i * 13) % 7) / 120 - 0.02);
-      m.setColorAt(i, color);
+      loads.current!.setColorAt(i, color);
     });
-    m.instanceMatrix.needsUpdate = true;
-    if (m.instanceColor) m.instanceColor.needsUpdate = true;
+    decks.current!.instanceMatrix.needsUpdate = true;
+    loads.current!.instanceMatrix.needsUpdate = true;
+    if (loads.current!.instanceColor) loads.current!.instanceColor.needsUpdate = true;
   }, [filled]);
   const onClick = (e: ThreeEvent<MouseEvent>) => {
     e.stopPropagation();
     if (e.instanceId != null) view.select(filled[e.instanceId].l);
   };
   return (
-    <instancedMesh ref={ref} args={[undefined, undefined, filled.length]} onClick={onClick} frustumCulled={false}>
-      <boxGeometry />
-      <meshStandardMaterial />
-    </instancedMesh>
+    <>
+      <instancedMesh ref={decks} args={[undefined, undefined, filled.length]} onClick={onClick} frustumCulled={false}>
+        <boxGeometry />
+        <meshStandardMaterial color={SCENE.pallet} />
+      </instancedMesh>
+      <instancedMesh ref={loads} args={[undefined, undefined, filled.length]} onClick={onClick} frustumCulled={false}>
+        <boxGeometry />
+        <meshStandardMaterial roughness={0.45} />
+      </instancedMesh>
+    </>
   );
 }
 

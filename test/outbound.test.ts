@@ -78,7 +78,7 @@ describe('가짜 상품 마스터·시작 재고', () => {
       expect([s.reserve.zone, s.reserve.aisle, s.reserve.bay, s.reserve.slot]).toEqual([s.pickFace.zone, s.pickFace.aisle, s.pickFace.bay, s.pickFace.slot]);
       for (const l of s.seed) expect(l.locationCode).toMatch(LOCATION_CODE_PATTERN);
       expect(s.column.map((l) => l.level)).toEqual(Array.from({ length: s.column.length }, (_, i) => i + 1));
-      expect(s.column.length).toBe(s.temp === 'AMBIENT' ? 5 : 4);
+      expect(s.column.length).toBe(4);
       expect(s.seed[0].expiresAt < s.seed[s.seed.length - 1].expiresAt).toBe(true); // 피킹면 LOT 이 먼저 끝난다
       expect(s.seed[1].lot).toBe(s.seed[0].lot); // 보충 대기 = 피킹면 LOT
       s.seed.forEach((l, i) => expect(l.qty).toBeLessThanOrEqual(s.column[i].capacity));
