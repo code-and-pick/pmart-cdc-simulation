@@ -1,6 +1,6 @@
 // 머리줄·3D 위 보기 칩 — MFC 시뮬레이터 ui/TopBar.tsx 와 같은 모양. 구역 버튼 대신 층 버튼(5F·6F·7F·B1)을 먼저 둔다(설계 §9).
-import { useApp, useView } from '../app/context';
-import { CDC_FACTS } from '../config';
+import { useApp, useTick, useView } from '../app/context';
+import { CDC_FACTS, SPEEDS } from '../config';
 import type { FloorKey, LabelMode, RightView } from '../render/controller';
 
 const LABEL_MODES: { mode: LabelMode; text: string }[] = [
@@ -17,8 +17,10 @@ const FLOORS: { key: FloorKey; text: string }[] = [
 ];
 
 export function TopBar() {
-  const { settings, restart } = useApp();
+  const { settings, restart, sim, ticker } = useApp();
   const view = useView();
+  useTick();
+  const busy = sim.agents.filter((a) => !a.idle).length;
   const mock = settings.mode === 'mock';
   return (
     <header className="topbar">
@@ -36,11 +38,28 @@ export function TopBar() {
             실서버
           </button>
         </span>
+        <span className="stat" title="일하는 사람 / 전체 (주간조 지게차 + 석간 FC·분배·라인·자키)">
+          작업자 <b>{busy}</b>/{sim.agents.length}
+        </span>
       </div>
       <div className="spacer" />
-      <div className="clock" title="시뮬레이션 시각 — 엔진은 다음 단계">
-        <span className="live paused" />
-        13:00
+      <div className="clock" title="시뮬레이션 시각">
+        <span className={`live ${sim.speed === 0 ? 'paused' : ''}`} />
+        {sim.clockText()}
+      </div>
+      <div className="seg">
+        {SPEEDS.map((sp) => (
+          <button
+            key={sp}
+            className={sim.speed === sp ? 'on' : undefined}
+            onClick={() => {
+              sim.speed = sp;
+              ticker.bump();
+            }}
+          >
+            {sp === 0 ? '❚❚' : `${sp}×`}
+          </button>
+        ))}
       </div>
     </header>
   );

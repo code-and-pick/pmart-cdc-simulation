@@ -3,7 +3,7 @@
 // 규칙 근거: WMS-business-logic.md 0.3(원장)·§12 CDC-F-016~018·§13 CDC-F-019~022.
 // 계약에 없어 MOCK 이 정한 것은 docs/backend-requests.md "시뮬레이터가 정한 값"에 적는다.
 
-import { ALLOCATION, CENTER_ID, MFCS } from '../../config';
+import { ALLOCATION, CENTER_ID, MFCS, TASK } from '../../config';
 import {
   ApiProblem,
   type CommandResponse,
@@ -487,7 +487,7 @@ export class MockBackend implements CdcOutboundPort {
     return this.call('GET', `/waves/${waveId}`, 200, () => structuredClone(this.mustWave(waveId)));
   }
 
-  /** PLANNED → RELEASED, 피킹 Task 생성. Task = TRF × 층·구역 (계약 Task.trfId 가 하나라서) */
+  /** PLANNED → RELEASED, 피킹 Task 생성. Task = TRF × 층·구역 × 카트 한 대(계약 Task.trfId 가 하나라서) */
   async releaseWave(waveId: string, idempotencyKey: string, expectedVersion?: number): Promise<CommandResponse> {
     return this.call('POST', `/waves/${waveId}/releases`, 202, () =>
       this.idempotent(`release:${waveId}`, idempotencyKey, { expectedVersion }, () => {
@@ -512,8 +512,7 @@ export class MockBackend implements CdcOutboundPort {
             groups.set(g, [...(groups.get(g) ?? []), h]);
           }
           for (const [, hs] of [...groups.entries()].sort(([a], [b]) => (a < b ? -1 : 1))) {
-            this.newPickTask(w.waveId, trfId, hs);
-            n += 1;
+            n += this.newPickTask(w.waveId, trfId, hs).length;
           }
         }
         w.state = 'RELEASED';
@@ -526,14 +525,18 @@ export class MockBackend implements CdcOutboundPort {
     );
   }
 
-  private newPickTask(waveId: string, trfId: string, holds: { sku: string; lot: string; locationCode: string; qty: number }[]): Task {
-    // 피킹 동선: 통로 → 베이 → 단 순 [시뮬]
+  /** 피킹 Task — 같은 TRF·층·구역 줄을 동선 순(통로 → 베이 → 단)으로 놓고 카트 한 대 분량(TASK.maxLines)씩 자른다 [시뮬] */
+  private newPickTask(waveId: string, trfId: string, holds: { sku: string; lot: string; locationCode: string; qty: number }[]): Task[] {
     const lines = [...holds]
       .sort((a, b) => (a.locationCode < b.locationCode ? -1 : 1))
       .map((h) => ({ sku: h.sku, lot: h.lot, locationCode: h.locationCode, plannedQty: h.qty, pickedQty: 0, shortQty: 0 }));
-    const t: Task = { taskId: this.id('PICK'), waveId, trfId, kind: 'PICK', state: 'CREATED', version: 0, lines, createdAt: this.iso() };
-    this.tasks.set(t.taskId, t);
-    return t;
+    const out: Task[] = [];
+    for (let i = 0; i < lines.length; i += TASK.maxLines) {
+      const t: Task = { taskId: this.id('PICK'), waveId, trfId, kind: 'PICK', state: 'CREATED', version: 0, lines: lines.slice(i, i + TASK.maxLines), createdAt: this.iso() };
+      this.tasks.set(t.taskId, t);
+      out.push(t);
+    }
+    return out;
   }
 
   async listTasks(waveId: string, filter: { state?: TaskState; assigneeId?: string } = {}): Promise<Task[]> {

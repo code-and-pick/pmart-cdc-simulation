@@ -132,8 +132,8 @@ export const ALLOCATION = {
 
 /** MFC 보충 요청(TRF) 만들기 — MOCK 에서 시뮬레이터가 replenishment 역할 [가정] (설계 §5.1 #1) */
 export const SUPPLY = {
-  /** MFC 한 곳의 하루 TRF 품목 수 [가정] */
-  linesPerMfc: 40,
+  /** MFC 한 곳의 하루 TRF 품목 수 [가정] — 고회전 2,000 SKU 의 30%, 석간 FC 16명이 저녁 내내 집는 양으로 맞춤 */
+  linesPerMfc: 600,
   /** 품목당 승인 수량 [가정] */
   qty: [6, 48] as const,
   /** MFC 도착 마감 — 다음 날 09:00 (MFC 오픈) [현장 하루 일정] */
@@ -163,4 +163,51 @@ export const SHELF = {
   fill: [0.3, 0.9] as const,
   /** 북쪽 띠에서 승강기·출고대기 줄 깊이(m) — 그 남쪽부터 선반 [가정] */
   northStrip: 7.5,
+} as const;
+
+/**
+ * 작업자 수(층마다) [가정] — 자료에 없음(설계 §6). 일용직은 시작할 때 FC·분배·라인에 배정 [현장].
+ * repl = 지게차 선반 보충(주간조 08~17 + 석간 1명 — 부족 재할당분 보충), fc = FC 피커, sort = 분배·라인(DAS·DPS·분류기 앞), jockey = 자키(롤테이너를 출고대기로).
+ */
+export const WORKFORCE: Record<5 | 6 | 7, { fc: number; sort: number; jockey: number; replDay: number; replEve: number }> = {
+  5: { fc: 6, sort: 2, jockey: 1, replDay: 3, replEve: 1 },
+  6: { fc: 5, sort: 2, jockey: 1, replDay: 3, replEve: 1 },
+  7: { fc: 5, sort: 2, jockey: 1, replDay: 3, replEve: 1 },
+};
+
+/** 작업 시간·속도 [가정] — 라인 1인 하루 약 2만 걸음 [현장] 을 보정 목표로 */
+export const WORK = {
+  /** 걷기(m/s) — 빈손·카트·지게차 */
+  walk: 1.2,
+  cart: 1.0,
+  forklift: 1.8,
+  /** 걸음 길이(m) — 걸음 수 표시 */
+  stepLen: 0.7,
+  /** FC: 선반 앞에서 지역 바코드·상품 스캔(초) + 낱개 하나 담기(초) */
+  pickScan: 8,
+  pickPerUnit: 1.5,
+  /** FC 결품 확률(줄마다) [시뮬] */
+  shortRate: 0.005,
+  /** 분류대에 카트 내려놓기(초) */
+  cartDrop: 20,
+  /** 분배·라인: 박스 하나 시작(초) + 낱개 하나(초) — 상품 스캔 → 불·숫자대로 담기 [현장] */
+  sortStart: 10,
+  sortPerUnit: 1.2,
+  /** 자키: 롤테이너 싣고 내리기(초), 한 번에 옮기는 박스 수 */
+  jockeyHandle: 15,
+  jockeyBatch: 6,
+  /** 지게차 보충: 팔레트 내리기(초) + 박스 뜯어 진열(초) + 낱개당(초) */
+  replPallet: 60,
+  replShelf: 30,
+  replPerUnit: 0.3,
+  /** 일이 없을 때 다시 묻기까지(초) */
+  idlePoll: 30,
+} as const;
+
+/** 시뮬레이션 시작 시각(초, 0시 기준) — 주간조 시작 직전 */
+export const SIM_START = 7 * 3600 + 55 * 60;
+
+/** 피킹 Task 크기 [시뮬] — 카트 한 대에 싣는 줄 수(TRF·층·구역 안에서 동선 순으로 자름) */
+export const TASK = {
+  maxLines: 20,
 } as const;

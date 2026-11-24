@@ -4,11 +4,12 @@ import { Canvas, useFrame, useThree, type ThreeEvent } from '@react-three/fiber'
 import { useEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { AppContext, useApp, useView, type AppCtx } from '../../app/context';
+import { AppContext, useApp, useTick, useView, type AppCtx } from '../../app/context';
 import { RACK, SHELF } from '../../config';
 import type { FloorLayout, Location, Rect } from '../../domain/layout';
 import { SCENE, ZONE_COLOR } from '../colors';
 import { plateTexture } from '../sprites';
+import { Agents, SimDriver } from './Agents';
 import { Shelves } from './Shelves';
 
 export function SiteScene({ app }: { app: AppCtx }) {
@@ -19,6 +20,8 @@ export function SiteScene({ app }: { app: AppCtx }) {
         <ambientLight intensity={0.85} />
         <directionalLight position={[60, 120, 40]} intensity={1.1} />
         <FloorContent />
+        <Agents />
+        <SimDriver />
         <CameraRig />
       </AppContext.Provider>
     </Canvas>
@@ -253,25 +256,38 @@ function Lifts({ f }: { f: FloorLayout }) {
   );
 }
 
-/** 출고대기 롤테이너 자리(91) — 01~05 는 MFC 기본 배정. 저온은 은색 보냉 커버 [현장 사진] */
+/**
+ * 출고대기 롤테이너 자리(91) — 01~05 는 MFC 기본 배정. 저온은 은색 보냉 커버 [현장 사진].
+ * 자키가 옮겨 온 박스 수만큼 롤테이너가 늘어난다(한 대 = 박스 [시뮬] 8개, 자리에 최대 4대까지 겹쳐 보임).
+ */
 function Staging({ f }: { f: FloorLayout }) {
+  const { sim } = useApp();
+  useTick();
   return (
     <>
       {f.staging.map((s) => {
         const used = s.bay <= 5;
         const cold = s.temp !== 'AMBIENT';
+        const boxes = sim.staged.get(s.code)?.boxes ?? 0;
+        const rolls = Math.min(4, Math.ceil(boxes / 8));
         return (
           <group key={s.code} position={[s.pos.x, 0, s.pos.z]}>
             <mesh rotation-x={-Math.PI / 2} position={[0, 0.01, 0]}>
               <planeGeometry args={[1.2, 1.9]} />
               <meshBasicMaterial color={SCENE.hazard} transparent opacity={0.35} />
             </mesh>
-            {used && (
+            {used && rolls === 0 && (
               <mesh position={[0, 0.9, 0]}>
+                <boxGeometry args={[0.8, 1.7, 0.7]} />
+                <meshStandardMaterial color={SCENE.rollContainer} wireframe />
+              </mesh>
+            )}
+            {Array.from({ length: rolls }, (_, i) => (
+              <mesh key={i} position={[(i % 2) * 0.45 - 0.22, 0.9, Math.floor(i / 2) * 0.8 - 0.4]}>
                 <boxGeometry args={[0.8, 1.7, 0.7]} />
                 <meshStandardMaterial color={cold ? SCENE.coldCover : SCENE.rollContainer} metalness={cold ? 0.5 : 0} roughness={cold ? 0.35 : 0.8} />
               </mesh>
-            )}
+            ))}
           </group>
         );
       })}

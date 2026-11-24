@@ -1,6 +1,7 @@
 import { useEffect, useSyncExternalStore } from 'react';
 import { SiteScene } from '../render/scene/SiteScene';
 import { LeftPanel } from '../ui/LeftPanel';
+import { Pda } from '../ui/Pda';
 import { Rail } from '../ui/Rail';
 import { RightPanel } from '../ui/RightPanel';
 import { TopBar, ViewBar } from '../ui/TopBar';
@@ -29,6 +30,7 @@ export function App({ app }: { app: AppCtx }) {
             </div>
             <RightPanel />
           </div>
+          <Pda />
         </div>
       </div>
     </AppContext.Provider>

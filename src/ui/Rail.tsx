@@ -10,6 +10,7 @@ const RIGHT: [RightView, string, string][] = [
 const LEFT: [LeftView, string, string][] = [
   ['settings', '⚙', '설정'],
   ['zone', '▣', '구역'],
+  ['workers', '☺', '작업자'],
   ['help', '?', '도움말'],
 ];
 

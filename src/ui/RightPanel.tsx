@@ -1,9 +1,11 @@
 // 오른쪽 패널 — 지표(kpis) · 재고 · 현장 흐름. MFC 시뮬레이터 RightPanel 의 kpi 모양을 쓴다. 재고는 MOCK 원장(cdc-inventory 역할).
-import { useApp, useView } from '../app/context';
+import { useApp, useTick, useView } from '../app/context';
 
 export function RightPanel() {
-  const { layout, backend, catalog } = useApp();
+  const { layout, backend, catalog, sim } = useApp();
   const view = useView();
+  useTick();
+  const day = sim.summary();
   if (!view.rightView) return null;
   const locs = layout.floors.flatMap((f) => f.locations);
   const shelves = layout.floors.flatMap((f) => f.shelves).length;
@@ -11,6 +13,10 @@ export function RightPanel() {
   const stock = backend.ledger.onHandByLocation();
   const violations = backend.ledger.check();
   const kpis: [string, string][] = [
+    ['피킹 작업', `${day.tasksDone}/${day.tasks}`],
+    ['실피킹 / 승인', `${day.picked.toLocaleString()} / ${day.approved.toLocaleString()}`],
+    ['분류(BOX)', day.sorted.toLocaleString()],
+    ['보충 남은 칸', day.replNeeds.toLocaleString()],
     ['팔레트 칸(보관)', locs.length.toLocaleString()],
     ['피킹 선반 칸', shelves.toLocaleString()],
     ['오토스토어 빈', layout.autostore.bins.toLocaleString()],
@@ -59,9 +65,17 @@ export function RightPanel() {
             )}
           </tbody>
         </table>
+      ) : view.rightView === 'logs' ? (
+        <div className="note" style={{ maxHeight: 'calc(100vh - 260px)', overflow: 'auto' }}>
+          {[...sim.events].reverse().slice(0, 150).map((e, i) => (
+            <div key={i} style={{ color: e.kind === 'warn' ? '#eb5757' : undefined, marginBottom: 3 }}>
+              <b style={{ fontVariantNumeric: 'tabular-nums' }}>{`${String(Math.floor(e.at / 3600)).padStart(2, '0')}:${String(Math.floor(e.at / 60) % 60).padStart(2, '0')}`}</b> {e.text}
+            </div>
+          ))}
+        </div>
       ) : (
         <div className="note">
-          {violations.length ? `원장 불변식 위반 ${violations.length}건: ${violations[0]}` : '원장 불변식 정상 (0 ≤ 예약 ≤ 현물, 시작 = 현물 + 출발, Transit = 출발 − 수령).'} 이관(TRF)·Wave·피킹·분배·라인·상차 흐름은 작업자 엔진을 붙이면 여기에 나옵니다(설계 §12 ⑤~⑦).
+          {violations.length ? `원장 불변식 위반 ${violations.length}건: ${violations[0]}` : '원장 불변식 정상 (0 ≤ 예약 ≤ 현물, 시작 = 현물 + 출발, Transit = 출발 − 수령).'} 현장 흐름(☰)에서 TRF 인수·보충·Wave·피킹·분류 사건을 봅니다. 검품·상차·출발은 설계 §12 ⑥~⑦.
         </div>
       )}
     </div>

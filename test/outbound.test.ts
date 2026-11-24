@@ -172,7 +172,7 @@ describe('TRF 인수·할당 (CDC-F-016)', () => {
 });
 
 describe('Wave·Task·실피킹 (CDC-F-017·018)', () => {
-  it('Wave 배포 → TRF × 층·구역 Task. 피킹은 위치만 옮긴다(랙 → 출고대기 91), 총현물 그대로', async () => {
+  it('Wave 배포 → TRF × 층·구역 × 카트(20줄) Task. 피킹은 위치만 옮긴다(랙 → 출고대기 91), 총현물 그대로', async () => {
     const { waveId } = await startDay();
     const wave = await mb.getWave(waveId);
     expect(wave.state).toBe('RELEASED');
@@ -181,6 +181,7 @@ describe('Wave·Task·실피킹 (CDC-F-017·018)', () => {
     for (const t of tasks) {
       expect(t.state).toBe('CREATED');
       expect(new Set(t.lines.map((l) => l.locationCode.split('-').slice(1, 3).join('-'))).size).toBe(1);
+      expect(t.lines.length).toBeLessThanOrEqual(20);
     }
     const before = mb.ledger.totals();
     const t0 = await claim('fc-01');

@@ -41,7 +41,7 @@ export interface CameraRequest {
 
 export type LabelMode = 'all' | 'rack' | 'off';
 export type RightView = 'summary' | 'inventory' | 'logs';
-export type LeftView = 'settings' | 'zone' | 'help';
+export type LeftView = 'settings' | 'zone' | 'workers' | 'help';
 export type Theme = 'dark' | 'light';
 export type FloorKey = FloorNo | 'B1';
 
@@ -63,6 +63,8 @@ export class ViewController extends Emitter {
   rightView: RightView | null = 'summary';
   /** 누른 칸 */
   selected: Location | null = null;
+  /** 누른 작업자(PDA 카드) */
+  selectedWorker: string | null = null;
   cameraRequest: CameraRequest | null = null;
 
   constructor(readonly layout: Layout) {
@@ -102,6 +104,15 @@ export class ViewController extends Emitter {
   select(loc: Location | null) {
     this.selected = loc;
     if (loc && this.leftView !== 'zone') this.leftView = 'zone';
+    this.emit();
+  }
+
+  selectWorker(id: string | null, floor?: FloorKey) {
+    this.selectedWorker = id;
+    if (floor !== undefined && floor !== this.floor) {
+      this.floor = floor;
+      this.selected = null;
+    }
     this.emit();
   }
 
