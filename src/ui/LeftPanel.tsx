@@ -59,7 +59,7 @@ function Settings() {
       </Sec>
       <Sec title="공급 MFC" aside={`${MFCS.length}곳`}>
         {MFCS.map((m) => (
-          <Row key={m.id} k={`${m.region} 그룹 · PPC-${String(m.staging).padStart(2, '0')}`} v={m.name} />
+          <Row key={m.id} k={`${m.region} · PPC-${String(m.staging).padStart(2, '0')}`} v={m.name} />
         ))}
       </Sec>
     </>

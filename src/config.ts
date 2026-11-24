@@ -84,11 +84,11 @@ export const CAPACITY = {
 
 /** [정본 CDC-6] 공급 대상 MFC 와 지역(PDA 지역 바코드 단위). 출고대기 91 기본 자리. */
 export const MFCS = [
-  { id: 'MFC-BJG-01', name: '1호점 부산진구', region: '부산', staging: 1 },
-  { id: 'MFC-BNG-01', name: '5호점 부산남구', region: '부산', staging: 2 },
-  { id: 'MFC-MOKPO-01', name: '2호점 목포', region: '광주·목포', staging: 3 },
-  { id: 'MFC-SEJ-01', name: '3호점 세종', region: '대전·세종', staging: 4 },
-  { id: 'MFC-CHC-01', name: '4호점 춘천', region: '강원', staging: 5 },
+  { id: 'MFC-BJG-01', name: '1호점 부산진구', region: '부산권', staging: 1 },
+  { id: 'MFC-BNG-01', name: '5호점 부산남구', region: '부산권', staging: 2 },
+  { id: 'MFC-MOKPO-01', name: '2호점 목포', region: '호남권', staging: 3 },
+  { id: 'MFC-SEJ-01', name: '3호점 세종', region: '충청권', staging: 4 },
+  { id: 'MFC-CHC-01', name: '4호점 춘천', region: '강원권', staging: 5 },
 ] as const;
 
 /** 하루 시간표(분, 0시 기준) [현장] 알바몬 후기·우아한청년들 하루 일정 / [가정] 주간조 */
@@ -227,6 +227,9 @@ export const OUTBOUND = {
   loadFrom: 22 * 60 + 30,
   /** 출차 — 23:00 부터, 그 MFC R/T 를 다 실은 차부터. 늦어도 이 시각(분)엔 실은 것만으로 출차 [가정] */
   departLatest: 24 * 60,
+  /** MFC 도착 — 마지막 도착 07:30, 하차·인계 완료 08:00 (MFC 08:00 영업) [정본 TMS 2.2, PR #448] — §12 ⑦ 운송에서 쓴다 */
+  mfcLastArrival: 7 * 60 + 30,
+  mfcHandoverDone: 8 * 60,
   /** 검품: 박스 하나(초) · 불합격 확률 · 재포장 뒤 재검품(초) */
   inspectPerBox: 20,
   inspectFailRate: 0.005,
