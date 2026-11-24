@@ -9,7 +9,7 @@ Vite 6 + TypeScript 5 (strict) + React 19 + react-three-fiber 9 (Three.js 0.169)
 - 시뮬레이션 엔진(`src/sim`)·백엔드 어댑터(`src/backend` — `port.ts` + `mock/` + `http/`)·도메인(`src/domain`)은 React 에 의존하지 않는다(테스트가 화면 없이 돈다).
 - 매 프레임 바뀌는 값(위치·수량)은 `useFrame` 안에서 three 객체를 직접 바꾸고 React 상태로 올리지 않는다.
 - 설정·스크립트·폴더 구조(`package.json`, `tsconfig.json`, `vite.config.ts`, `server/`, `test/**/*.test.ts`)는 MFC 시뮬레이터를 따른다. 버전을 올리거나 라이브러리를 더하려면 먼저 사용자에게 묻는다.
-- 화면 UI/UX 는 MFC 시뮬레이터를 그대로 따른다(사용자 2026-11-24). 다른 점은 설계 §9.
+- **MFC 시뮬레이터가 기준이다**(사용자 2026-11-24). 화면 UI/UX·구조·구역 글자(A 냉동·B 냉장·C 상온)를 그대로 따른다. 백엔드 결정과 다르면 MFC 시뮬레이터를 따르고 백엔드에 요청한다. 다른 점은 설계 §9.
 - 개발 서버 포트: **5182**. 이미 쓰는 포트 — 백오피스 5173~5176, MFC 시뮬레이터 5180, 라이더 시뮬레이터 5181, rider-backoffice 목 모드 5186.
 
 ## 센터 고정값 — 절대 바꾸지 않는다 (사용자 2026-11-24)
