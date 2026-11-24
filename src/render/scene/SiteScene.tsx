@@ -4,7 +4,7 @@ import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { useEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { AppContext, useApp, useTick, useView, type AppCtx } from '../../app/context';
-import { MFCS, OUTBOUND, RACK, SHELF, TMS } from '../../config';
+import { OUTBOUND, RACK, SHELF, TMS } from '../../config';
 import { TEMP_KO } from '../../sim/simulation';
 import { B1 } from '../../sim/site';
 import type { FloorLayout, Location, Rect } from '../../domain/layout';
@@ -370,7 +370,7 @@ function Basement() {
             <planeGeometry args={[3.6, B1.truckZ1 - B1.truckZ0 + 2]} />
             <meshBasicMaterial color={ZONE_COLOR[d.temp]} transparent opacity={0.3} />
           </mesh>
-          <sprite position={[0, 3, B1.doorZ]} scale={[2.4, 1.2, 1]}>
+          <sprite position={[0, 3, B1.doorZ - 0.6]} scale={[3.2, 1.6, 1]}>
             <spriteMaterial map={plateTexture(d.short)} />
           </sprite>
         </group>
@@ -379,7 +379,8 @@ function Basement() {
         .filter((r) => r.state === 'PLANNED' || r.state === 'LOADING')
         .map((r) => {
           const rts = Math.ceil(r.loaded.length / OUTBOUND.boxesPerRt);
-          const name = `${r.plan.region} ${TEMP_KO[r.plan.temp]} · ${r.plan.stops.map((st) => MFCS.find((m) => m.id === st.mfcId)?.name.replace(/^\d호점 /, '') ?? st.mfcId).join('→')}`;
+          // 접안 간격 4.5 m 안에 들어가게 짧게 두 줄 — 노선·정차는 오른쪽 ⛟ 운송 표에
+          const name = `${r.plan.region.replace(/권$/, '')} ${TEMP_KO[r.plan.temp]}`;
           return (
             <group key={r.plan.tripId} position={[r.dock.pos.x, 0, 0]}>
               <mesh position={[0, 1.7, (B1.truckZ0 + B1.truckZ1 - 2) / 2]}>
@@ -390,8 +391,8 @@ function Basement() {
                 <boxGeometry args={[2.3, 2.2, 1.6]} />
                 <meshStandardMaterial color={0x2f6fd6} />
               </mesh>
-              <sprite position={[0, 4.2, (B1.truckZ0 + B1.truckZ1) / 2]} scale={[8, 1.15, 1]}>
-                <spriteMaterial map={plateTexture(`${name} R/T ${rts}/${TMS.vehicle.maxRt}`, { w: 900, h: 128 })} />
+              <sprite position={[0, 4.4, (B1.truckZ0 + B1.truckZ1) / 2]} scale={[4.2, 1.7, 1]}>
+                <spriteMaterial map={plateTexture(`${name}\n${rts}/${TMS.vehicle.maxRt} R/T`, { w: 384, h: 156 })} />
               </sprite>
             </group>
           );

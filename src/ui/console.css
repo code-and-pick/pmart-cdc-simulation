@@ -1141,3 +1141,7 @@ details.sec > summary h4 { justify-content: flex-start; gap: 6px; }
 .bk-short .bk-i, .bk-short .bk-q { color: var(--bad); }
 .bk-todo { opacity: 0.6; }
 .bk-empty { font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+
+/* CDC: 오른쪽 패널 바로 아래 글·표가 패널 왼쪽 밖으로 삐져나오던 것 — 안쪽 여백 */
+.panel.right > .note { padding: 0 12px 10px; box-sizing: border-box; }
+.panel.right > table.inv { margin: 0 8px; width: calc(100% - 16px); }

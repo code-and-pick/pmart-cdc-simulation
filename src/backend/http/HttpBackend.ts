@@ -22,6 +22,7 @@ import type {
 import { CENTER_ID } from '../../config';
 import type { ApiListener, CdcOutboundPort } from '../port';
 import { HttpClient, type HttpClientOptions } from './client';
+import type { HttpInternal } from './HttpInternal';
 
 const enc = encodeURIComponent;
 /** Task 경로 앞부분 — 게이트웨이 /api/v1/tasks/** 는 MFC 쪽이라 CDC 는 센터 아래로(0.3.0) */
@@ -31,7 +32,11 @@ export class HttpBackend implements CdcOutboundPort {
   readonly mode = 'http' as const;
   readonly client: HttpClient;
 
-  constructor(opt: HttpClientOptions) {
+  constructor(
+    opt: HttpClientOptions,
+    /** 내부 조회는 게이트웨이로 열지 않는다(CDC-9) — LAN 직접 */
+    private readonly internal: HttpInternal,
+  ) {
     this.client = new HttpClient(opt);
   }
 
@@ -100,14 +105,14 @@ export class HttpBackend implements CdcOutboundPort {
     return (await this.client.call<PreDepartureCancellation>('GET', `/transfers/${enc(trfId)}/pre-departure-cancellations/${enc(requestId)}`)).body;
   }
 
-  // 조회 (internal — 게이트웨이가 열어 줘야 화면이 읽는다, R-16)
+  // 조회 (internal — 게이트웨이로 열지 않는다, LAN 서비스 직접 — 백엔드 CDC-9)
   async getTransferIntake(trfId: string): Promise<TransferIntake> {
-    return (await this.client.call<TransferIntake>('GET', `/internal/transfer-intakes/${enc(trfId)}`)).body;
+    return this.internal.getTransferIntake(trfId);
   }
   async getOutboundReadiness(trfId: string): Promise<OutboundReadiness> {
-    return (await this.client.call<OutboundReadiness>('GET', '/internal/outbound-readiness', { query: { trfId } })).body;
+    return this.internal.getOutboundReadiness(trfId);
   }
   async getShipmentManifest(trfId: string): Promise<ShipmentManifest> {
-    return (await this.client.call<ShipmentManifest>('GET', `/internal/shipment-manifests/${enc(trfId)}`)).body;
+    return this.internal.getShipmentManifest(trfId);
   }
 }

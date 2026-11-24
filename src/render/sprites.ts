@@ -20,10 +20,13 @@ export function plateTexture(text: string, opts: { bg?: string; fg?: string; w?:
   g.lineWidth = 4;
   g.strokeRect(2, 2, w - 4, h - 4);
   g.fillStyle = opts.fg ?? '#111318';
-  g.font = `700 ${Math.floor(h * 0.62)}px 'Noto Sans KR', sans-serif`;
+  // 줄바꿈(\n)이 있으면 여러 줄로
+  const lines = text.split('\n');
+  const lh = h / lines.length;
+  g.font = `700 ${Math.floor(lh * 0.62)}px 'Noto Sans KR', sans-serif`;
   g.textAlign = 'center';
   g.textBaseline = 'middle';
-  g.fillText(text, w / 2, h / 2 + 2, w - 12);
+  lines.forEach((ln, i) => g.fillText(ln, w / 2, lh * (i + 0.5) + 2, w - 12));
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.SRGBColorSpace;
   t.anisotropy = 4;

@@ -7,6 +7,7 @@ import { buildLayout } from './domain/layout';
 import { Simulation } from './sim/simulation';
 import { HttpBackend } from './backend/http/HttpBackend';
 import { HttpTms } from './backend/http/HttpTms';
+import { HttpInternal } from './backend/http/HttpInternal';
 import { TokenSource } from './backend/http/tokens';
 import { CDC_OPERATOR_ACCOUNT } from './backend/http/accounts';
 import { Ticker, ViewController } from './render/controller';
@@ -70,7 +71,8 @@ if (app.real) {
 function makeReal() {
   const tokens = new TokenSource(CDC_OPERATOR_ACCOUNT, 90);
   const opt = { baseUrl: settings.http.baseUrl, token: () => tokens.get(), sourceSystem: 'pmart-cdc-simulation', now: () => sim?.time ?? 0, timeoutMs: 8000, retries: 2 };
-  return { backend: new HttpBackend(opt), tms: new HttpTms(opt), tokens };
+  const internal = new HttpInternal({ sourceSystem: opt.sourceSystem, now: opt.now, timeoutMs: opt.timeoutMs, retries: opt.retries });
+  return { backend: new HttpBackend(opt, internal), tms: new HttpTms(opt), internal, tokens };
 }
 
 createRoot(document.getElementById('root')!).render(<App app={app} />);

@@ -6,6 +6,7 @@ import type { Simulation } from '../sim/simulation';
 import type { HttpBackend } from '../backend/http/HttpBackend';
 import type { HttpTms } from '../backend/http/HttpTms';
 import type { TokenSource } from '../backend/http/tokens';
+import type { HttpInternal } from '../backend/http/HttpInternal';
 import type { Ticker, ViewController } from '../render/controller';
 
 export interface PersistedSettings {
@@ -23,7 +24,7 @@ export interface AppCtx {
   /** 하루 시뮬레이션(시계·작업자) — 설계 §12 ⑤ */
   sim: Simulation;
   /** 실서버 모드일 때만 — 계약 실호출 어댑터(설계 §12 ⑧). 엔진은 아직 MOCK 만 돈다 */
-  real?: { backend: HttpBackend; tms: HttpTms; tokens: TokenSource };
+  real?: { backend: HttpBackend; tms: HttpTms; internal: HttpInternal; tokens: TokenSource };
   controller: ViewController;
   ticker: Ticker;
   settings: PersistedSettings;

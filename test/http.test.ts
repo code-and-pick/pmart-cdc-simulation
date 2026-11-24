@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { HttpBackend } from '../src/backend/http/HttpBackend';
 import { HttpTms } from '../src/backend/http/HttpTms';
 import { HttpClient } from '../src/backend/http/client';
+import { HttpInternal } from '../src/backend/http/HttpInternal';
 import { checkReadiness } from '../src/backend/http/readiness';
 import { ApiProblem, ResultUnknown } from '../src/domain/contract';
 
@@ -31,7 +32,7 @@ const opt = (f: typeof fetch) => ({ baseUrl: '/api/v1', token: () => 'tok-1', so
 describe('cdc-outbound 실호출 어댑터 (계약 0.3.0 경로·헤더)', () => {
   it('명령은 Idempotency-Key·X-Source-System·Bearer 토큰·X-Expected-Version 을 붙여 계약 경로로 보낸다', async () => {
     const { f, seen } = fakeFetch(() => json(201, { waveId: 'WAV-1', state: 'PLANNED' }));
-    const be = new HttpBackend(opt(f));
+    const be = new HttpBackend(opt(f), new HttpInternal({ ...opt(f) }));
     const w = await be.createWave({ cdcId: 'CDC01', trfIds: ['TRF-1'] }, 'k-wave');
     expect(w.waveId).toBe('WAV-1');
     expect(seen[0]).toMatchObject({ url: '/api/v1/waves', method: 'POST', body: { cdcId: 'CDC01', trfIds: ['TRF-1'] } });
@@ -44,7 +45,7 @@ describe('cdc-outbound 실호출 어댑터 (계약 0.3.0 경로·헤더)', () =>
   it('다음 작업 받기 200(들고 있던 것)·201(새 배정), 착수는 본문 없이 담당 토큰으로', async () => {
     let n = 0;
     const { f, seen } = fakeFetch(() => json(++n === 1 ? 201 : 200, { taskId: 'PICK-1', state: n === 1 ? 'ACCEPTED' : 'IN_PROGRESS' }));
-    const be = new HttpBackend(opt(f));
+    const be = new HttpBackend(opt(f), new HttpInternal({ ...opt(f) }));
     expect((await be.pullNextTask('CDC01', 'fc-5-01', { kind: 'PICK', floor: '5' }, 'k1')).status).toBe(201);
     expect(seen[0].url).toBe('/api/v1/cdcs/CDC01/workers/fc-5-01/next-tasks');
     await be.startTask('PICK-1', 'fc-5-01', 'k2', 1);
@@ -53,7 +54,7 @@ describe('cdc-outbound 실호출 어댑터 (계약 0.3.0 경로·헤더)', () =>
 
   it('128자를 넘는 키는 같은 입력이면 같은 키로 줄인다', async () => {
     const { f, seen } = fakeFetch(() => json(202, { status: 'APPLIED', requestId: 'x' }));
-    const be = new HttpBackend(opt(f));
+    const be = new HttpBackend(opt(f), new HttpInternal({ ...opt(f) }));
     const long = 'k'.repeat(300);
     await be.reportSortingResult({ waveId: 'W', trfId: 'T', workerId: 'w', lpns: [{ lpn: 'L', unitType: 'BOX', state: 'SEALED', contents: [{ sku: 'E-00000001', lot: 'L1', qty: 1 }] }] }, long);
     await be.reportSortingResult({ waveId: 'W', trfId: 'T', workerId: 'w', lpns: [{ lpn: 'L', unitType: 'BOX', state: 'SEALED', contents: [{ sku: 'E-00000001', lot: 'L1', qty: 1 }] }] }, long);
@@ -63,7 +64,7 @@ describe('cdc-outbound 실호출 어댑터 (계약 0.3.0 경로·헤더)', () =>
 
   it('업무 거절(409)은 ApiProblem 그대로 — 다시 보내지 않는다', async () => {
     const { f, seen } = fakeFetch(() => json(409, { type: 'about:blank', title: 'x', status: 409, code: 'PICK_EXCEEDS_ALLOCATION', traceId: 't' }, true));
-    const be = new HttpBackend(opt(f));
+    const be = new HttpBackend(opt(f), new HttpInternal({ ...opt(f) }));
     const e = await be.reportPickResult('PICK-1', { workerId: 'w', lines: [{ sku: 'E-00000001', lot: 'L', locationCode: 'C', pickedQty: 9 }] }, 'k').catch((x) => x);
     expect(e).toBeInstanceOf(ApiProblem);
     expect((e as ApiProblem).problem.code).toBe('PICK_EXCEEDS_ALLOCATION');
@@ -72,11 +73,11 @@ describe('cdc-outbound 실호출 어댑터 (계약 0.3.0 경로·헤더)', () =>
 
   it('응답 불명(503·연결 끊김)은 같은 키로 다시 보내고, 끝까지 모르면 ResultUnknown(실패로 단정하지 않음)', async () => {
     const a = fakeFetch((_, n) => (n === 1 ? json(503, { code: 'DEPENDENCY_UNAVAILABLE', status: 503 }, true) : json(202, { status: 'APPLIED', requestId: 'r' })));
-    const r = await new HttpBackend(opt(a.f)).reportLoadingResult({ trfId: 'T', tripId: 'TR', vehicleId: 'V', workerId: 'w', action: 'LOADED', lpns: [{ lpn: 'L' }] }, 'k-load');
+    const r = await new HttpBackend(opt(a.f), new HttpInternal({ ...opt(a.f) })).reportLoadingResult({ trfId: 'T', tripId: 'TR', vehicleId: 'V', workerId: 'w', action: 'LOADED', lpns: [{ lpn: 'L' }] }, 'k-load');
     expect(r.status).toBe('APPLIED');
     expect(a.seen.map((s) => s.headers['Idempotency-Key'])).toEqual(['k-load', 'k-load']);
     const b = fakeFetch(() => 'NETWORK');
-    const e = await new HttpBackend(opt(b.f)).reportInspectionResult({ trfId: 'T', inspectorId: 'q', items: [{ lpn: 'L', result: 'PASSED' }] }, 'k-insp').catch((x) => x);
+    const e = await new HttpBackend(opt(b.f), new HttpInternal({ ...opt(b.f) })).reportInspectionResult({ trfId: 'T', inspectorId: 'q', items: [{ lpn: 'L', result: 'PASSED' }] }, 'k-insp').catch((x) => x);
     expect(e).toBeInstanceOf(ResultUnknown);
     expect(b.seen).toHaveLength(3);
     expect(new Set(b.seen.map((s) => s.headers['Idempotency-Key']))).toEqual(new Set(['k-insp']));
@@ -84,7 +85,7 @@ describe('cdc-outbound 실호출 어댑터 (계약 0.3.0 경로·헤더)', () =>
 
   it('작업 목록은 nextCursor 를 끝까지 따라간다', async () => {
     const { f, seen } = fakeFetch((s) => (s.url.includes('cursor=c2') ? json(200, { items: [{ taskId: 'B' }], page: { nextCursor: null } }) : json(200, { items: [{ taskId: 'A' }], page: { nextCursor: 'c2' } })));
-    const tasks = await new HttpBackend(opt(f)).listTasks('WAV-1', { state: 'CREATED' });
+    const tasks = await new HttpBackend(opt(f), new HttpInternal({ ...opt(f) })).listTasks('WAV-1', { state: 'CREATED' });
     expect(tasks.map((t) => t.taskId)).toEqual(['A', 'B']);
     expect(seen[0].url).toBe('/api/v1/cdcs/CDC01/tasks?waveId=WAV-1&state=CREATED');
   });
@@ -118,13 +119,43 @@ describe('실서버 연결 점검', () => {
       if (s.url.includes('/vehicles')) return json(501, { code: 'NOT_IMPLEMENTED', status: 501 }, true);
       return 'NETWORK';
     });
-    const rows = await checkReadiness(new HttpClient({ ...opt(f), retries: 0 }));
+    const gw = new HttpClient({ ...opt(f), retries: 0 });
+    const internal = new HttpInternal({ ...opt(f), retries: 0 });
+    const rows = await checkReadiness({ gateway: gw, outbound: internal.outbound, inventory: internal.inventory });
     expect(Object.fromEntries(rows.map((r) => [r.service, r.state]))).toEqual({
       'cdc-location': 'READY',
       'cdc-inventory': 'NO_TOKEN',
       'cdc-outbound': 'NOT_ROUTED',
+      'cdc-outbound 내부': 'UNREACHABLE',
+      'cdc-inventory 내부': 'UNREACHABLE',
       fleet: 'NOT_IMPLEMENTED',
       'transport-execution': 'UNREACHABLE',
     });
+  });
+});
+
+describe('내부 경로 LAN 직접 (백엔드 CDC-9)', () => {
+  it('토큰 없이 X-Source-System 만, 명령엔 멱등 키 — /svc/cdc-outbound·/svc/cdc-inventory 프록시로', async () => {
+    const { f, seen } = fakeFetch(() => json(200, { status: 'APPLIED', requestId: 'r' }));
+    const internal = new HttpInternal({ sourceSystem: 'pmart-cdc-simulation', now: () => 0, timeoutMs: 1000, retries: 0, fetchImpl: f });
+    await internal.intakeTransfer({ trfId: 'T', trfVersion: 1, cdcId: 'CDC01', mfcId: 'MFC-BJG-01', approvalRef: 'A', deadlineMeaning: 'ARRIVAL', dueAt: 'x', lines: [{ sku: 'E-00000001', approvedQty: 1 }] }, 'k-intake');
+    await internal.validateDeparture({ departureId: 'D', tripId: 'TR', vehicleId: 'V', departedAt: 'x', source: 'SIMULATED', trfCompositions: [{ trfId: 'T', mfcId: 'MFC-BJG-01', lpns: ['L1'] }] }, 'k-dep');
+    await internal.postReplenishmentMove('CDC01', 'MOV-1', [{ sku: 'E-00000001', lot: 'L', fromLocationCode: 'A', toLocationCode: 'B', qty: 3, allocationId: 'ALC-1' }], 'k-mov');
+    await internal.getTransferIntake('T');
+    expect(seen.map((x) => x.url)).toEqual(['/svc/cdc-outbound/internal/transfer-intakes', '/svc/cdc-outbound/internal/departure-validations', '/svc/cdc-inventory/internal/move-postings', '/svc/cdc-outbound/internal/transfer-intakes/T']);
+    for (const x of seen) {
+      expect(x.headers.Authorization).toBeUndefined();
+      expect(x.headers['X-Source-System']).toBe('pmart-cdc-simulation');
+    }
+    expect(seen.slice(0, 3).map((x) => x.headers['Idempotency-Key'])).toEqual(['k-intake', 'k-dep', 'k-mov']);
+    expect(seen[2].body).toMatchObject({ cdcId: 'CDC01', moveKind: 'REPLENISHMENT_MOVE', sourceRef: 'MOV-1' });
+  });
+
+  it('공개 HttpBackend 의 내부 조회(TRF·출발 준비·매니페스트)는 게이트웨이가 아니라 LAN 직접으로', async () => {
+    const { f, seen } = fakeFetch(() => json(200, {}));
+    const be = new HttpBackend(opt(f), new HttpInternal({ sourceSystem: 's', now: () => 0, timeoutMs: 1000, retries: 0, fetchImpl: f }));
+    await be.getTransferIntake('T');
+    await be.getShipmentManifest('T');
+    expect(seen.map((x) => x.url)).toEqual(['/svc/cdc-outbound/internal/transfer-intakes/T', '/svc/cdc-outbound/internal/shipment-manifests/T']);
   });
 });

@@ -88,7 +88,9 @@ export class ViewController extends Emitter {
   /** 층 안 구역 버튼 — 전체 · 랙 구역 · 승강기·출고대기 띠 · 설비 */
   zoneViews(): ZoneView[] {
     const L = this.layout;
-    const all: ZoneView = { key: 'ALL', label: '전체', rect: { x0: 0, z0: 0, x1: L.width, z1: L.depth } };
+    // B1 은 승강기 착지(z −9)~차 끝(z 15), 접안 14자리 폭만 — 층 바닥 전체를 잡으면 너무 멀었다
+    const b1Right = Math.max(6 + L.docks.length * 4.5 + 4, ...L.floors[0].lifts.map((x) => x.rect.x1 + 4));
+    const all: ZoneView = { key: 'ALL', label: '전체', rect: this.floor === 'B1' ? { x0: 0, z0: -9, x1: b1Right, z1: 15 } : { x0: 0, z0: 0, x1: L.width, z1: L.depth } };
     const f = this.floorLayout();
     if (!f) return [all];
     return [all, ...f.zones.map((z) => ({ key: z.id, label: z.kind === 'BAND' ? '출고대기·승강기' : z.label, rect: z.rect }))];
@@ -113,7 +115,8 @@ export class ViewController extends Emitter {
     const cx = (r.x0 + r.x1) / 2;
     const cz = (r.z0 + r.z1) / 2;
     const dist = this.zoneDist(v);
-    const target = new THREE.Vector3(cx, 0, key === 'ALL' ? cz + 1 : cz - dist * 0.12);
+    // 전체(층): 일이 몰리는 북쪽 띠(승강기·출고대기·선반·분류)가 화면 위에 들어오게 보는 점을 북쪽으로 [시뮬]
+    const target = new THREE.Vector3(cx, 0, key === 'ALL' ? (this.floor === 'B1' ? cz + 1 : cz - dist * 0.22) : cz - dist * 0.12);
     const pos = key === 'ALL' ? new THREE.Vector3(cx, dist * 0.78, cz + dist * 0.72) : new THREE.Vector3(cx, dist * 0.92, cz + dist * 0.42);
     this.cameraRequest = { pos, target, animate };
     this.emit();
@@ -123,7 +126,8 @@ export class ViewController extends Emitter {
   zoneDist(v: ZoneView): number {
     const w = v.rect.x1 - v.rect.x0;
     const d = v.rect.z1 - v.rect.z0;
-    if (v.key === 'ALL') return Math.max(w, d) * 0.75;
+    // 전체: 층 전체(120 × 79 m)가 들어오되 랙 번호판이 읽힐 만큼 [시뮬]. B1 은 좁아 더 가깝게
+    if (v.key === 'ALL') return Math.max(w, d) * (this.floor === 'B1' ? 0.75 : 0.62);
     return Math.max(w, d * 1.3) * 0.7 + 2.5;
   }
 

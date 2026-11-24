@@ -127,7 +127,7 @@ function RealCheck() {
   const run = () => {
     if (!real) return;
     setBusy(true);
-    void checkReadiness(real.backend.client)
+    void checkReadiness({ gateway: real.backend.client, outbound: real.internal.outbound, inventory: real.internal.inventory })
       .then(setRows)
       .finally(() => setBusy(false));
   };
@@ -136,7 +136,7 @@ function RealCheck() {
   return (
     <Sec title="실서버 연결 점검" aside={busy ? '점검 중…' : <button onClick={run}>다시</button>}>
       <div className="help">
-        <p>실서버 모드에서는 시뮬레이션 엔진을 돌리지 않습니다 — 백엔드에 cdc-outbound·TMS 서비스가 아직 없고(2026-11-25), CDC 시험 계정도 없습니다(R-16). 아래는 조회만 해 보는 연결 점검입니다.</p>
+        <p>실서버 모드에서는 시뮬레이션 엔진을 돌리지 않습니다 — cdc-outbound·TMS 가 LAN 에 아직 없고 CDC 시험 계정도 아직 없습니다(R-16, 이름 제안 claude-cdc-sup·cdcw-*). 아래는 조회만 해 보는 연결 점검입니다. 공개 경로는 게이트웨이 + 직원 토큰, 내부 경로는 LAN 서비스 직접(토큰 없음, CDC-9).</p>
         {real.tokens.lastError && <p>토큰: {real.tokens.lastError}</p>}
       </div>
       {(rows ?? []).map((r) => (

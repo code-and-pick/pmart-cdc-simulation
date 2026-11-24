@@ -19,6 +19,8 @@ export const READINESS_KO: Record<Readiness, string> = {
 
 export interface Probe {
   service: string;
+  /** gateway = 게이트웨이 + 직원 토큰 · outbound/inventory = LAN 서비스 직접(토큰 없음, CDC-9) */
+  via: 'gateway' | 'outbound' | 'inventory';
   /** 무엇에 쓰는지 */
   use: string;
   path: string;
@@ -27,11 +29,13 @@ export interface Probe {
 
 /** 서비스 응답의 404(문제 코드 NOT_FOUND 등)는 "경로는 있다" — 게이트웨이 404 와 구별한다 */
 export const PROBES: Probe[] = [
-  { service: 'cdc-location', use: '칠곡 위치(랙·선반·출고대기·접안)', path: `/locations/${CENTER_ID}-C-5-01-01-1-1` },
-  { service: 'cdc-inventory', use: 'SKU 취급·재고(시작 재고·할당·보충·TOUT)', path: `/cdcs/${CENTER_ID}/sku-handlings` },
-  { service: 'cdc-outbound', use: 'Wave·작업·실적·분류·검품·상차', path: '/waves/__probe__' },
-  { service: 'fleet', use: '차량·기사', path: '/vehicles' },
-  { service: 'transport-execution', use: '운행·출발·도착·인계', path: '/trips/__probe__' },
+  { service: 'cdc-location', via: 'gateway', use: '칠곡 위치(랙·선반·출고대기·접안)', path: `/locations/${CENTER_ID}-C-5-01-01-1-1` },
+  { service: 'cdc-inventory', via: 'gateway', use: 'SKU 취급', path: `/cdcs/${CENTER_ID}/sku-handlings` },
+  { service: 'cdc-outbound', via: 'gateway', use: 'Wave·작업·실적·분류·검품·상차', path: '/waves/__probe__' },
+  { service: 'cdc-outbound 내부', via: 'outbound', use: 'TRF 인수·출발 검증·매니페스트(LAN 직접 :8603)', path: '/internal/transfer-intakes/__probe__' },
+  { service: 'cdc-inventory 내부', via: 'inventory', use: '가용·할당·Transit·보충 MOV(LAN 직접 :8601)', path: '/internal/availability', query: { cdcId: CENTER_ID, sku: 'E-10000037' } },
+  { service: 'fleet', via: 'gateway', use: '차량·기사', path: '/vehicles' },
+  { service: 'transport-execution', via: 'gateway', use: '운행·출발·도착·인계', path: '/trips/__probe__' },
 ];
 
 export interface ProbeResult extends Probe {
@@ -39,11 +43,11 @@ export interface ProbeResult extends Probe {
   detail: string;
 }
 
-export async function checkReadiness(client: HttpClient, probes: Probe[] = PROBES): Promise<ProbeResult[]> {
+export async function checkReadiness(clients: { gateway: HttpClient; outbound: HttpClient; inventory: HttpClient }, probes: Probe[] = PROBES): Promise<ProbeResult[]> {
   const out: ProbeResult[] = [];
   for (const p of probes) {
     try {
-      await client.call('GET', p.path, { query: p.query });
+      await clients[p.via].call('GET', p.path, { query: p.query });
       out.push({ ...p, state: 'READY', detail: '200' });
     } catch (e) {
       if (e instanceof ApiProblem) {
