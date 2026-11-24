@@ -20,7 +20,9 @@ Vite 6 + TypeScript 5 (strict) + React 19 + react-three-fiber 9 (Three.js 0.169)
 ## 실제 DC 자료 — 거스르지 않는다 (사용자 2026-11-24)
 - 알바몬 후기 https://community.albamon.com/post/detail/929845 (석간 13~22시, FC·분배·라인 작업 방식)
 - 우아한청년들 https://www.woowayouths.com/story/culture/view/5/24 (실제 내부: DAS·DPS·휠소터·오토스토어, 보냉 커버 롤테이너)
-- 확인한 내용은 `docs/design/cdc-design.md` §2. 작업 방식·장비·시간을 정할 때 이 자료와 어긋나면 안 된다.
+- 같은 사이트 보도자료 https://www.woowayouths.com/media/press/view/1/27 (DAS 냉장·DPS 냉동·1차 고속분류기·비식재 오토스토어), 하루 일정 https://www.woowayouths.com/story/culture/view/1/10 (08:00 입고·13:00 선별·23:00 출발).
+- 확인한 내용은 `docs/design/cdc-design.md` §2.
+- 사용자 결정(2026-11-24): 층마다 2,867평 균등, 차량은 지하로 들어오고 승강기로 올림, 주간조 있음. 작업 방식·장비·시간을 정할 때 이 자료와 어긋나면 안 된다.
 - 사용자 개념도·DC Wave 초안은 `docs/design/ref/`(원본, 수정하지 않음).
 
 ## 비즈니스 로직 근거 (`../pmart-backend/docs`, 읽기 전용)
