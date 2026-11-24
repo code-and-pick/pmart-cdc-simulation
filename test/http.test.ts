@@ -142,7 +142,14 @@ describe('내부 경로 LAN 직접 (백엔드 CDC-9)', () => {
     await internal.validateDeparture({ departureId: 'D', tripId: 'TR', vehicleId: 'V', departedAt: 'x', source: 'SIMULATED', trfCompositions: [{ trfId: 'T', mfcId: 'MFC-BJG-01', lpns: ['L1'] }] }, 'k-dep');
     await internal.postReplenishmentMove('CDC01', 'MOV-1', [{ sku: 'E-00000001', lot: 'L', fromLocationCode: 'A', toLocationCode: 'B', qty: 3, allocationId: 'ALC-1' }], 'k-mov');
     await internal.getTransferIntake('T');
-    expect(seen.map((x) => x.url)).toEqual(['/svc/cdc-outbound/internal/transfer-intakes', '/svc/cdc-outbound/internal/departure-validations', '/svc/cdc-inventory/internal/move-postings', '/svc/cdc-outbound/internal/transfer-intakes/T']);
+    await internal.getSnapshot('CDC01', 'E-10000037');
+    expect(seen.map((x) => x.url)).toEqual([
+      '/svc/cdc-outbound/internal/transfer-intakes',
+      '/svc/cdc-outbound/internal/departure-validations',
+      '/svc/cdc-inventory/internal/move-postings',
+      '/svc/cdc-outbound/internal/transfer-intakes/T',
+      '/svc/cdc-inventory/internal/snapshots?cdcId=CDC01&sku=E-10000037',
+    ]);
     for (const x of seen) {
       expect(x.headers.Authorization).toBeUndefined();
       expect(x.headers['X-Source-System']).toBe('pmart-cdc-simulation');

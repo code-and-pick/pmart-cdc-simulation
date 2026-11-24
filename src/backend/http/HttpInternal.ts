@@ -10,6 +10,15 @@ import { HttpClient, type HttpClientOptions } from './client';
 
 const enc = encodeURIComponent;
 
+/** /internal/snapshots 응답(0.4.0) — 칸마다 SKU·LOT·수량·예약. 취급 OFF·안전량 미설정이면 handlingActive=false·safety NOT_SET·available=null */
+export interface InventorySnapshot {
+  cdcId?: string;
+  items: (Omit<Availability, 'available' | 'lots'> & {
+    available: number | null;
+    lots: (Availability['lots'][number] & { locations: { locationCode: string; qualityState: string; onHand: number; reserved: number }[] })[];
+  })[];
+}
+
 export interface MoveLine {
   sku: string;
   lot: string;
@@ -65,6 +74,13 @@ export class HttpInternal {
   // ── cdc-inventory (센터 현황·보충 MOV) ─────────────────
   async getAvailability(cdcId: string, sku: string): Promise<Availability> {
     return (await this.inventory.call<Availability>('GET', '/internal/availability', { query: { cdcId, sku } })).body;
+  }
+  /**
+   * 칸별 재고 — GET /internal/snapshots?cdcId=&sku= (cdc-inventory 0.4.0, PR #458). items 는 가용 조회 모양 + lots[].locations[](locationCode·qualityState·onHand·reserved).
+   * sku 를 비우면 현물 있는 SKU 전부 — 시작·재동기화 때만. 주기 조회는 작업에 나온 SKU 만 sku= 로(백엔드 안내).
+   */
+  async getSnapshot(cdcId: string, sku?: string): Promise<InventorySnapshot> {
+    return (await this.inventory.call<InventorySnapshot>('GET', '/internal/snapshots', { query: { cdcId, sku } })).body;
   }
   async getAllocation(allocationId: string): Promise<Allocation> {
     return (await this.inventory.call<Allocation>('GET', `/internal/allocations/${enc(allocationId)}`)).body;
