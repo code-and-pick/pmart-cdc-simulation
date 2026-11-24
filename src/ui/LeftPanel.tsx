@@ -58,7 +58,7 @@ function Settings() {
 }
 
 function ZoneInfo() {
-  const { layout } = useApp();
+  const { layout, backend, catalog } = useApp();
   const view = useView();
   const loc = view.selected;
   if (view.floor === 'B1') {
@@ -71,6 +71,7 @@ function ZoneInfo() {
     );
   }
   const f = view.floorLayout()!;
+  const stock = loc ? backend.ledger.cellsAt(loc.code) : [];
   return (
     <>
       {loc && (
@@ -79,7 +80,14 @@ function ZoneInfo() {
           <Row k="번호판" v={loc.short} />
           <Row k="통로·베이·단·슬롯" v={`${loc.aisle} · ${loc.bay} · ${loc.level} · ${loc.slot}`} />
           <Row k="용량" v={`${loc.capacity.toLocaleString()} 유닛`} />
-          <Row k="재고" v="— (재고 원장은 다음 단계)" />
+          {stock.length === 0 && <Row k="재고" v="비어 있음" />}
+          {stock.map((c) => (
+            <div key={c.lot}>
+              <Row k="상품" v={`${catalog.bySku.get(c.sku)?.name ?? ''} (${c.sku})`} />
+              <Row k="LOT · 기한" v={`${c.lot} · ${c.expiresAt}`} />
+              <Row k="현물 · 예약" v={`${c.onHand.toLocaleString()} · ${c.reserved.toLocaleString()} 유닛`} />
+            </div>
+          ))}
         </Sec>
       )}
       <Sec title={f.label} aside={`문서 ${(Object.values(f.spec.docPyeong.storage).reduce((a, b) => a + b, 0) + f.spec.docPyeong.dt).toLocaleString()}평`}>

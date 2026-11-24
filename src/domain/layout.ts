@@ -263,3 +263,18 @@ function allocateCapacity(locs: Location[], total: number) {
   const order = raw.map((r, i) => [r - Math.floor(r), i] as const).sort((a, b) => b[0] - a[0] || a[1] - b[1]);
   for (let k = 0; k < total - given; k++) locs[order[k][1]].capacity++;
 }
+
+/**
+ * 피킹한 물건이 가는 출고대기(91) 자리 — 그 칸이 있는 층, 같은 온도대의 출고대기 구역 글자, MFC 자리 번호(PPC-01~05) [정본 CDC-5].
+ * 5F 는 상온 C·냉동 A 두 줄, 6F 는 냉장 B, 7F 는 생활용품 G.
+ */
+export function stagingCodeFor(rackLocationCode: string, stagingNo: number): string {
+  const [, zone, floorStr] = rackLocationCode.split('-');
+  const floor = Number(floorStr) as FloorNo;
+  const spec = CHILGOK_FLOORS.find((f) => f.floor === floor);
+  if (!spec) throw new Error(`층 없음: ${rackLocationCode}`);
+  const temp = spec.zones.find((z) => z.letter === zone)?.temp ?? 'AMBIENT';
+  const want = temp === 'FROZEN' ? 'A' : temp === 'CHILLED' ? 'B' : null;
+  const letter = (want && spec.stagingLetters.find((l) => l === want)) ?? spec.stagingLetters.find((l) => l !== 'A' && l !== 'B') ?? spec.stagingLetters[0];
+  return locationCode(letter, floor, 91, stagingNo, 0, 1);
+}

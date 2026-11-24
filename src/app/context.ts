@@ -1,4 +1,6 @@
 import { createContext, useContext, useSyncExternalStore } from 'react';
+import type { MockBackend } from '../backend/mock/MockBackend';
+import type { Catalog } from '../domain/catalog';
 import type { Layout } from '../domain/layout';
 import type { Ticker, ViewController } from '../render/controller';
 
@@ -7,9 +9,13 @@ export interface PersistedSettings {
   http: { baseUrl: string };
 }
 
-/** 앱 문맥 — MFC 시뮬레이터 app/context.ts 와 같은 틀. 시뮬레이션 엔진(sim)은 다음 단계에서 붙는다(설계 §12 ④~). */
+/** 앱 문맥 — MFC 시뮬레이터 app/context.ts 와 같은 틀. 시뮬레이션 엔진(sim)은 다음 단계에서 붙는다(설계 §12 ⑤~). */
 export interface AppCtx {
   layout: Layout;
+  /** 가짜 상품 마스터·시작 재고 [시뮬] */
+  catalog: Catalog;
+  /** MOCK 백엔드(cdc-outbound + 원장). 실서버 모드는 설계 §12 ⑧ */
+  backend: MockBackend;
   controller: ViewController;
   ticker: Ticker;
   settings: PersistedSettings;

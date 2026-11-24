@@ -92,3 +92,37 @@ export const SHIFT = {
 
 /** 배속 — MFC 시뮬레이터와 같다 */
 export const SPEEDS = [0, 1, 5, 15, 30, 60, 120] as const;
+
+/**
+ * 가짜 상품 마스터·시작 재고 [시뮬] (scope S-3: 입고 안 함 → 시작 재고는 시드, 설계 §4.3·§5.1 #0).
+ * 고회전 2,000 SKU 가 팔레트 랙 1단 피킹면에 있다 [개념도 CDC-03]. 저회전 8,000 SKU(오토스토어·DPS·경량 선반)는 다음 단계.
+ */
+export const CATALOG = {
+  seed: 20261125,
+  /** [개념도 CDC-03] 고회전 SKU 수 */
+  skus: 2000,
+  /** 피킹면 채움률 [시뮬] — 칸 용량 대비 */
+  pickFill: [0.45, 0.85] as const,
+  /** 2단 보충 대기·3단~ 리저브 팔레트 채움률 [시뮬] */
+  reserveFill: [0.7, 1.0] as const,
+  /** 유통기한(일) 범위 [가정] — 시작일 기준, 피킹면 LOT 이 리저브 LOT 보다 먼저 끝난다(FEFO 가 피킹면부터 고르게) */
+  shelfLifeDays: { FROZEN: [120, 360], CHILLED: [6, 25], AMBIENT: [60, 540] } as const,
+} as const;
+
+/** 할당 정책 [시뮬] — 실서버는 cdc-inventory 정책값. 시뮬레이터가 정한 값(docs/backend-requests.md) */
+export const ALLOCATION = {
+  /** FEFO 최소 잔여일수 — 온도대별 [가정] */
+  minRemainingDays: { FROZEN: 30, CHILLED: 3, AMBIENT: 14 } as const,
+  /** 안전량 S — MOCK 은 0 으로 둔다(정책 NOT_SET 은 0 이 아니다 — 실서버는 CONFIG_REQUIRED) */
+  safetyQty: 0,
+} as const;
+
+/** MFC 보충 요청(TRF) 만들기 — MOCK 에서 시뮬레이터가 replenishment 역할 [가정] (설계 §5.1 #1) */
+export const SUPPLY = {
+  /** MFC 한 곳의 하루 TRF 품목 수 [가정] */
+  linesPerMfc: 40,
+  /** 품목당 승인 수량 [가정] */
+  qty: [6, 48] as const,
+  /** MFC 도착 마감 — 다음 날 09:00 (MFC 오픈) [현장 하루 일정] */
+  dueNextDayMin: 9 * 60,
+} as const;

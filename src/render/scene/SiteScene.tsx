@@ -7,7 +7,6 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { AppContext, useApp, useView, type AppCtx } from '../../app/context';
 import { RACK } from '../../config';
 import type { FloorLayout, Location, Rect } from '../../domain/layout';
-import { Rng } from '../../util/rng';
 import { SCENE, ZONE_COLOR } from '../colors';
 import { plateTexture } from '../sprites';
 
@@ -135,16 +134,18 @@ function Racks({ f }: { f: FloorLayout }) {
  */
 function Loads({ f }: { f: FloorLayout }) {
   const view = useView();
+  const { backend } = useApp();
   const ref = useRef<THREE.InstancedMesh>(null);
+  // 원장에 현물이 있는 칸만 그린다(시작 재고 시드). 상자 높이 = 칸 용량 대비 현물
   const filled = useMemo(() => {
-    const rng = new Rng(f.floor * 1000 + 7);
-    return f.locations.filter((l) => rng.next() < (l.type === 'PICK_FACE' ? 0.85 : 0.7));
-  }, [f]);
+    const stock = backend.ledger.onHandByLocation();
+    return f.locations.filter((l) => (stock.get(l.code) ?? 0) > 0).map((l) => ({ l, ratio: Math.min(1, (stock.get(l.code) ?? 0) / l.capacity) }));
+  }, [f, backend]);
   useEffect(() => {
     const m = ref.current!;
     const color = new THREE.Color();
-    filled.forEach((l, i) => {
-      const h = RACK.levelH * 0.72;
+    filled.forEach(({ l, ratio }, i) => {
+      const h = RACK.levelH * 0.72 * (0.35 + 0.65 * ratio);
       tmp.position.set(l.pos.x, (l.level - 1) * RACK.levelH + h / 2 + 0.12, l.pos.z);
       tmp.scale.set(RACK.depth * 0.9, h, (RACK.bayW / RACK.slots) * 0.82);
       tmp.updateMatrix();
@@ -157,7 +158,7 @@ function Loads({ f }: { f: FloorLayout }) {
   }, [filled]);
   const onClick = (e: ThreeEvent<MouseEvent>) => {
     e.stopPropagation();
-    if (e.instanceId != null) view.select(filled[e.instanceId]);
+    if (e.instanceId != null) view.select(filled[e.instanceId].l);
   };
   return (
     <instancedMesh ref={ref} args={[undefined, undefined, filled.length]} onClick={onClick} frustumCulled={false}>
