@@ -518,9 +518,12 @@ class FloorBuilder {
     this.spec.stagingLetters.forEach((letter, li) => {
       const temp: Temp = this.spec.zones.find((z) => z.letter === letter)?.temp ?? 'AMBIENT';
       const per = this.spec.stagingLetters.length > 1 ? STAGING_SLOTS / 2 : STAGING_SLOTS;
+      // 앞줄(휠소터 쪽, z 3.7) = 01~절반, 뒷줄(북쪽 벽 쪽) = 나머지 — MFC 자리 PPC-01~05 가 앞줄에 한 칸씩이라
+      // 휠소터 슈트가 다른 롤테이너 위를 지나지 않는다(사용자 2026-11-26 "롤테이너가 컨베이어를 뚫고 있다")
+      const half = Math.ceil(per / 2);
       for (let k = 1; k <= per; k++) {
-        const row = (k - 1) % 2;
-        const col = Math.floor((k - 1) / 2);
+        const row = k <= half ? 1 : 0;
+        const col = (k - 1) % half;
         this.staging.push({
           code: locationCode(letter, this.floor, 91, k, 0, 1),
           short: `PPC-${pad2(k)}${this.spec.stagingLetters.length > 1 ? letter : ''}`,

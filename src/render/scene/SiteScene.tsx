@@ -207,8 +207,9 @@ function Loads({ f }: { f: FloorLayout }) {
 }
 
 /**
- * 랙 번호판 — 기사 사진(A10·A11·A12 …)처럼 랙 줄 끝 기둥 위쪽에 붙인 흰 판(사용자 2026-11-26 "사진대로").
- * 통로 번호판은 그 통로 동쪽 랙 줄(마지막 통로는 서쪽 랙 줄) 끝 기둥에, 묶음마다 가로 통로 쪽 끝에 단다.
+ * 랙 번호판 — 기사 사진(A10·A11·A12 …)처럼 랙 끝 기둥 위쪽 흰 판(사용자 2026-11-26 "사진대로").
+ * 위치 코드가 통로 번호라 통로마다 하나 — 통로 입구 양쪽 랙 끝 기둥 위에 걸친 판(묶음마다 가로 통로 쪽 끝). 랙 줄보다 통로가 하나 많아
+ * 랙 줄 기둥에 붙이면 한 줄에 둘이 붙는 곳이 생겼다(사용자 2026-11-26).
  */
 function Plates({ f }: { f: FloorLayout }) {
   const y = (lv: number) => (lv - 0.5) * RACK.levelH + 0.4;
@@ -217,10 +218,9 @@ function Plates({ f }: { f: FloorLayout }) {
       {f.aisles.flatMap((a) => {
         const levels = f.spec.zones.find((z) => z.letter === a.zone)!.levels;
         return [...new Set(f.rows.map((r) => r.z0))].map((z0) => {
-          const row = f.rows.find((r) => r.zone === a.zone && r.aisle === a.no && r.z0 === z0 && r.side === 'E') ?? f.rows.find((r) => r.zone === a.zone && r.aisle === a.no && r.z0 === z0);
-          if (!row) return null;
+          if (!f.rows.some((r) => r.zone === a.zone && r.aisle === a.no && r.z0 === z0)) return null;
           return (
-            <sprite key={`${a.plate}@${z0}`} position={[row.cx, y(levels), z0 - 0.12]} scale={[1.5, 0.95, 1]}>
+            <sprite key={`${a.plate}@${z0}`} position={[a.cx, y(levels), z0 - 0.12]} scale={[1.5, 0.95, 1]}>
               <spriteMaterial map={plateTexture(a.plate, { w: 256, h: 160 })} depthWrite={false} />
             </sprite>
           );
