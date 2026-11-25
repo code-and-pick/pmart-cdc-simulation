@@ -487,4 +487,10 @@ export const INBOUND = {
   unloadSec: 50,
   inspectSec: 300,
   putawaySec: 40,
+  /**
+   * 5F 상온 입고 — 따로 자리 없이 7F 상온 도크·입고 검수에서 받고 검수한 뒤 승강기(92)로 5F 에 내린다
+   * (사용자 2026-11-26 결정 "7F 에서 검수 → 승강기로 5F"). 5F 도크 2개는 냉동용, 5F 북쪽은 출고대기·승강기·휠소터로 참.
+   */
+  ambientFloor: 7 as const,
+  ambientAlsoFor: 5 as const,
 } as const;

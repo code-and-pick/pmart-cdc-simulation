@@ -145,6 +145,8 @@ export interface InboundPallet {
   k: number;
   state: 'WAIT' | 'CHECK' | 'DONE';
   tiers: number;
+  /** 넣을 층 — 5F 상온은 7F 에서 검수하고 승강기로 내린다(사용자 2026-11-26) */
+  to: FloorNo;
 }
 
 /** 도크 앞에 내려놓은 R/T — 도크 층(냉동 5F·냉장 6F·상온 7F) [사용자 2026-11-26 층마다 도크] */
@@ -1696,7 +1698,8 @@ export class Simulation implements DutyClock {
       a.carrying = null;
       truck.left -= 1;
       this.inboundSeq += 1;
-      this.inboundYard.push({ id: this.inboundSeq, floor: fl, k: waitSpot.k, state: 'WAIT', tiers: 2 + (this.inboundSeq % 3) });
+      // 7F 상온 입고 차에는 5F 상온 몫도 실려 온다 — 둘에 하나는 5F 로(검수 뒤 승강기) [시뮬]
+      this.inboundYard.push({ id: this.inboundSeq, floor: fl, k: waitSpot.k, state: 'WAIT', tiers: 2 + (this.inboundSeq % 3), to: fl === INBOUND.ambientFloor && this.inboundSeq % 2 === 0 ? INBOUND.ambientAlsoFor : fl });
       return;
     }
     if (waiting && doneSpot) {
@@ -1712,10 +1715,17 @@ export class Simulation implements DutyClock {
       return;
     }
     if (done) {
-      a.pda = { title: '입고 — 넘기기', step: '검수 끝난 팔레트 → 랙 앞(지게차 적치)', rows: [] };
+      a.pda = { title: '입고 — 넘기기', step: done.to === fl ? '검수 끝난 팔레트 → 랙 앞(지게차 적치)' : `검수 끝난 팔레트 → 승강기로 ${done.to}F 상온`, rows: [['넣을 층', `${done.to}F`]] };
       await this.go(a, at(done.k), WORK.walk, '검수 끝난 팔레트로');
       a.carrying = 'PALLET';
       this.inboundYard.splice(this.inboundYard.indexOf(done), 1);
+      if (done.to !== fl) {
+        // 5F 상온 몫 — 승강기(92)에 실어 5F 로(5F 에서는 지게차가 랙에 넣는다고 보고 화면은 여기까지)
+        await this.go(a, liftDoor(f, 1), WORK.cart, `승강기로 ${done.to}F 상온`);
+        await a.wait(INBOUND.putawaySec, `승강기에 싣기 → ${done.to}F`);
+        a.carrying = null;
+        return;
+      }
       const rack = f.locations.find((l) => l.type === 'RESERVE' && l.temp === e.temp) ?? f.locations[0];
       await this.go(a, { x: rack.pos.x, z: f.walk.roomZ, lane: 'S' }, WORK.cart, '랙 앞으로(지게차에 넘김)');
       await a.wait(INBOUND.putawaySec, '팔레트 내려놓기');
