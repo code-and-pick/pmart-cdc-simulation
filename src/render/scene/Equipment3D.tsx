@@ -801,13 +801,64 @@ export function Inbound({ e }: { e: Equip }) {
   );
 }
 
-/** DC 관리자 사무실 — 유리 칸막이·책상·의자·모니터·화이트보드(사용자 2026-11-25 "7층에 dc 관리자 사무실") */
+/** 사무실 책상 하나 — 상판·다리·모니터·의자. rot = 앉은 사람이 보는 방향(0 = +x). big = 센터 관리자 책상(넓은 상판·옆 서랍장·명패) */
+function Desk({ x, z, rot = 0, big = false }: { x: number; z: number; rot?: number; big?: boolean }) {
+  const W = big ? 1.9 : 1.4;
+  const D = big ? 0.9 : 0.75;
+  return (
+    <group position={[x, 0, z]} rotation-y={rot}>
+      <mesh position={[0, 0.74, 0]}>
+        <boxGeometry args={[D, 0.05, W]} />
+        <meshStandardMaterial color={big ? 0x8a6a4f : 0xe8e2d6} roughness={0.7} />
+      </mesh>
+      {[-1, 1].map((s) => (
+        <mesh key={s} position={[0, 0.37, s * (W / 2 - 0.04)]}>
+          <boxGeometry args={[D - 0.05, 0.74, 0.05]} />
+          <meshStandardMaterial color={0x9aa1ab} />
+        </mesh>
+      ))}
+      {big && (
+        <>
+          {/* 옆 서랍장 · 명패 */}
+          <mesh position={[0, 0.35, W / 2 - 0.3]}>
+            <boxGeometry args={[D - 0.1, 0.68, 0.45]} />
+            <meshStandardMaterial color={0x6f5540} />
+          </mesh>
+          <mesh position={[D / 2 - 0.12, 0.81, 0]} rotation-z={-0.3}>
+            <boxGeometry args={[0.04, 0.09, 0.32]} />
+            <meshStandardMaterial color={0xd4af37} metalness={0.6} roughness={0.3} />
+          </mesh>
+        </>
+      )}
+      {/* 모니터(앉는 사람 앞, 상판 안쪽) */}
+      {(big ? [-0.32, 0.32] : [0]).map((dz) => (
+        <mesh key={dz} position={[D / 2 - 0.2, 1.02, dz]} rotation-y={-Math.PI / 2}>
+          <boxGeometry args={[0.55, 0.34, 0.03]} />
+          <meshStandardMaterial color={0x1f2430} emissive={0x2a5a9a} emissiveIntensity={0.45} />
+        </mesh>
+      ))}
+      {/* 의자(상판 뒤) */}
+      <mesh position={[-D / 2 - 0.35, 0.45, 0]}>
+        <boxGeometry args={[0.48, 0.08, 0.48]} />
+        <meshStandardMaterial color={0x2f3542} />
+      </mesh>
+      <mesh position={[-D / 2 - 0.6, big ? 0.85 : 0.75, 0]}>
+        <boxGeometry args={[0.06, big ? 0.75 : 0.55, 0.48]} />
+        <meshStandardMaterial color={0x2f3542} />
+      </mesh>
+    </group>
+  );
+}
+
+/**
+ * DC 관리자 사무실 — 유리 칸막이(서쪽 가운데 문)·직원 책상 2(간격 두고, 문 쪽 북쪽 절반)·안쪽(남쪽 끝) DC 센터 관리자 책상(문을 보고 앉음)·화이트보드.
+ * 사용자 2026-11-25 "7층에 dc 관리자 사무실", 2026-11-26 "직원 책상 4개 붙어있는 거 간격 두고 2개, 안쪽에 센터 관리자 책상 하나".
+ */
 function Office({ e }: { e: Equip }) {
   const r = e.rect;
   const w = r.x1 - r.x0;
   const d = r.z1 - r.z0;
   const cx = (r.x0 + r.x1) / 2;
-  const desks = Math.max(2, Math.floor((d - 3) / 2.4));
   return (
     <group>
       {/* 유리 칸막이(서쪽·북쪽·남쪽) — 서쪽 가운데 문 */}
@@ -822,38 +873,13 @@ function Office({ e }: { e: Equip }) {
           <meshStandardMaterial color={0xcfe3f7} transparent opacity={0.35} depthWrite={false} />
         </mesh>
       ))}
-      {Array.from({ length: desks }, (_, i) => {
-        const z = r.z0 + 2 + i * 2.4;
-        return (
-          <group key={i} position={[cx + 0.3, 0, z]}>
-            <mesh position={[0, 0.74, 0]}>
-              <boxGeometry args={[1.4, 0.05, 0.75]} />
-              <meshStandardMaterial color={0xe8e2d6} />
-            </mesh>
-            {[-0.62, 0.62].map((dx) => (
-              <mesh key={dx} position={[dx, 0.37, 0]}>
-                <boxGeometry args={[0.05, 0.74, 0.7]} />
-                <meshStandardMaterial color={0x9aa1ab} />
-              </mesh>
-            ))}
-            <mesh position={[0.35, 1.02, 0]} rotation-y={-Math.PI / 2}>
-              <boxGeometry args={[0.55, 0.34, 0.03]} />
-              <meshStandardMaterial color={0x1f2430} emissive={0x2a5a9a} emissiveIntensity={0.45} />
-            </mesh>
-            {/* 의자 */}
-            <mesh position={[-0.75, 0.45, 0]}>
-              <boxGeometry args={[0.45, 0.08, 0.45]} />
-              <meshStandardMaterial color={0x2f3542} />
-            </mesh>
-            <mesh position={[-0.97, 0.75, 0]}>
-              <boxGeometry args={[0.06, 0.55, 0.45]} />
-              <meshStandardMaterial color={0x2f3542} />
-            </mesh>
-          </group>
-        );
-      })}
-      {/* 화이트보드(동쪽 벽) */}
-      <mesh position={[r.x1 - 0.08, 1.4, r.z1 - 2]} rotation-y={-Math.PI / 2}>
+      {/* 직원 책상 둘 — 동쪽 벽을 보고, 사이 3m */}
+      <Desk x={cx + 0.6} z={r.z0 + 2.6} />
+      <Desk x={cx + 0.6} z={r.z0 + 2.6 + 3.2} />
+      {/* DC 센터 관리자 책상 — 안쪽(남쪽 끝), 문 쪽(북쪽)을 보고 앉음 */}
+      <Desk x={cx} z={r.z1 - 2.2} rot={Math.PI / 2} big />
+      {/* 화이트보드(동쪽 벽, 직원 책상 사이) */}
+      <mesh position={[r.x1 - 0.08, 1.4, r.z0 + 4.2]} rotation-y={-Math.PI / 2}>
         <planeGeometry args={[2.2, 1.1]} />
         <meshStandardMaterial color={0xffffff} />
       </mesh>
