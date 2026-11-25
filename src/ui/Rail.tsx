@@ -3,17 +3,23 @@ import { useView } from '../app/context';
 import type { LeftView, RightView } from '../render/controller';
 
 const RIGHT: [RightView, string, string][] = [
+  ['trf', '📋', 'TRF'],
+  ['admin', '⚑', '관리'],
   ['logs', '☰', '현장'],
   ['transport', '⛟', '운송'],
   ['api', '⧉', 'API'],
   ['events', '⇄', '이벤트'],
   ['inventory', '▦', '재고'],
+  ['moves', '⇵', '변동'],
+  ['barcode', '▥', '바코드'],
 ];
 const LEFT: [LeftView, string, string][] = [
   ['settings', '⚙', '설정'],
   ['zone', '▣', '구역'],
   ['workers', '☺', '작업자'],
   ['help', '?', '도움말'],
+  // 개발용 성능 탭 — npm run dev 에서만(MFC 와 같음)
+  ...(import.meta.env.DEV ? [['perf', '◔', '성능'] as [LeftView, string, string]] : []),
 ];
 
 export function Rail() {

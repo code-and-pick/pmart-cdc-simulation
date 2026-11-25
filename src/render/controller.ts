@@ -42,8 +42,8 @@ export interface CameraRequest {
 
 /** all = 랙 번호판 + 가까이 확대하면 칸 번호 · rack = 랙 번호판만 · off = 끔 (MFC 와 같음) */
 export type LabelMode = 'all' | 'rack' | 'off';
-export type RightView = 'logs' | 'transport' | 'api' | 'events' | 'inventory';
-export type LeftView = 'settings' | 'zone' | 'workers' | 'help';
+export type RightView = 'logs' | 'trf' | 'transport' | 'admin' | 'api' | 'events' | 'inventory' | 'moves' | 'barcode';
+export type LeftView = 'settings' | 'zone' | 'workers' | 'help' | 'perf';
 export type Theme = 'dark' | 'light';
 export type FloorKey = FloorNo | 'B1';
 
@@ -205,6 +205,13 @@ export class ViewController extends Emitter {
   }
 
   /** 벽 투명도 — MFC 와 같음: 전체 보기 0.32, 구역에 들어가면 0.07(안이 보이게), 칸 정면이면 0 */
+  /** MFC 필터(위 칩) — 고른 MFC 의 TRF·박스·R/T·출고대기 자리만 강조 [사용자 §6-3] */
+  mfcFilter: string | null = null;
+  setMfcFilter(id: string | null) {
+    this.mfcFilter = id;
+    this.emit();
+  }
+
   /** 사용자가 고른 벽 투명도(위 [벽 / 벽 숨김] — MFC 와 같음), null 이면 화면 상태대로 */
   wallUser: number | null = null;
   get wallOpacity(): number {

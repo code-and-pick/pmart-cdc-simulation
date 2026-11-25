@@ -8,6 +8,7 @@ import { MFCS, OUTBOUND, TMS } from '../config';
 import type { RightView } from '../render/controller';
 import { TEMP_KO } from '../sim/simulation';
 import { trfTemp } from '../sim/supply';
+import { AdminBoard, BarcodeBoard, MovesBoard, StockSearch, TrfBoard } from './Boards';
 
 const clock = (sec: number) => `${String(Math.floor(sec / 3600) % 24).padStart(2, '0')}:${String(Math.floor(sec / 60) % 60).padStart(2, '0')}`;
 /** 큰 수는 만 단위로 짧게 */
@@ -257,7 +258,17 @@ function Stock() {
 function LogBody({ tab }: { tab: RightView }): ReactNode {
   const { sim } = useApp();
   if (tab === 'transport') return <Transport />;
-  if (tab === 'inventory') return <Stock />;
+  if (tab === 'trf') return <TrfBoard />;
+  if (tab === 'admin') return <AdminBoard />;
+  if (tab === 'moves') return <MovesBoard />;
+  if (tab === 'barcode') return <BarcodeBoard />;
+  if (tab === 'inventory')
+    return (
+      <>
+        <StockSearch />
+        <Stock />
+      </>
+    );
   if (tab === 'api')
     return sim.apiLog.slice(-150).map((r, i) => {
       const ok = typeof r.status === 'number' && r.status < 400;
@@ -294,7 +305,9 @@ function Log({ tab }: { tab: RightView }) {
   const box = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
   const key = `${tab}:${sim.apiLog.length}:${sim.domainEvents.length}:${sim.events.length}:${tab === 'logs' || tab === 'inventory' || tab === 'transport' ? `${Math.floor(sim.time / 30)}.${backend.ledger.version}` : ''}`;
-  const body = useMemo(() => <LogBody tab={tab} />, [key]); // eslint-disable-line react-hooks/exhaustive-deps
+  const live = tab === 'trf' || tab === 'admin' || tab === 'moves' || tab === 'barcode' || tab === 'inventory';
+  const memo = useMemo(() => <LogBody tab={tab} />, [key]); // eslint-disable-line react-hooks/exhaustive-deps
+  const body = live ? <LogBody tab={tab} /> : memo;
   const lastTab = useRef(tab);
   useLayoutEffect(() => {
     const el = box.current;

@@ -1,6 +1,8 @@
 import { useEffect, useSyncExternalStore } from 'react';
 import { SiteScene } from '../render/scene/SiteScene';
+import { IssueBar } from '../ui/IssueBar';
 import { LeftPanel } from '../ui/LeftPanel';
+import { ScanZoom } from '../ui/Barcode';
 import { Pda } from '../ui/Pda';
 import { Rail } from '../ui/Rail';
 import { RightPanel } from '../ui/RightPanel';
@@ -23,6 +25,7 @@ export function App({ app }: { app: AppCtx }) {
         <Rail />
         <div className="shell">
           <TopBar />
+          <IssueBar />
           <div className="stage">
             <LeftPanel />
             <div className="stage-gap">
@@ -31,6 +34,7 @@ export function App({ app }: { app: AppCtx }) {
             <RightPanel />
           </div>
           <Pda />
+          <ScanZoom />
         </div>
       </div>
     </AppContext.Provider>

@@ -30,6 +30,8 @@ export class Agent {
   pos: P;
   at: WalkPoint;
   heading = 0;
+  /** 가상 작업자 인원을 줄이면 지금 일을 마치고 빠진다(설정 → 가상 작업자) */
+  retired = false;
   path: P[] = [];
   speed = 1;
   distance = 0;

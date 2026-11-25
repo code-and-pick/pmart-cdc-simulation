@@ -86,6 +86,8 @@ interface JockeyJob {
   from: WalkPoint;
   /** 이 시각부터 집을 수 있다(휠소터 이동 중) */
   readyAt?: number;
+  /** 박스를 닫은(분류된) 시각 — 롤테이너까지 걸린 시간 측정 */
+  sealedAt?: number;
 }
 
 /** 출고대기·하강·상차를 따라가는 박스(LPN) — 수량은 서버 분류 결과 그대로 */
@@ -171,6 +173,8 @@ export class Simulation implements DutyClock {
   /** 켜진 표시등(DPS·라인) — 화면이 그린다 */
   readonly lights: WorkLight[] = [];
   private lpnSeq = 0;
+  /** 분류된 박스 → 출고대기 롤테이너까지 이동 거리(m)·시간(s) [사용자 §9 비교] */
+  readonly boxTravel: { floor: FloorNo; dist: number; sec: number }[] = [];
   private splitRow = 0;
   /** 라인: 스캔 1회당 켜진 칸 수 분포(인덱스 = 칸 수) [사용자 §7] */
   readonly lineLitHist: number[] = [];
@@ -261,6 +265,35 @@ export class Simulation implements DutyClock {
     if (m < w.start) return `근무 전 (${hm(w.start * 60)} 시작)`;
     if (m >= w.end) return '퇴근';
     return a.shift === 'DAY' ? '점심' : '휴식';
+  }
+
+  /** 속도 배수(설정 → 가상 작업자) — 모든 작업자 걸음·손 빠르기에 곱한다 [시뮬] */
+  paceScale = 1;
+
+  /** 지금 인원(층·역할·조) */
+  headcount(fl: FloorKey, role: Role, shift?: Shift): number {
+    return this.agents.filter((a) => a.floor === fl && a.role === role && !a.retired && (!shift || a.shift === shift)).length;
+  }
+
+  /**
+   * 가상 작업자 인원 바꾸기(설정 → 가상 작업자, MFC 와 같은 슬라이더) — 늘리면 새 사람이 바로 일하고, 줄이면 맨 뒤 사람이 지금 일을 마치고 빠진다.
+   */
+  setHeadcount(fl: FloorNo, role: Role, n: number, shift: Shift = role === 'REPL' ? 'DAY' : 'EVENING') {
+    const cur = this.agents.filter((a) => a.floor === fl && a.role === role && a.shift === shift && !a.retired);
+    if (n > cur.length) {
+      const home = this.sites.get(fl)!.home();
+      const used = new Set(this.agents.filter((a) => a.floor === fl && a.role === role).map((a) => Number(a.id.slice(-2))));
+      for (let k = cur.length; k < n; k++) {
+        let no = 1;
+        while (used.has(no)) no++;
+        used.add(no);
+        const id = `${role.toLowerCase()}-${fl}-${String(no).padStart(2, '0')}`;
+        const a = new Agent(id, `${ROLE_KO[role]} ${fl}F-${String(no).padStart(2, '0')}`, role, fl, shift, { ...home, x: home.x + this.agents.length * 0.3 }, this);
+        this.agents.push(a);
+        void this.run(a);
+      }
+    } else for (const a of cur.slice(n)) a.retired = true;
+    this.log('flow', `${hm(this.time)} 가상 작업자 ${fl}F ${ROLE_KO[role]} ${cur.length} → ${n}명`);
   }
 
   private hire(fl: FloorNo) {
@@ -565,6 +598,10 @@ export class Simulation implements DutyClock {
   // ── 사람 ───────────────────────────────────────────
   private async run(a: Agent) {
     for (;;) {
+      if (a.retired && !this.carts.has(a.id)) {
+        this.agents.splice(this.agents.indexOf(a), 1);
+        return;
+      }
       try {
         await a.untilDuty();
         if (a.role === 'REPL') await this.replenishOnce(a);
@@ -601,7 +638,7 @@ export class Simulation implements DutyClock {
     let h = 0;
     for (const c of a.id) h = (h * 31 + c.charCodeAt(0)) >>> 0;
     const [lo, hi] = WORK.pace;
-    return lo + ((h % 1000) / 1000) * (hi - lo);
+    return (lo + ((h % 1000) / 1000) * (hi - lo)) * this.paceScale;
   }
 
   /** 좁은 선반 통로에 다른 사람이 있으면 잠깐 기다린다 [가정] */
@@ -928,7 +965,7 @@ export class Simulation implements DutyClock {
           }
           const lpns = await this.seal(a, d);
           this.sealedBy.SPLIT += lpns.length;
-          for (const l of lpns) this.jockeyQueue.get(fl)!.push({ trfId: d.trfId, mfcId: d.mfcId, lpn: l.lpn, units: l.contents.reduce((x, c) => x + c.qty, 0), temp: d.temp, stagingCode: d.stagingCode, contents: l.contents, from: spot });
+          for (const l of lpns) this.jockeyQueue.get(fl)!.push({ sealedAt: this.time, trfId: d.trfId, mfcId: d.mfcId, lpn: l.lpn, units: l.contents.reduce((x, c) => x + c.qty, 0), temp: d.temp, stagingCode: d.stagingCode, contents: l.contents, from: spot });
         }
       } else if (cart.handling === 'BOX') {
         // 무거운 상자 → 1차 고속분류기(휠소터): 박스를 올리면 바퀴가 MFC 갈래로 보낸다 → 자키가 갈래 끝 롤테이너를 출고대기로
@@ -941,7 +978,7 @@ export class Simulation implements DutyClock {
           const m = Math.max(0, MFCS.findIndex((x) => x.id === d.mfcId));
           for (const l of lpns) {
             this.sorterIn.push(this.time);
-            this.jockeyQueue.get(fl)!.push({ trfId: d.trfId, mfcId: d.mfcId, lpn: l.lpn, units: l.contents.reduce((x, c) => x + c.qty, 0), temp: d.temp, stagingCode: d.stagingCode, contents: l.contents, from: site.sorterOut(m), readyAt: this.time + WORK.sorterTravel });
+            this.jockeyQueue.get(fl)!.push({ sealedAt: this.time, trfId: d.trfId, mfcId: d.mfcId, lpn: l.lpn, units: l.contents.reduce((x, c) => x + c.qty, 0), temp: d.temp, stagingCode: d.stagingCode, contents: l.contents, from: site.sorterOut(m), readyAt: this.time + WORK.sorterTravel });
           }
         }
         if (this.sorterIn.length > 200) this.sorterIn.splice(0, this.sorterIn.length - 200);
@@ -953,7 +990,7 @@ export class Simulation implements DutyClock {
         for (const d of cart.drops) {
           const lpns = await this.seal(a, d);
           this.sealedBy.DPS += lpns.length;
-          for (const l of lpns) this.jockeyQueue.get(fl)!.push({ trfId: d.trfId, mfcId: d.mfcId, lpn: l.lpn, units: l.contents.reduce((x, c) => x + c.qty, 0), temp: d.temp, stagingCode: d.stagingCode, contents: l.contents, from: at, readyAt: this.time + WORK.sorterTravel / 2 });
+          for (const l of lpns) this.jockeyQueue.get(fl)!.push({ sealedAt: this.time, trfId: d.trfId, mfcId: d.mfcId, lpn: l.lpn, units: l.contents.reduce((x, c) => x + c.qty, 0), temp: d.temp, stagingCode: d.stagingCode, contents: l.contents, from: at, readyAt: this.time + WORK.sorterTravel / 2 });
         }
       } else {
         // 박스·FC: 피킹 = 분류 — 출고대기 MFC 롤테이너로 바로 [현장 "DPS·박스 피킹 → 바로 출고대기"]
@@ -965,6 +1002,7 @@ export class Simulation implements DutyClock {
           await a.wait(WORK.cartDrop, '박스 닫고 MFC 롤테이너에');
           for (const d of ds) {
             const lpns = await this.seal(a, d);
+            for (const _ of lpns) this.boxTravel.push({ floor: fl, dist: 0, sec: 0 });
             if (cart.handling === 'PORT') this.sealedBy.PORT += lpns.length;
             else this.sealedBy.DIRECT += lpns.length;
             const arr = this.staged.get(code) ?? [];
@@ -1083,7 +1121,7 @@ export class Simulation implements DutyClock {
       if (!units) continue;
       const lpns = await this.seal(a, { trfId: box.trfId, waveId: box.waveId, contents: box.contents, temp: box.temp });
       this.sealedBy.LINE += lpns.length;
-      for (const l of lpns) this.jockeyQueue.get(fl)!.push({ trfId: box.trfId, mfcId: box.mfcId, lpn: l.lpn, units: l.contents.reduce((x, c) => x + c.qty, 0), temp: box.temp, stagingCode: box.stagingCode, contents: l.contents, from: box.from });
+      for (const l of lpns) this.jockeyQueue.get(fl)!.push({ sealedAt: this.time, trfId: box.trfId, mfcId: box.mfcId, lpn: l.lpn, units: l.contents.reduce((x, c) => x + c.qty, 0), temp: box.temp, stagingCode: box.stagingCode, contents: l.contents, from: box.from });
     }
   }
 
@@ -1153,7 +1191,10 @@ export class Simulation implements DutyClock {
       a.carrying = 'ROLL';
       a.cold = dest.temp !== 'AMBIENT';
       a.pda.step = `${dest.short} 로 밀고 가기`;
+      const d0 = a.distance;
       await this.go(a, site.front(dest), WORK.cart, `출고대기로 (${dest.short})`);
+      const moved = a.distance - d0;
+      for (const b of batch) this.boxTravel.push({ floor: fl, dist: moved, sec: this.time - (b.sealedAt ?? b.readyAt ?? this.time) });
       await a.wait(WORK.jockeyHandle, dest.temp === 'AMBIENT' ? '출고대기에 내려놓기' : '출고대기에 내려놓기 · 보냉 커버');
       const arr = this.staged.get(code) ?? [];
       arr.push(...batch.map((b) => ({ lpn: b.lpn, trfId: b.trfId, mfcId: b.mfcId, units: b.units, temp: b.temp, state: 'WAIT' as const, contents: b.contents })));
@@ -1298,6 +1339,11 @@ export class Simulation implements DutyClock {
   }
 
   // ── 화면 요약 ───────────────────────────────────────
+  /** Wave 상태(온도대마다) — 이상 알림 */
+  waveStatus() {
+    return this.day.waves.map((w) => ({ ...w }));
+  }
+
   /** 지금 하루 단계(시간표 CDC-8) */
   phase(): string {
     const m = this.time / 60;

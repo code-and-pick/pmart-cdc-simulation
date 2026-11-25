@@ -503,6 +503,11 @@ export class CdcLedger {
   }
 
   // ── 불변식 점검 (시험·화면 경고) ─────────────────────
+  /** 원장 커밋 전부(시각 순) — 재고 변동 화면 */
+  commitList(): Commit[] {
+    return [...this.commits.values()];
+  }
+
   check(): string[] {
     const v: string[] = [];
     const sumHold = new Map<string, number>();
