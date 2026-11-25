@@ -146,3 +146,32 @@ export function palletTexture(): THREE.CanvasTexture {
   palletTex.colorSpace = THREE.SRGBColorSpace;
   return palletTex;
 }
+
+let crateTex: THREE.CanvasTexture | null = null;
+/**
+ * 야채 크레이트(구멍 뚫린 낮은 플라스틱 상자) 옆면 — 흰 바탕에 짙은 구멍 줄 두 줄 + 위 손잡이 구멍 + 테두리. 색은 재질 색(초록)으로 곱한다.
+ * 사용자 2026-11-26 "크레이트는 보통 낮은 빈박스에 구멍 뚫린 건데 빈박스 구분이 안 가는 UI".
+ */
+export function crateTexture(): THREE.CanvasTexture {
+  if (crateTex) return crateTex;
+  const w = 128;
+  const h = 48;
+  const c = document.createElement('canvas');
+  c.width = w;
+  c.height = h;
+  const g = c.getContext('2d')!;
+  g.fillStyle = '#ffffff';
+  g.fillRect(0, 0, w, h);
+  g.fillStyle = '#5b6b5f';
+  // 구멍(세로로 긴 틈) 두 줄
+  for (const y of [14, 28]) for (let x = 8; x < w - 8; x += 12) g.fillRect(x, y, 6, 9);
+  // 손잡이 구멍
+  g.fillRect(w / 2 - 14, 4, 28, 6);
+  // 위·아래 테두리(크레이트 경계가 보이게)
+  g.fillStyle = '#9fb0a3';
+  g.fillRect(0, 0, w, 2);
+  g.fillRect(0, h - 3, w, 3);
+  crateTex = new THREE.CanvasTexture(c);
+  crateTex.colorSpace = THREE.SRGBColorSpace;
+  return crateTex;
+}

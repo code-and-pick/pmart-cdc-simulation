@@ -13,7 +13,7 @@ import { FLOW, MFCS } from '../../config';
 import type { Equip } from '../../domain/layout';
 import type { FloorNo } from '../../domain/sites/chilgok';
 import { autostorePorts, dasRows, mfcSlotIndex } from '../../sim/site';
-import { boxTexture, palletTexture, plateTexture } from '../sprites';
+import { boxTexture, crateTexture, palletTexture, plateTexture } from '../sprites';
 import { StaticMerge } from './StaticMerge';
 
 const BLUE = 0x1f63d0;
@@ -470,6 +470,32 @@ function BlueFrame({ x, z, len, depth, h, dir, levels = 2 }: { x: number; z: num
  * 라인(DAS, 6F 냉장) — 동서로 긴 줄 몇 개: 앞 롤러 작업대(분류 작업자가 박스를 스캔), 뒤에 MFC 별 롤테이너 줄, 위 선반 빔 표시등.
  * 사진: 롤러 작업대 + 파란 철망 롤테이너 + 위 파란 선반.
  */
+/** 위가 열린 크레이트(낮은 플라스틱 상자, 옆면 구멍) — 바닥 + 벽 넷. 사용자 2026-11-26 "크레이트는 낮은 빈 박스에 구멍 뚫린 것" */
+function OpenCrate({ y = 0, w = 0.6, d = 0.4, h = 0.26, color = 0x3aa35a }: { y?: number; w?: number; d?: number; h?: number; color?: number }) {
+  const t = 0.02;
+  return (
+    <group position={[0, y, 0]}>
+      <mesh position={[0, t / 2, 0]}>
+        <boxGeometry args={[w, t, d]} />
+        <meshStandardMaterial color={color} roughness={0.7} />
+      </mesh>
+      {(
+        [
+          [0, d / 2 - t / 2, w, t],
+          [0, -d / 2 + t / 2, w, t],
+          [w / 2 - t / 2, 0, t, d],
+          [-w / 2 + t / 2, 0, t, d],
+        ] as const
+      ).map(([x, z, sx, sz], i) => (
+        <mesh key={i} position={[x, h / 2, z]}>
+          <boxGeometry args={[sx, h, sz]} />
+          <meshStandardMaterial color={color} roughness={0.7} map={crateTexture()} />
+        </mesh>
+      ))}
+    </group>
+  );
+}
+
 function DasLines({ e, floor, split }: { e: Equip; floor: FloorNo; split: boolean }) {
   const busy = useBusy(floor);
   const off = () => false;
@@ -487,10 +513,14 @@ function DasLines({ e, floor, split }: { e: Equip; floor: FloorNo; split: boolea
               split ? (
                 // 분배: MFC 별 초록 크레이트(LPN = MFC 하나) — MFC 칸만
                 mfcAt.has(i) && (
-                  <mesh key={i} position={[x, 0.98, z + 1.0]}>
-                    <boxGeometry args={[0.6, 0.32, 0.42]} />
-                    <meshStandardMaterial color={0x3aa35a} />
-                  </mesh>
+                  <group key={i} position={[x, 0, z + 1.0]}>
+                    {/* 작업대 + 위가 열린 구멍 뚫린 크레이트 */}
+                    <mesh position={[0, 0.39, 0]}>
+                      <boxGeometry args={[0.8, 0.78, 0.6]} />
+                      <meshStandardMaterial color={0x9aa3ad} metalness={0.3} roughness={0.5} />
+                    </mesh>
+                    <OpenCrate y={0.78} />
+                  </group>
                 )
               ) : (
                 <RollContainer key={i} x={x} z={z + 1.35} cold={false} fill={mfcAt.has(i) ? 0.5 : 0} />
@@ -580,6 +610,10 @@ function DpsConveyor({ e, floor }: { e: Equip; floor: FloorNo }) {
 }
 
 /** 야채 바닥 적치 레인(6F 냉장) — 자리마다 나무 팔레트 + 초록 크레이트 더미(현물만큼 높이). 크레이트는 입고 용기, 분배 크레이트(MFC 별)는 출고 용기 */
+/** 야채 크레이트 한 단 높이(m)·한 자리 최대 단 수 [가정] */
+const CRATE_H = 0.24;
+const CRATE_MAX = 5;
+
 function VegLanes({ e, floor }: { e: Equip; floor: FloorNo }) {
   const { backend, layout, sim } = useApp();
   const f = layout.floors.find((x) => x.floor === floor)!;
@@ -601,14 +635,18 @@ function VegLanes({ e, floor }: { e: Equip; floor: FloorNo }) {
     if (ver.current === backend.ledger.version) return;
     ver.current = backend.ledger.version;
     const stock = sim.live('stock', 500, () => backend.ledger.onHandByLocation());
+    // 크레이트를 한 단씩 쌓는다 — 현물만큼 1~CRATE_MAX 단(사용자 2026-11-26 "낮은 구멍 뚫린 상자")
     cells.forEach((l, i) => {
       const q = stock.get(l.code) ?? 0;
-      const h = q ? 0.3 + 1.1 * Math.min(1, q / l.capacity) : 0;
-      tmp.position.set(l.pos.x, 0.14 + h / 2, l.pos.z);
-      tmp.rotation.set(0, 0, 0);
-      tmp.scale.set(q ? 0.95 : 0, q ? h : 0, q ? 0.95 : 0);
-      tmp.updateMatrix();
-      crates.current.setMatrixAt(i, tmp.matrix);
+      const n = q ? Math.max(1, Math.round(CRATE_MAX * Math.min(1, q / l.capacity))) : 0;
+      for (let k = 0; k < CRATE_MAX; k++) {
+        const on = k < n;
+        tmp.position.set(l.pos.x, 0.14 + CRATE_H / 2 + k * CRATE_H, l.pos.z);
+        tmp.rotation.set(0, k % 2 ? 0.04 : -0.03, 0);
+        tmp.scale.set(on ? 0.9 : 0, on ? CRATE_H - 0.01 : 0, on ? 0.6 : 0);
+        tmp.updateMatrix();
+        crates.current.setMatrixAt(i * CRATE_MAX + k, tmp.matrix);
+      }
     });
     crates.current.instanceMatrix.needsUpdate = true;
   });
@@ -619,9 +657,9 @@ function VegLanes({ e, floor }: { e: Equip; floor: FloorNo }) {
         <boxGeometry />
         <meshStandardMaterial color={0xd9b98a} roughness={0.85} map={palletTexture()} />
       </instancedMesh>
-      <instancedMesh ref={crates} args={[undefined, undefined, cells.length]} frustumCulled={false}>
+      <instancedMesh ref={crates} args={[undefined, undefined, cells.length * CRATE_MAX]} frustumCulled={false}>
         <boxGeometry />
-        <meshStandardMaterial color={0x3aa35a} roughness={0.7} />
+        <meshStandardMaterial color={0x3aa35a} roughness={0.7} map={crateTexture()} />
       </instancedMesh>
     </group>
   );
@@ -875,7 +913,7 @@ function Desk({ x, z, rot = 0, big = false }: { x: number; z: number; rot?: numb
 }
 
 /**
- * DC 관리자 사무실 — 유리 칸막이(서쪽 가운데 문)·직원 책상 2(간격 두고, 문 쪽 북쪽 절반)·안쪽(남쪽 끝) DC 센터 관리자 책상(문을 보고 앉음)·화이트보드.
+ * DC 관리자 사무실 — 유리 칸막이(서쪽 가운데 문)·직원 4인용 책상 묶음 2(간격 두고)·안쪽(남쪽 끝) DC 센터 관리자 책상(문을 보고 앉음)·화이트보드.
  * 사용자 2026-11-25 "7층에 dc 관리자 사무실", 2026-11-26 "직원 책상 4개 붙어있는 거 간격 두고 2개, 안쪽에 센터 관리자 책상 하나".
  */
 function Office({ e }: { e: Equip }) {
@@ -897,13 +935,26 @@ function Office({ e }: { e: Equip }) {
           <meshStandardMaterial color={0xcfe3f7} transparent opacity={0.35} depthWrite={false} />
         </mesh>
       ))}
-      {/* 직원 책상 둘 — 동쪽 벽을 보고, 사이 3m */}
-      <Desk x={cx + 0.6} z={r.z0 + 2.6} />
-      <Desk x={cx + 0.6} z={r.z0 + 2.6 + 3.2} />
+      {/* 직원 4인용 책상 묶음 둘 — 책상 넷을 정사각형으로 붙여(둘씩 마주 봄) 묶음 사이 띄움(사용자 2026-11-26 "4인용 정사각형으로 붙어있는 거 간격 두고 2개") */}
+      {[r.z0 + 3.0, r.z0 + 3.0 + 4.4].map((pz) => (
+        <group key={pz}>
+          {[-0.7, 0.7].map((dz) => (
+            <group key={dz}>
+              <Desk x={cx + 0.4 - 0.375} z={pz + dz} />
+              <Desk x={cx + 0.4 + 0.375} z={pz + dz} rot={Math.PI} />
+            </group>
+          ))}
+          {/* 가운데 칸막이 */}
+          <mesh position={[cx + 0.4, 0.98, pz]}>
+            <boxGeometry args={[0.04, 0.42, 2.8]} />
+            <meshStandardMaterial color={0x9fb3c8} />
+          </mesh>
+        </group>
+      ))}
       {/* DC 센터 관리자 책상 — 안쪽(남쪽 끝), 문 쪽(북쪽)을 보고 앉음 */}
       <Desk x={cx} z={r.z1 - 2.2} rot={Math.PI / 2} big />
-      {/* 화이트보드(동쪽 벽, 직원 책상 사이) */}
-      <mesh position={[r.x1 - 0.08, 1.4, r.z0 + 4.2]} rotation-y={-Math.PI / 2}>
+      {/* 화이트보드(북쪽 벽) */}
+      <mesh position={[cx, 1.4, r.z0 + 0.08]}>
         <planeGeometry args={[2.2, 1.1]} />
         <meshStandardMaterial color={0xffffff} />
       </mesh>
