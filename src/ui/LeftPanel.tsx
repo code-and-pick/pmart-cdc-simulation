@@ -210,7 +210,8 @@ function Settings() {
         <Row k="주소" v={CDC_FACTS.address} />
         <Row k="면적" v={`${CDC_FACTS.areaPyeong.toLocaleString()}평`} />
         <Row k="사용 층" v={`${CDC_FACTS.floors[0]}~${CDC_FACTS.floors[CDC_FACTS.floors.length - 1]}층 (차량은 지하 B1)`} />
-        <Row k="보관 용량" v={`${(CDC_FACTS.capacityUnits / 10_000).toLocaleString()}만 유닛`} />
+        {/* 보관 용량은 칸 용량 합(계산값) — 520만은 목표(사용자 2026-11-25 "고정값을 계산값으로") */}
+        <Row k="보관 용량" v={`${(layout.capacity.total / 10_000).toFixed(1)}만 유닛 (계산 · 목표 ${(CDC_FACTS.capacityUnits / 10_000).toLocaleString()}만)`} />
       </Sec>
       <Sec title="층 배치" aside="보관 = 팔레트 랙 면적">
         {layout.floors.map((f) => (
@@ -577,8 +578,12 @@ function Workers() {
       {([5, 6, 7, 'B1'] as const).map((fl) => {
         const people = sim.agents.filter((a) => a.floor === fl).sort((a, b) => ROLE_ORDER.indexOf(a.role) - ROLE_ORDER.indexOf(b.role));
         const busy = people.filter((a) => !a.idle).length;
+        // 층 가동률(근무 시간 가중) — 사용자 2026-11-25 "작업자별 UPH·유휴율"
+        const on = people.reduce((x, a) => x + a.onDutySeconds, 0);
+        const idle = people.reduce((x, a) => x + a.idleSeconds, 0);
+        const util = on > 0 ? Math.round((100 * (on - idle)) / on) : null;
         return (
-          <Sec key={fl} title={fl === 'B1' ? 'B1 지하 상차' : `${fl}F`} aside={`일하는 사람 ${busy}/${people.length}`}>
+          <Sec key={fl} title={fl === 'B1' ? 'B1 지하 상차' : `${fl}F`} aside={`일하는 사람 ${busy}/${people.length}${util !== null ? ` · 가동 ${util}%` : ''}`}>
             {people.map((a) => (
               <button
                 key={a.id}
@@ -589,6 +594,11 @@ function Workers() {
               >
                 <span className="srow-l">{a.name}</span>
                 <b className="srow-v">{a.activity}</b>
+                {a.onDutySeconds > 60 && (
+                  <span className="wk-rate" title={`근무 ${Math.round(a.onDutySeconds / 60)}분 · 일 없이 기다림 ${Math.round(a.idleSeconds / 60)}분 · 처리 ${a.units.toLocaleString()}개 · 완료 ${a.done}건`}>
+                    가동 {Math.round(a.utilization * 100)}% · 유휴 {Math.round((1 - a.utilization) * 100)}%{a.units > 0 ? ` · UPH ${Math.round(a.uph)}` : ` · ${(a.done / Math.max(1 / 60, a.onDutySeconds / 3600)).toFixed(1)}건/h`}
+                  </span>
+                )}
               </button>
             ))}
           </Sec>

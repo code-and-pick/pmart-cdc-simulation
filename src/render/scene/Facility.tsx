@@ -8,7 +8,7 @@ import { useLayoutEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { plateTexture } from '../sprites';
 import { useApp } from '../../app/context';
-import { RACK, SHELF, BUILDING } from '../../config';
+import { RACK, SHELF } from '../../config';
 import type { FloorLayout, Layout, Rect, ZoneArea, Door } from '../../domain/layout';
 import { SCENE, ZONE_FLOOR, ZONE_PILL } from '../colors';
 
@@ -116,7 +116,8 @@ function Zones({ f }: { f: FloorLayout }) {
 }
 
 /**
- * 벽 — 건물 둘레(높은 투명벽) + 온도 방 단열 패널 벽(높이 BUILDING.coldWallH, 반투명, 벽 위 "냉동 -20°C"/"냉장 3°C") [사용자 2026-11-25 §2].
+ * 벽 — 건물 둘레 + 온도 방 경계(건물 안쪽 면). 온도 방 벽도 건물 벽과 같은 벽(높이·색·투명도)이고, 바깥쪽 경계는 건물 벽이 그대로 맡는다 —
+ * 그래서 방 둘레 전체가 벽으로 닫힌다. "냉동 -20°C"/"냉장 3°C" 는 벽 위에(사용자 2026-11-25 "건물벽이랑 같은 벽, 표시는 벽 위에").
  * 문 자리는 비우고 문 모양만: 지게차 출입문(노란 문틀) · 박스·R/T 반출 에어커튼(투명 띠) · 냉동 전실 문(문틀).
  * 투명도는 controller.wallOpacity — 위 [벽 / 벽 숨김] 토글(MFC 와 같음).
  */
@@ -128,8 +129,7 @@ function Walls({ f, L }: { f: FloorLayout; L: Layout }) {
     const o = controller.wallOpacity;
     for (const m of mats.current) {
       if (!m) continue;
-      const cold = m.userData.cold as boolean;
-      m.opacity = cold ? Math.min(0.55, o * 1.6) : o;
+      m.opacity = o; // 온도 방 벽도 건물 벽과 같은 투명도
       m.visible = o > 0.01;
     }
     for (const g of groups.current) if (g) g.visible = o > 0.01;
@@ -145,7 +145,7 @@ function Walls({ f, L }: { f: FloorLayout; L: Layout }) {
     const doors: { d: Door; h: number }[] = [];
     const labels: { text: string; x: number; z: number; temp: 'FROZEN' | 'CHILLED' }[] = [];
     for (const room of f.coldRooms) {
-      const H = BUILDING.coldWallH;
+      const H = WALL_H; // 건물 벽과 같은 높이
       for (const s of room.walls) {
         // 문 자리를 비우고 벽 조각들로
         const along = s.z0 === s.z1 ? 'x' : 'z';
@@ -162,8 +162,13 @@ function Walls({ f, L }: { f: FloorLayout; L: Layout }) {
             walls.push({ r: along === 'x' ? { x0: cur, z0: s.z0 - t / 2, x1: c0, z1: s.z0 + t / 2 } : { x0: s.x0 - t / 2, z0: cur, x1: s.x0 + t / 2, z1: c0 }, cold: true, h: H });
           cur = Math.max(cur, c1);
         }
-        // 벽 위 온도 표시 — 긴 벽마다 하나
+        // 벽 위 온도 표시 — 긴 벽마다 하나(문이 가운데면 조금 비켜서)
         if (a1 - a0 > 8) labels.push({ text: room.label, x: along === 'x' ? (a0 + a1) / 2 : s.x0, z: along === 'x' ? s.z0 : (a0 + a1) / 2, temp: room.temp });
+      }
+      // 긴 벽이 없는 방도 표시 하나는 — 가장 긴 벽 위
+      if (!labels.some((l) => l.text === room.label) && room.walls.length) {
+        const w = [...room.walls].sort((a, b) => Math.hypot(b.x1 - b.x0, b.z1 - b.z0) - Math.hypot(a.x1 - a.x0, a.z1 - a.z0))[0];
+        labels.push({ text: room.label, x: (w.x0 + w.x1) / 2, z: (w.z0 + w.z1) / 2, temp: room.temp });
       }
       for (const d of room.doors) doors.push({ d, h: H });
     }
@@ -182,7 +187,7 @@ function Walls({ f, L }: { f: FloorLayout; L: Layout }) {
                 mats.current[mi++] = m;
               }
             }}
-            color={w.cold ? 0xe6f0fb : SCENE.wall}
+            color={SCENE.wall}
             transparent
             opacity={0.32}
             roughness={0.4}
@@ -233,8 +238,8 @@ function Walls({ f, L }: { f: FloorLayout; L: Layout }) {
           ref={(g) => {
             if (g) groups.current[doors.length + i] = g;
           }}
-          position={[l.x, BUILDING.coldWallH + 0.7, l.z]}
-          scale={[3.6, 0.9, 1]}
+          position={[l.x, WALL_H + 0.9, l.z]}
+          scale={[5.2, 1.3, 1]}
         >
           <spriteMaterial map={plateTexture(l.text, { bg: l.temp === 'FROZEN' ? '#2f6fd6' : '#2aa36b', fg: '#ffffff', w: 384, h: 96 })} depthWrite={false} />
         </sprite>

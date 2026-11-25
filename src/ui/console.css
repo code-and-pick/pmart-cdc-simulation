@@ -189,6 +189,11 @@
   align-items: center;
   gap: 10px;
   min-width: 0;
+  overflow: hidden;
+  flex: 0 1 auto;
+}
+.topbar .clock {
+  flex: none;
 }
 .topbar .title {
   font-weight: 800;
@@ -249,6 +254,72 @@
 .topbar .seg button.on {
   background: rgba(91, 155, 255, 0.25);
   color: #fff;
+}
+
+/* 좁은 창 — 센터 이름표·보기 이름을 먼저 숨기고, 배속은 고르기 상자로(사용자 2026-11-25 "836px") */
+.topbar .speed-select {
+  display: none;
+  width: auto;
+  flex: none;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--head-ink);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 6px;
+  padding: 3px 6px;
+  font: inherit;
+  font-size: 12.5px;
+}
+.topbar .speed-select option {
+  color: #111;
+}
+@media (max-width: 1180px) {
+  .topbar .chip,
+  .topbar .sub {
+    display: none;
+  }
+}
+@media (max-width: 1000px) {
+  .topbar {
+    gap: 8px;
+    padding: 0 10px;
+  }
+  .topbar .seg.speeds {
+    display: none;
+  }
+  .topbar .speed-select {
+    display: inline-block;
+  }
+}
+@media (max-width: 620px) {
+  .topbar .stat {
+    display: none;
+  }
+}
+
+/* 패널 안 MFC 고르기 */
+.pick-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.mfc-pick {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.mfc-pick select {
+  width: auto;
+  font: inherit;
+  font-size: 12.5px;
+  padding: 3px 6px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel, #fff);
+  color: var(--text);
 }
 
 /* ───────── 확인할 일 띠 ───────── */
@@ -1145,3 +1216,15 @@ details.sec > summary h4 { justify-content: flex-start; gap: 6px; }
 /* CDC: 오른쪽 패널 바로 아래 글·표가 패널 왼쪽 밖으로 삐져나오던 것 — 안쪽 여백 */
 .panel.right > .note { padding: 0 12px 10px; box-sizing: border-box; }
 .panel.right > table.inv { margin: 0 8px; width: calc(100% - 16px); }
+
+/* 작업자 가동률(사용자 2026-11-25) */
+.wk-rate {
+  grid-column: 1 / -1;
+  display: block;
+  width: 100%;
+  font-size: 11px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  margin-top: 1px;
+}
+

@@ -777,7 +777,8 @@ function Office({ e }: { e: Equip }) {
 
 /** 오토스토어 — 알루미늄 격자(위), 옥색 옆판, 빨간 로봇들이 격자 위를 오감, 남쪽(앞) 포트 2개 */
 function AutoStore({ e }: { e: Equip }) {
-  const { sim } = useApp();
+  const { sim, layout } = useApp();
+  const info = layout.autostore;
   const r = e.rect;
   const H = 4.4;
   const cell = 0.7;
@@ -850,6 +851,13 @@ function AutoStore({ e }: { e: Equip }) {
         <boxGeometry args={[0.62, 0.5, 0.62]} />
         <meshStandardMaterial color={0xe5322d} />
       </instancedMesh>
+      {/* 통 수 표시(사용자 2026-11-25 "오토스토어 빈 수를 화면에 표시") */}
+      {info && (
+        <sprite position={[(r.x0 + r.x1) / 2, H + 1.0, (r.z0 + r.z1) / 2]} scale={[4.6, 1.15, 1]}>
+          <spriteMaterial map={plateTexture(`오토스토어 통 ${info.bins.toLocaleString()}개 (자리 ${info.binsFit.toLocaleString()})
+SKU ${info.skus.toLocaleString()} · 로봇 ${info.robots} · 포트 ${info.ports}`, { w: 512, h: 128 })} depthWrite={false} />
+        </sprite>
+      )}
       {/* 포트(작업자가 빈에서 꺼내 MFC 박스에 담는 자리) */}
       {autostorePorts(r).map((px) => (
         <group key={px} position={[px, 0, r.z1 - 0.9]}>

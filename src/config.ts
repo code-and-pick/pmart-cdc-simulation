@@ -73,12 +73,17 @@ export const B1_DOCKS: { temp: 'A' | 'B' | 'C'; count: number }[] = [
 export const STAGING_SLOTS = 30;
 
 /**
- * 보관 용량 배분 [가정]. 칸 용량 합 = CDC_FACTS.capacityUnits(520만) 이 되게 나눈다.
- * 오토스토어 빈(bin) 몫을 먼저 떼고, 나머지를 팔레트 칸에 무게(상온 1.2 · 저온 1.0)로 나눈다.
+ * 보관 용량 [가정] — 칸마다 유닛을 정하고 총 용량은 칸 용량 합(계산값, layout.capacity). CDC_FACTS.capacityUnits(520만)는 목표로 대조한다.
  */
 export const CAPACITY = {
   /** 팔레트 칸 하나 평균 유닛 [가정] — 저온은 짐 높이 1.7m(상온 2.0m)라 덜 들어간다. 총 용량은 이 값으로 계산한다(사용자 2026-11-25 "총 용량을 계산값으로") */
   palletUnits: { AMBIENT: 240, CHILLED: 180, FROZEN: 180 },
+  /**
+   * 구역별 팔레트 칸 유닛(온도대 값 대신) [가정 — 사용자 2026-11-25 "팔레트당 유닛이 7F 생활용품에 맞는지 재검토"].
+   * G 생활용품(휴지·세제·주방 — 부피가 커서 팔레트 하나에 30롤 휴지 약 40팩, 세제 3L 약 200개): 평균 150.
+   * H 소형 비식재(칫솔·건전지·문구 — 상자 하나 24~100개 × 팔레트 40상자): 보수적으로 600. 5F 상온 식품은 240 그대로.
+   */
+  palletUnitsByZone: { G: 150, H: 600 } as Record<string, number>,
   /** 야채 바닥 적치 자리 하나 유닛 [가정] */
   vegLaneUnits: 120,
 } as const;
@@ -103,7 +108,7 @@ export const BUILDING = {
 
 /**
  * SKU 목표 [사용자 2026-11-25 §1] — 총 18,000, 온도대 비율은 MFC 설계 칸 비율 냉동 22 : 냉장 31 : 상온 47(상온에 생활용품 포함).
- * 옛 SHELF.targetSlots(2,180/3,270/5,450 = 10,900)는 근거가 달라 이것으로 바꿈.
+ * 옛 선반 목표 칸(10,900)은 지움 — SKU 목표는 이것 하나(사용자 2026-11-25 "SKU_TARGET 으로 통일").
  */
 export const SKU_TARGET = { total: 18_000, FROZEN: 4_000, CHILLED: 5_500, AMBIENT: 8_500 } as const;
 
@@ -117,10 +122,13 @@ export const SKU_PLACE = {
   veg: 300,
   /** 5F E·F 선반 SKU(구역마다) [가정] — 5F 띠 공간에 들어가는 만큼 */
   efShelf: 630,
-  /** 7F H 오토스토어 SKU [가정] — 작고 가벼운 비식재 일부만(사용자 §5) */
-  autostore: 1_500,
-  /** 랙 1단이 박스 피킹면(PICK_FACE)인 구역 [가정] — 5F C·D 무거운 상자, 7F G·H 대용량 */
-  faceZones: ['C', 'D', 'G', 'H'] as readonly string[],
+  /**
+   * 7F H 오토스토어 SKU [가정] — H 는 소형 비식재 = 오토스토어(설계 §5, 사용자 2026-11-25 "H 소형 = 오토스토어 설계대로").
+   * 전엔 1,500 + H 랙 1단 대용량 피킹면 816 이었는데, H 피킹면을 없애고 그 SKU 를 오토스토어로(2,400).
+   */
+  autostore: 2_400,
+  /** 랙 1단이 박스 피킹면(PICK_FACE)인 구역 [가정] — 5F C·D 무거운 상자, 7F G 대용량 생활용품. H 랙은 오토스토어 보충용 보관(RESERVE)만 */
+  faceZones: ['C', 'D', 'G'] as readonly string[],
 };
 
 /** 6F 냉장 바닥 적치 레인 위치 코드 통로 [가정 — 백엔드 확인 필요] · 레인 모양 */
@@ -148,7 +156,8 @@ export const AUTOSTORE = {
   minQty: 8,
   /** 로봇·포트 [가정 — 설치비 비례] · 포트당 시간당 통 교환 상한 [가정] */
   robots: 10,
-  ports: 2,
+  /** 포트 2 → 3(2026-11-25 — SKU 2,400 으로 늘어 포트 대기 평균 60초·가동 70%) */
+  ports: 3,
   portBinsPerHour: 300,
   /** 로봇이 통 하나 가져오는 시간(s) [가정] */
   fetchSec: 40,
@@ -192,12 +201,12 @@ export const SPEEDS = [0, 1, 5, 15, 30, 60, 120] as const;
  */
 export const CATALOG = {
   seed: 20261125,
-  /** 5F 상온 C~F 구역 SKU 수 [시뮬] — 다른 구역은 선반 목표 칸(MFC 10,900 SKU 설계, B-1)만큼 SKU(사용자 2026-11-25 냉동 선반 채움률 9% 지적) */
-  minZoneSkus: 190,
   /** 피킹면 채움률 [시뮬] — 칸 용량 대비 */
   pickFill: [0.45, 0.85] as const,
   /** 2단 보충 대기·3단~ 리저브 팔레트 채움률 [시뮬] */
   reserveFill: [0.7, 1.0] as const,
+  /** 한 칸 시작 재고 합의 최대 채움(칸 용량 대비) [시뮬] — 여러 SKU 가 한 보관 칸을 나눠 써도 넘치지 않게 */
+  maxFill: 0.95,
   /** 유통기한(일) 범위 [가정] — 시작일 기준, 피킹면 LOT 이 리저브 LOT 보다 먼저 끝난다(FEFO 가 피킹면부터 고르게) */
   shelfLifeDays: { FROZEN: [120, 360], CHILLED: [6, 25], AMBIENT: [60, 540] } as const,
 } as const;
@@ -246,11 +255,6 @@ export const SHELF = {
   fill: [0.3, 0.9] as const,
   /** 북쪽 띠에서 승강기·출고대기 줄 깊이(m) — 그 남쪽부터 선반 [가정] */
   northStrip: 7.5,
-  /**
-   * 피킹 선반 칸 수(이상) — MFC 설계 10,900 SKU 에 맞춰 칸 하나 = SKU 하나 [사용자 2026-11-25 "10,900 설계에 맞춰 선반 확장", 백엔드 B-1·CDC-7].
-   * 냉동 A 2,180 · 냉장 B 3,270 · 상온 5,450(C~H 를 팔레트 통로 수 비율로 나눔). 통로 하나 240칸이라 통로 단위로 올림.
-   */
-  targetSlots: { FROZEN: 2180, CHILLED: 3270, AMBIENT: 5450 },
 } as const;
 
 /**
@@ -276,10 +280,11 @@ export const FLOW = {
 export const WORKFORCE: Record<5 | 6 | 7, { fc: number; sort: number; jockey: number; replDay: number; replEve: number }> = {
   // sort = 6F 라인(DAS)·분배 작업자(번호 홀수 라인 · 짝수 분배). 5F·7F 는 피킹 = 분류라 분류대 사람 없이 FC·DPS 로 [사용자 2026-11-25 설계 §5.4]
   // 5F: 상온 FC 6 + DAS 2(냉동은 DPS 구역 작업자 FLOW.dps), 6F: DAS 4 + 분배 2, 7F: FC 7 + DAS 2 [사용자 §9]
-  5: { fc: 6, sort: 2, jockey: 3, replDay: 5, replEve: 1 },
+  // 2026-11-25 가동률 분석으로 다시 배분(사용자 "유휴 인원 — 병목인지 인원 과다인지"): 5F·6F FC·자키는 가동 5~32%(일이 적음), 7F FC 는 91%(오토스토어 SKU 2,400 으로 늘어 병목) → 5F FC 6→3·자키 3→2, 6F FC 5→4·자키 3→2, 7F FC 7→10·자키 4→3
+  5: { fc: 3, sort: 2, jockey: 2, replDay: 5, replEve: 1 },
   // 6F: 라인 6명(줄 3개에 2명씩 — 한 줄에서 색으로 내 몫 구분) + 분배 2명, 자키 3명(라인에 상품 박스 공급) [사용자 2026-11-25 "라인 2~3명·분배 2명", "라인 줄 수에 맞게"]
-  6: { fc: 5, sort: 6, jockey: 3, replDay: 5, replEve: 1 },
-  7: { fc: 7, sort: 2, jockey: 4, replDay: 5, replEve: 1 },
+  6: { fc: 4, sort: 6, jockey: 2, replDay: 5, replEve: 1 },
+  7: { fc: 10, sort: 2, jockey: 3, replDay: 5, replEve: 1 },
 };
 
 /** 작업 시간·속도 [가정] — 라인 1인 하루 약 2만 걸음 [현장] 을 보정 목표로 */

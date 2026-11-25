@@ -340,7 +340,7 @@ class FloorBuilder {
                     bay,
                     level,
                     slot,
-                    capacity: CAPACITY.palletUnits[z.temp],
+                    capacity: CAPACITY.palletUnitsByZone[z.letter] ?? CAPACITY.palletUnits[z.temp],
                     face: side === 'E' ? -1 : 1,
                     pos: { x: rx, y: (level - 0.5) * RACK.levelH, z: zz0 + k * RACK.bayW + (slot - 0.5) * (RACK.bayW / RACK.slots) },
                   });

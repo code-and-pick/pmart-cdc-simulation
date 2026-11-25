@@ -8,7 +8,7 @@ import { MFCS, OUTBOUND, TMS } from '../config';
 import type { RightView } from '../render/controller';
 import { TEMP_KO } from '../sim/simulation';
 import { trfTemp } from '../sim/supply';
-import { AdminBoard, BarcodeBoard, MovesBoard, StockSearch, TrfBoard } from './Boards';
+import { AdminBoard, BarcodeBoard, MfcPick, MovesBoard, StockSearch, TrfBoard } from './Boards';
 
 const clock = (sec: number) => `${String(Math.floor(sec / 3600) % 24).padStart(2, '0')}:${String(Math.floor(sec / 60) % 60).padStart(2, '0')}`;
 /** 큰 수는 만 단위로 짧게 */
@@ -214,8 +214,23 @@ function Stock() {
   const stock = sim.live('stock', 500, () => backend.ledger.onHandByLocation());
   const t = backend.ledger.totals();
   const v = sim.live('check', 2000, () => backend.ledger.check());
+  // 고른 MFC 몫 — 할당(예약)·피킹·출고대기 박스
+  const mfc = view.mfcFilter ? MFCS.find((m) => m.id === view.mfcFilter) : undefined;
+  const mine = mfc ? sim.live(`mfc-stock-${mfc.id}`, 1000, () => {
+    const ts = backend.listTransfers().filter((x) => x.mfcId === mfc.id);
+    const sum = (k: 'allocatedQty' | 'pickedQty' | 'departedQty') => ts.reduce((a, x) => a + x.progress.reduce((b, l) => b + l[k], 0), 0);
+    return { alloc: sum('allocatedQty'), picked: sum('pickedQty'), departed: sum('departedQty'), staged: [...sim.staged.values()].flat().filter((b) => b.mfcId === mfc.id).reduce((a, b) => a + b.units, 0) };
+  }) : undefined;
   return (
     <>
+      <div className="pick-row">
+        <MfcPick />
+      </div>
+      {mfc && mine && (
+        <div className="note">
+          {mfc.name} 몫 — 할당 {mine.alloc.toLocaleString()} · 피킹 {mine.picked.toLocaleString()} · 출고대기 박스 {mine.staged.toLocaleString()}개 · 출발 {mine.departed.toLocaleString()}
+        </div>
+      )}
       <div className="note">
         CDC 현물 {t.onHand.toLocaleString()} · 예약 {t.reserved.toLocaleString()} · Transit {t.transit.toLocaleString()} · 원장 불변식 위반 {v.length}건{v.length ? ` (${v[0]})` : ''}. 줄을 누르면 그 구역으로 갑니다.
       </div>
@@ -358,9 +373,22 @@ const hmSec = (sec?: number) => (sec === undefined ? '' : fmt(sec / 60));
 /** 운송 — 운행(노선 × 온도대)마다 차·기사·출차·정차별 도착·인계 [TMS 2.2] */
 function Transport() {
   const { sim } = useApp();
-  const runs = [...sim.runs.values()].sort((a, b) => a.plan.plannedDepartMin - b.plan.plannedDepartMin);
+  const view = useView();
+  const runs = [...sim.runs.values()].filter((r) => !view.mfcFilter || r.stops.some((st) => st.mfcId === view.mfcFilter)).sort((a, b) => a.plan.plannedDepartMin - b.plan.plannedDepartMin);
+  if (!runs.length && sim.runs.size) return (
+    <>
+      <div className="pick-row">
+        <MfcPick />
+      </div>
+      <div className="note">고른 MFC 로 가는 운행이 없습니다.</div>
+    </>
+  );
   if (!runs.length) return <div className="note">22:00 배차 전입니다. 배차는 고정 노선 × 온도대(차 한 대 = 온도대 하나, 5톤 {TMS.vehicle.maxRt} R/T)로 정하고, 출차는 max(23:00, 첫 MFC 도착 목표 − 주행)입니다.</div>;
   return (
+    <>
+    <div className="pick-row">
+      <MfcPick />
+    </div>
     <table className="inv">
       <thead>
         <tr>
@@ -409,5 +437,6 @@ function Transport() {
         ))}
       </tbody>
     </table>
+    </>
   );
 }

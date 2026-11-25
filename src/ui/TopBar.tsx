@@ -1,6 +1,6 @@
 // 머리줄·3D 위 보기 칩 — MFC 시뮬레이터 ui/TopBar.tsx 와 같은 모양. 구역 버튼 대신 층 버튼(5F·6F·7F·B1)을 먼저 둔다(설계 §9).
 import { useApp, useTick, useView } from '../app/context';
-import { CDC_FACTS, MFCS, SPEEDS } from '../config';
+import { CDC_FACTS, SPEEDS } from '../config';
 import type { FloorKey, LabelMode, RightView } from '../render/controller';
 
 const WALLS: { o: number; text: string }[] = [
@@ -46,22 +46,28 @@ export function TopBar() {
           작업자 <b>{busy}</b>/{sim.agents.length}
         </span>
       </div>
-      <div className="seg mfc-filter" title="고른 MFC 의 TRF·박스·R/T·출고대기 자리만 강조(MFC 지점 선택처럼)">
-        <button className={view.mfcFilter === null ? 'on' : undefined} onClick={() => view.setMfcFilter(null)}>
-          모든 MFC
-        </button>
-        {MFCS.map((m) => (
-          <button key={m.id} className={view.mfcFilter === m.id ? 'on' : undefined} onClick={() => view.setMfcFilter(view.mfcFilter === m.id ? null : m.id)}>
-            {m.name.replace(/^d호점 /, '')}
-          </button>
-        ))}
-      </div>
       <div className="spacer" />
       <div className="clock" title="시뮬레이션 시각">
         <span className={`live ${sim.speed === 0 ? 'paused' : ''}`} />
         {sim.clockText()}
       </div>
-      <div className="seg">
+      {/* 좁은 창(약 1,000px 아래)에서는 배속 버튼 대신 고르기 상자(사용자 2026-11-25 "836px 에서 30×~120× 가 화면 밖") */}
+      <select
+        className="speed-select"
+        aria-label="배속"
+        value={sim.speed}
+        onChange={(e) => {
+          sim.speed = Number(e.target.value);
+          ticker.bump();
+        }}
+      >
+        {SPEEDS.map((sp) => (
+          <option key={sp} value={sp}>
+            {sp === 0 ? '멈춤' : `${sp}×`}
+          </option>
+        ))}
+      </select>
+      <div className="seg speeds">
         {SPEEDS.map((sp) => (
           <button
             key={sp}

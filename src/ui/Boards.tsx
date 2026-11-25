@@ -38,6 +38,27 @@ function lpnsOf(sim: ReturnType<typeof useApp>['sim'], trfId: string): string[] 
 
 const STEPS = ['피킹', '분류', '검품', '상차', '출발', '인계'];
 
+/**
+ * MFC 고르기 — 상단바 대신 패널 안에서(사용자 2026-11-25 "DC 인데 상단에 MFC 바가 왜 크게 있어 — 재고·운송은 그 안에서 센터 선택").
+ * 고른 MFC 는 TRF·관리·재고·운송·바코드가 같이 쓰고, 3D 출고대기 자리도 강조한다.
+ */
+export function MfcPick() {
+  const view = useView();
+  return (
+    <label className="mfc-pick">
+      MFC
+      <select value={view.mfcFilter ?? ''} onChange={(e) => view.setMfcFilter(e.target.value || null)}>
+        <option value="">전체</option>
+        {MFCS.map((m) => (
+          <option key={m.id} value={m.id}>
+            {m.name}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
 /** TRF 카드 — MFC "실제 주문" 대신(사용자 §6-4): 단계 점, TRF·LPN 번호 검색, MFC 필터 */
 export function TrfBoard() {
   const { sim } = useApp();
@@ -52,7 +73,10 @@ export function TrfBoard() {
     });
   return (
     <div className="sfl">
-      <input className="search" placeholder="TRF·LPN 번호 검색" value={q} onChange={(e) => setQ(e.target.value)} style={{ width: '100%', marginBottom: 8 }} />
+      <div className="pick-row">
+        <MfcPick />
+        <input className="search" placeholder="TRF·LPN 번호 검색" value={q} onChange={(e) => setQ(e.target.value)} style={{ flex: 1 }} />
+      </div>
       {!rows.length && <div className="note">{q ? '찾는 TRF·LPN 이 없습니다.' : '08:00 에 TRF 를 받습니다.'}</div>}
       {rows.map(({ t, p, dots, handedAt }) => {
         const lp = lpnsOf(sim, t.trfId);
@@ -98,6 +122,9 @@ export function AdminBoard() {
   const byMfc = (id: string) => !view.mfcFilter || id === view.mfcFilter;
   return (
     <div>
+      <div className="pick-row">
+        <MfcPick />
+      </div>
       <div className="chips" style={{ marginBottom: 6 }}>
         {(
           [
@@ -353,6 +380,9 @@ export function BarcodeBoard() {
   ];
   return (
     <div className={print ? 'print-sheet' : ''}>
+      <div className="pick-row">
+        <MfcPick />
+      </div>
       <div className="seg" style={{ marginBottom: 8 }}>
         <button className={sv.mode === 'qr' ? 'on' : ''} onClick={() => scanView.setMode('qr')}>
           QR

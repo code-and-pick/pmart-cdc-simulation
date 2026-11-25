@@ -14,7 +14,7 @@ export interface RackZoneSpec {
   label: string;
   /** 그 온도대 방 안에서 팔레트 통로를 나눌 몫 — 통로 수는 방 면적에서 나온다(layout.sitePlan) [가정] */
   share: number;
-  /** 피킹 선반 목표 칸(SHELF.targetSlots)을 같은 온도대끼리 나눌 몫 — 없으면 통로 수. 0 이면 SKU 수만큼만 [시뮬] */
+  /** 피킹 선반 칸을 같은 온도대끼리 나눌 몫(옛 값 — SKU 목표는 SKU_TARGET) — 없으면 통로 수. 0 이면 SKU 수만큼만 [시뮬] */
   shelfShare?: number;
   /** 피킹 칸이 오토스토어 빈(bin) — 선반을 세우지 않고 작업자 앞 포트로 통이 온다 [사용자 2026-11-25 "7F 비식재만 실제 사용"] */
   bins?: boolean;

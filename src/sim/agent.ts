@@ -26,6 +26,11 @@ export interface DutyClock {
   dutyLabel(a: Agent): string;
 }
 
+/** 일 없이 기다리는 중인지 — "작업 대기"·"DPS 박스 기다림" 등(좁은 통로에서 앞사람을 기다리는 것은 일하는 중으로 본다) */
+export function idleActivity(activity: string): boolean {
+  return activity.endsWith('대기') || (activity.endsWith('기다림') && !activity.includes('앞사람'));
+}
+
 export class Agent {
   pos: P;
   at: WalkPoint;
@@ -37,6 +42,10 @@ export class Agent {
   distance = 0;
   busySeconds = 0;
   done = 0;
+  /** 가동률 계산(사용자 2026-11-25 "작업자별 UPH·유휴율") — 근무 중 시간 · 그중 일 없이 기다린 시간 · 처리 유닛(피킹·라인 담기) */
+  onDutySeconds = 0;
+  idleSeconds = 0;
+  units = 0;
   activity = '근무 전';
   carrying: 'CART' | 'PALLET' | 'ROLL' | null = null;
   /** 지게차를 세워 두고 걸어서 선반에 갔을 때 — 지게차 자리 [사용자 2026-11-25 "지게차는 선반 입구까지만"] */
@@ -62,7 +71,17 @@ export class Agent {
   }
 
   get idle(): boolean {
-    return this.mode === 'duty' || this.activity.endsWith('대기') || this.mode === null;
+    return this.mode === 'duty' || this.mode === null || idleActivity(this.activity);
+  }
+
+  /** 근무 중 가동률(0~1) — 일 없이 기다린 시간을 뺀 몫 */
+  get utilization(): number {
+    return this.onDutySeconds > 0 ? 1 - this.idleSeconds / this.onDutySeconds : 0;
+  }
+
+  /** 근무 시간당 처리 유닛(UPH) */
+  get uph(): number {
+    return this.onDutySeconds > 60 ? this.units / (this.onDutySeconds / 3600) : 0;
   }
 
   /** 걸어서(또는 카트·지게차로) 간다. path = route 결과 */
@@ -102,6 +121,8 @@ export class Agent {
   }
 
   tick(dt: number) {
+    if (this.mode === 'walk' || this.mode === 'wait') this.onDutySeconds += dt;
+    if (this.mode === 'wait' && idleActivity(this.activity)) this.idleSeconds += dt;
     if (this.mode === 'walk') {
       this.busySeconds += dt;
       let move = this.speed * dt;
@@ -124,7 +145,7 @@ export class Agent {
       }
       if (!this.path.length) this.finish();
     } else if (this.mode === 'wait') {
-      if (!this.activity.endsWith('대기')) this.busySeconds += dt;
+      if (!idleActivity(this.activity)) this.busySeconds += dt;
       this.waitLeft -= dt;
       if (this.waitLeft <= 0) this.finish();
     } else if (this.mode === 'duty') {

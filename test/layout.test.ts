@@ -119,7 +119,7 @@ describe('위치 코드 [정본 CDC-3·5]', () => {
     expect(new Set(codes).size).toBe(codes.length);
   });
 
-  it('랙 1단 박스 피킹면(5F C·D, 7F G·H)은 PICK_FACE, 그 밖 팔레트는 RESERVE', () => {
-    for (const l of all) expect(l.type).toBe(['C', 'D', 'G', 'H'].includes(l.zone) && l.level === 1 ? 'PICK_FACE' : 'RESERVE');
+  it('랙 1단 박스 피킹면(5F C·D, 7F G)은 PICK_FACE, 그 밖 팔레트(H 는 오토스토어 보충용 보관)는 RESERVE', () => {
+    for (const l of all) expect(l.type).toBe(['C', 'D', 'G'].includes(l.zone) && l.level === 1 ? 'PICK_FACE' : 'RESERVE');
   });
 });

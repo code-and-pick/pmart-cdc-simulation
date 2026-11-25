@@ -179,6 +179,16 @@ export function buildCatalog(layout: Layout, baseDate: string): Catalog {
       });
     }
   }
+  // 시작 재고가 칸 용량을 넘지 않게 — 한 보관 칸을 여러 SKU 가 나눠 쓰면(섞인 팔레트) 칸 합을 용량 × 최대 채움 안으로 줄인다(사용자 2026-11-25 "7F G 133%·H 123% 과적재")
+  const want = new Map<string, number>();
+  for (const s of skus) for (const x of s.seed) want.set(x.locationCode, (want.get(x.locationCode) ?? 0) + x.qty);
+  const capOf = new Map([...layout.floors.flatMap((f) => [...f.locations, ...f.shelves])].map((l) => [l.code, l.capacity]));
+  for (const s of skus)
+    for (const x of s.seed) {
+      const cap = Math.floor((capOf.get(x.locationCode) ?? x.qty) * CATALOG.maxFill);
+      const tot = want.get(x.locationCode)!;
+      if (tot > cap) x.qty = Math.max(1, Math.floor((x.qty * cap) / tot));
+    }
   const bySku = new Map(skus.map((s) => [s.sku, s]));
   const byLocation = new Map<string, SkuInfo>();
   for (const s of skus) {

@@ -891,6 +891,7 @@ export class Simulation implements DutyClock {
       );
       if (take > 0) this.lastPickAt.set(a.floor as FloorNo, this.time);
       if (take > 0) this.pickLog.push({ at: this.time, qty: take, handling, floor: a.floor as FloorNo });
+      a.units += take;
       this.shortUnits += short;
       if (take > 0) took.set(`${l.sku}|${l.lot}`, (took.get(`${l.sku}|${l.lot}`) ?? 0) + take);
       basket[i].picked += take;
@@ -1236,6 +1237,7 @@ export class Simulation implements DutyClock {
       if (take > 0) {
         box.took.set(`${l.sku}|${l.lot}`, (box.took.get(`${l.sku}|${l.lot}`) ?? 0) + take);
         this.pickLog.push({ at: this.time, qty: take, handling: 'DPS', floor: 5 });
+        a.units += take;
         this.lastPickAt.set(5, this.time);
       }
       this.shortUnits += short;
@@ -1454,6 +1456,7 @@ export class Simulation implements DutyClock {
       const same = box.contents.find((c) => c.sku === best.sku && c.lot === best.lot);
       if (same) same.qty += t.qty;
       else box.contents.push({ sku: best.sku, lot: best.lot, qty: t.qty });
+      a.units += t.qty;
       this.openBoxes.set(key, box);
     }
     for (const id of perTrf.keys()) this.busy.set(id, (this.busy.get(id) ?? 1) - 1);
