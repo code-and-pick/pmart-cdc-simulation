@@ -365,9 +365,11 @@ const CARD_Y = RACK_TOP + 0.4 + CARD_H / 2;
 /** 설비 줄은 랙 줄 바로 위 한 줄 — 두 줄 모두 곧은 줄(같은 높이끼리) */
 const CARD_Y_BAND = CARD_Y + CARD_H + 0.5;
 const CARD_GAP = 0.5;
-/** 북쪽 벽 쪽 카드 줄 — 층마다 고른 설비(사용자 2026-11-26 "6층 DAS·휠소터·분배 카드를 북쪽 벽으로", 비운 자리에 야채 레인 카드) */
-const NORTH_CARDS: Partial<Record<number, RegExp>> = { 6: /DAS|WHEEL_SORTER|SPLIT/ };
+/** 북쪽 벽 쪽 카드 줄 — 출고 설비(휠소터·DAS·분배·DPS)는 모든 층 북쪽 벽에(사용자 2026-11-26 "6층 DAS·휠소터·분배 카드를 북쪽 벽으로" → "휠소터는 벽에 붙이라니까" 5F 도). 띠 줄에는 선반·입고 검수 등만 */
+const NORTH_CARDS: Partial<Record<number, RegExp>> = { 5: /DAS|WHEEL_SORTER|DPS/, 6: /DAS|WHEEL_SORTER|SPLIT/, 7: /DAS|WHEEL_SORTER/ };
 const NORTH_Z = 0.8;
+/** 북쪽 벽 줄 높이 — 벽에 붙인 간판처럼 낮게(높이 세우면 전체 보기에서 화면 위로 빠짐) */
+const NORTH_Y = 2.2 + CARD_H / 2;
 /** 띠 줄(출고대기 남쪽 끝)에 두는 것 — 띠에서 남쪽으로 길게 뻗은 설비(6F 야채 레인: 분배 카드가 비운 자리) */
 const BAND_ROW = /VEG_LANES/;
 const TEMP_SHORT: Record<string, string> = { AMBIENT: '상온', CHILLED: '냉장', FROZEN: '냉동' };
@@ -448,12 +450,21 @@ export function zoneCards(f: FloorLayout): Card[] {
       const z = m.sp.z ?? (row === 'rack' ? rackZ : f.walk.roomZ);
       const levels = levelsAt.get(z) ?? [];
       levelsAt.set(z, levels);
-      const own = m.sp.z !== undefined && m.sp.z !== NORTH_Z;
-      const x = Math.min(width - w / 2, Math.max(w / 2, m.sp.x));
+      const own = m.sp.z !== undefined; // 자기 줄(북쪽 벽·구역 앞) — 랙 카드 높이로 낮게(북쪽 벽 줄을 띠 높이로 두면 전체 보기에서 화면 위로 빠짐)
+      let x = Math.min(width - w / 2, Math.max(w / 2, m.sp.x));
+      const north = m.sp.z === NORTH_Z;
+      // 북쪽 벽 줄은 한 줄(벽 간판) — 겹치면 위로 쌓지 않고 옆으로 비켜 선다
+      if (north) {
+        const taken = levels[0] ?? [];
+        for (let guard = 0; guard < 20 && taken.some(([a, b]) => x + w / 2 + CARD_GAP > a && x - w / 2 - CARD_GAP < b); guard++) {
+          const hit = taken.find(([a, b]) => x + w / 2 + CARD_GAP > a && x - w / 2 - CARD_GAP < b)!;
+          x = x >= (hit[0] + hit[1]) / 2 ? hit[1] + CARD_GAP + w / 2 : hit[0] - CARD_GAP - w / 2;
+        }
+      }
       let k = 0;
-      if (row === 'band') while ((levels[k] ?? []).some(([a, b]) => x + w / 2 + CARD_GAP > a && x - w / 2 - CARD_GAP < b)) k++;
+      if (row === 'band' && !north) while ((levels[k] ?? []).some(([a, b]) => x + w / 2 + CARD_GAP > a && x - w / 2 - CARD_GAP < b)) k++;
       (levels[k] ??= []).push([x - w / 2, x + w / 2]);
-      const y = row === 'rack' || own ? CARD_Y + (own ? k * (CARD_H + 0.4) : 0) : CARD_Y_BAND + k * (CARD_H + 0.4);
+      const y = own && z < f.walk.northZ ? NORTH_Y + k * (CARD_H + 0.4) : row === 'rack' || own ? CARD_Y + (own ? k * (CARD_H + 0.4) : 0) : CARD_Y_BAND + k * (CARD_H + 0.4);
       out.push({ id: m.sp.id, tex: m.tex, pos: [x, y, z], w, h: CARD_H });
     }
   }
