@@ -3,6 +3,10 @@ import { useApp, useTick, useView } from '../app/context';
 import { CDC_FACTS, SPEEDS } from '../config';
 import type { FloorKey, LabelMode, RightView } from '../render/controller';
 
+const WALLS: { o: number; text: string }[] = [
+  { o: 0.32, text: '벽' },
+  { o: 0, text: '벽 숨김' },
+];
 const LABEL_MODES: { mode: LabelMode; text: string }[] = [
   { mode: 'all', text: '번호' },
   { mode: 'rack', text: '랙만' },
@@ -92,6 +96,12 @@ export function ViewBar() {
         {LABEL_MODES.map((l) => (
           <button key={l.mode} className={view.labelMode === l.mode ? 'on' : undefined} onClick={() => view.setLabelMode(l.mode)}>
             {l.text}
+          </button>
+        ))}
+        <span className="seg-sep" />
+        {WALLS.map((w) => (
+          <button key={w.o} className={(view.wallUser ?? 0.32) === w.o ? 'on' : undefined} onClick={() => view.setWallOpacity(w.o)}>
+            {w.text}
           </button>
         ))}
       </div>

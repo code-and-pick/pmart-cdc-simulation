@@ -6,9 +6,10 @@
 import { useFrame } from '@react-three/fiber';
 import { useLayoutEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
+import { plateTexture } from '../sprites';
 import { useApp } from '../../app/context';
-import { RACK, SHELF } from '../../config';
-import type { FloorLayout, Layout, Rect, ZoneArea } from '../../domain/layout';
+import { RACK, SHELF, BUILDING } from '../../config';
+import type { FloorLayout, Layout, Rect, ZoneArea, Door } from '../../domain/layout';
 import { SCENE, ZONE_FLOOR, ZONE_PILL } from '../colors';
 
 /** 층 높이(벽) [가정] — 랙 6m + 맨 위 짐 2m 위로 */
@@ -114,64 +115,129 @@ function Zones({ f }: { f: FloorLayout }) {
   );
 }
 
-/** 높은 투명벽 — 건물 둘레 + 5F 냉동 방(랙 구역 둘레). 투명도는 controller.wallOpacity */
+/**
+ * 벽 — 건물 둘레(높은 투명벽) + 온도 방 단열 패널 벽(높이 BUILDING.coldWallH, 반투명, 벽 위 "냉동 -20°C"/"냉장 3°C") [사용자 2026-11-25 §2].
+ * 문 자리는 비우고 문 모양만: 지게차 출입문(노란 문틀) · 박스·R/T 반출 에어커튼(투명 띠) · 냉동 전실 문(문틀).
+ * 투명도는 controller.wallOpacity — 위 [벽 / 벽 숨김] 토글(MFC 와 같음).
+ */
 function Walls({ f, L }: { f: FloorLayout; L: Layout }) {
   const { controller } = useApp();
   const mats = useRef<THREE.MeshStandardMaterial[]>([]);
+  const groups = useRef<THREE.Object3D[]>([]);
   useFrame(() => {
     const o = controller.wallOpacity;
     for (const m of mats.current) {
       if (!m) continue;
-      m.opacity = o;
+      const cold = m.userData.cold as boolean;
+      m.opacity = cold ? Math.min(0.55, o * 1.6) : o;
       m.visible = o > 0.01;
     }
+    for (const g of groups.current) if (g) g.visible = o > 0.01;
   });
   const t = 0.25;
-  const walls = useMemo(() => {
-    const out: { r: Rect; glass: boolean }[] = [
-      { r: { x0: -t, z0: -t, x1: L.width + t, z1: 0 }, glass: false },
-      { r: { x0: -t, z0: L.depth, x1: L.width + t, z1: L.depth + t }, glass: false },
-      { r: { x0: -t, z0: 0, x1: 0, z1: L.depth }, glass: false },
-      { r: { x0: L.width, z0: 0, x1: L.width + t, z1: L.depth }, glass: false },
+  const { walls, doors, labels } = useMemo(() => {
+    const walls: { r: Rect; cold: boolean; h: number }[] = [
+      { r: { x0: -t, z0: -t, x1: L.width + t, z1: 0 }, cold: false, h: WALL_H },
+      { r: { x0: -t, z0: L.depth, x1: L.width + t, z1: L.depth + t }, cold: false, h: WALL_H },
+      { r: { x0: -t, z0: 0, x1: 0, z1: L.depth }, cold: false, h: WALL_H },
+      { r: { x0: L.width, z0: 0, x1: L.width + t, z1: L.depth }, cold: false, h: WALL_H },
     ];
-    // 냉동 방 — 5F 냉동 랙 구역 둘레(남쪽은 바깥벽). 유리처럼 옅게
-    for (const room of f.rooms.filter((x) => x.temp === 'FROZEN')) {
-      const r = room.rect;
-      const rz = f.walk.rackZ;
-      for (const x of [r.x0, r.x1]) {
-        if (x <= 0.01 || x >= L.width - 0.01) continue; // 바깥벽과 겹침
-        // 옆벽은 랙 앞 가로 통로 자리(폭 4 m)를 비운다 — 지게차가 이웃 방에서 드나듦
-        out.push({ r: { x0: x - t / 2, z0: r.z0, x1: x + t / 2, z1: rz - 2 }, glass: true });
-        out.push({ r: { x0: x - t / 2, z0: rz + 2, x1: x + t / 2, z1: r.z1 }, glass: true });
+    const doors: { d: Door; h: number }[] = [];
+    const labels: { text: string; x: number; z: number; temp: 'FROZEN' | 'CHILLED' }[] = [];
+    for (const room of f.coldRooms) {
+      const H = BUILDING.coldWallH;
+      for (const s of room.walls) {
+        // 문 자리를 비우고 벽 조각들로
+        const along = s.z0 === s.z1 ? 'x' : 'z';
+        const a0 = along === 'x' ? s.x0 : s.z0;
+        const a1 = along === 'x' ? s.x1 : s.z1;
+        const cuts = room.doors
+          .filter((d) => (along === 'x' ? d.z0 === d.z1 && Math.abs(d.z0 - s.z0) < 0.01 : d.x0 === d.x1 && Math.abs(d.x0 - s.x0) < 0.01))
+          .map((d) => (along === 'x' ? [d.x0, d.x1] : [d.z0, d.z1]) as [number, number])
+          .filter(([c0, c1]) => c1 > a0 && c0 < a1)
+          .sort((p, q) => p[0] - q[0]);
+        let cur = a0;
+        for (const [c0, c1] of [...cuts, [a1, a1] as [number, number]]) {
+          if (c0 > cur + 0.05)
+            walls.push({ r: along === 'x' ? { x0: cur, z0: s.z0 - t / 2, x1: c0, z1: s.z0 + t / 2 } : { x0: s.x0 - t / 2, z0: cur, x1: s.x0 + t / 2, z1: c0 }, cold: true, h: H });
+          cur = Math.max(cur, c1);
+        }
+        // 벽 위 온도 표시 — 긴 벽마다 하나
+        if (a1 - a0 > 8) labels.push({ text: room.label, x: along === 'x' ? (a0 + a1) / 2 : s.x0, z: along === 'x' ? s.z0 : (a0 + a1) / 2, temp: room.temp });
       }
-      // 북쪽 벽은 문 두 곳(통로 쪽, 폭 4 m — 지게차·카트)을 비워 세 조각 [시뮬, MFC 냉동 방 문처럼]
-      const w = r.x1 - r.x0;
-      const doors = [r.x0 + w * 0.25, r.x0 + w * 0.75];
-      let x = r.x0;
-      for (const d of doors) {
-        out.push({ r: { x0: x, z0: r.z0 - t / 2, x1: d - 2, z1: r.z0 + t / 2 }, glass: true });
-        x = d + 2;
-      }
-      out.push({ r: { x0: x, z0: r.z0 - t / 2, x1: r.x1, z1: r.z0 + t / 2 }, glass: true });
+      for (const d of room.doors) doors.push({ d, h: H });
     }
-    return out;
+    return { walls, doors, labels };
   }, [f, L]);
+  let mi = 0;
   return (
     <>
       {walls.map((w, i) => (
-        <mesh key={i} position={[(w.r.x0 + w.r.x1) / 2, WALL_H / 2, (w.r.z0 + w.r.z1) / 2]} raycast={() => null}>
-          <boxGeometry args={[w.r.x1 - w.r.x0, WALL_H, w.r.z1 - w.r.z0]} />
+        <mesh key={i} position={[(w.r.x0 + w.r.x1) / 2, w.h / 2, (w.r.z0 + w.r.z1) / 2]} raycast={() => null}>
+          <boxGeometry args={[w.r.x1 - w.r.x0, w.h, w.r.z1 - w.r.z0]} />
           <meshStandardMaterial
             ref={(m: THREE.MeshStandardMaterial | null) => {
-              if (m) mats.current[i] = m;
+              if (m) {
+                m.userData.cold = w.cold;
+                mats.current[mi++] = m;
+              }
             }}
-            color={w.glass ? 0xd2e4fa : SCENE.wall}
+            color={w.cold ? 0xe6f0fb : SCENE.wall}
             transparent
             opacity={0.32}
             roughness={0.4}
             depthWrite={false}
           />
         </mesh>
+      ))}
+      {doors.map(({ d, h }, i) => {
+        const alongX = d.z0 === d.z1;
+        const len = alongX ? d.x1 - d.x0 : d.z1 - d.z0;
+        const cx = (d.x0 + d.x1) / 2;
+        const cz = (d.z0 + d.z1) / 2;
+        const color = d.kind === 'FORKLIFT' ? 0xf2c94c : d.kind === 'AIR_CURTAIN' ? 0x7fc4f5 : 0xb0bccc;
+        return (
+          <group
+            key={`d${i}`}
+            ref={(g) => {
+              if (g) groups.current[i] = g;
+            }}
+          >
+            {/* 문틀(양 기둥 + 윗틀) */}
+            {[-1, 1].map((sgn) => (
+              <mesh key={sgn} position={alongX ? [cx + (sgn * len) / 2, h / 2, cz] : [cx, h / 2, cz + (sgn * len) / 2]} raycast={() => null}>
+                <boxGeometry args={[0.18, h, 0.18]} />
+                <meshStandardMaterial color={color} />
+              </mesh>
+            ))}
+            <mesh position={[cx, (d.kind === 'FORKLIFT' ? 4.2 : 2.6) + 0.1, cz]} raycast={() => null}>
+              <boxGeometry args={alongX ? [len, 0.2, 0.25] : [0.25, 0.2, len]} />
+              <meshStandardMaterial color={color} />
+            </mesh>
+            {d.kind === 'AIR_CURTAIN' && (
+              // 에어커튼 — 늘어진 투명 띠
+              <mesh position={[cx, 1.3, cz]} raycast={() => null}>
+                <boxGeometry args={alongX ? [len * 0.96, 2.6, 0.04] : [0.04, 2.6, len * 0.96]} />
+                <meshStandardMaterial color={0xbfe3ff} transparent opacity={0.35} depthWrite={false} />
+              </mesh>
+            )}
+            <sprite position={[cx, (d.kind === 'FORKLIFT' ? 4.2 : 2.6) + 0.7, cz]} scale={[2.6, 0.62, 1]}>
+              <spriteMaterial map={plateTexture(d.kind === 'FORKLIFT' ? '지게차 문' : d.kind === 'AIR_CURTAIN' ? '에어커튼 (박스·R/T)' : '냉동 전실 문', { w: 384, h: 92 })} depthWrite={false} />
+            </sprite>
+          </group>
+        );
+      })}
+      {labels.map((l, i) => (
+        <sprite
+          key={`l${i}`}
+          ref={(g) => {
+            if (g) groups.current[doors.length + i] = g;
+          }}
+          position={[l.x, BUILDING.coldWallH + 0.7, l.z]}
+          scale={[3.6, 0.9, 1]}
+        >
+          <spriteMaterial map={plateTexture(l.text, { bg: l.temp === 'FROZEN' ? '#2f6fd6' : '#2aa36b', fg: '#ffffff', w: 384, h: 96 })} depthWrite={false} />
+        </sprite>
       ))}
     </>
   );

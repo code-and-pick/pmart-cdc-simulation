@@ -4,7 +4,7 @@ import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { useEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { AppContext, useApp, useTick, useView, type AppCtx } from '../../app/context';
-import { OUTBOUND, RACK, SHELF, TMS } from '../../config';
+import { OUTBOUND, RACK, SHELF, TMS, BUILDING } from '../../config';
 import { TEMP_KO } from '../../sim/simulation';
 import { B1 } from '../../sim/site';
 import type { FloorLayout, Location } from '../../domain/layout';
@@ -12,7 +12,7 @@ import { SCENE, ZONE_COLOR, zoneBoxColor } from '../colors';
 import { boxTexture, palletTexture, plateTexture } from '../sprites';
 import { Agents, SimDriver } from './Agents';
 import { Facility, Lights } from './Facility';
-import { EquipmentModel, FreightLift, RollContainer, WorkLights } from './Equipment3D';
+import { EquipmentModel, FreightLift, Inbound, RollContainer, WorkLights } from './Equipment3D';
 import { CameraRig, CellLabels, Picker } from './Core';
 import { Shelves } from './Shelves';
 import { BEAM_H, beamY, LOAD_MAX } from '../rackGeom';
@@ -166,7 +166,9 @@ function Loads({ f }: { f: FloorLayout }) {
       tmp.scale.set(q ? d : 0, q ? deckH : 0, q ? w : 0);
       tmp.updateMatrix();
       decks.current!.setMatrixAt(i, tmp.matrix);
-      const h = (LOAD_MAX - deckH) * (0.4 + 0.6 * ratio);
+      // 저온 방은 천장 단열·냉각기로 짐 높이 1.7m [가정 BUILDING.coldPalletH], 상온 2.0m
+      const hMax = l.temp === 'AMBIENT' ? LOAD_MAX : Math.min(LOAD_MAX, BUILDING.coldPalletH);
+      const h = (hMax - deckH) * (0.4 + 0.6 * ratio);
       tmp.position.set(l.pos.x, base + deckH + h / 2, l.pos.z);
       tmp.scale.set(q ? d * 0.96 : 0, q ? h : 0, q ? w * 0.96 : 0);
       tmp.updateMatrix();
@@ -315,6 +317,9 @@ function Basement() {
           label={`화물 승강기 ${l.no}`}
           open={() => (sim.agents.some((a) => a.floor === 'B1' && Math.abs(a.pos.x - (l.rect.x0 + l.rect.x1) / 2) < 2 && a.pos.z > B1.liftZ + 1 && a.pos.z < B1.liftZ + 5) ? 1 : 0)}
         />
+      ))}
+      {layout.b1Equipment.map((e) => (
+        <Inbound key={e.label} e={e} />
       ))}
       {layout.docks.map((d) => (
         <group key={d.code} position={[d.pos.x, 0, 0]}>

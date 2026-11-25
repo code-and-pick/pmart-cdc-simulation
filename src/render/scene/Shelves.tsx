@@ -132,8 +132,8 @@ function ShelfStock({ f }: { f: FloorLayout }) {
     const stock = backend.ledger.onHandByLocation();
     const color = new THREE.Color();
     f.shelves.forEach((l, i) => {
-      if (l.bin) {
-        // 오토스토어 빈 — 선반에 그리지 않음
+      if (l.bin || l.lane) {
+        // 오토스토어 칸·야채 레인 — 선반에 그리지 않음(각자 모형이 그림)
         tmp.scale.set(0, 0, 0);
         tmp.position.set(0, -10, 0);
         tmp.updateMatrix();

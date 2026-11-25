@@ -205,9 +205,16 @@ export class ViewController extends Emitter {
   }
 
   /** 벽 투명도 — MFC 와 같음: 전체 보기 0.32, 구역에 들어가면 0.07(안이 보이게), 칸 정면이면 0 */
+  /** 사용자가 고른 벽 투명도(위 [벽 / 벽 숨김] — MFC 와 같음), null 이면 화면 상태대로 */
+  wallUser: number | null = null;
   get wallOpacity(): number {
     if (this.nearCut > 0) return 0;
-    return this.focusedZone === 'ALL' ? 0.32 : 0.07;
+    return this.wallUser ?? (this.focusedZone === 'ALL' ? 0.32 : 0.07);
+  }
+
+  setWallOpacity(o: number) {
+    this.wallUser = o;
+    this.emit();
   }
 
   setLabelMode(m: LabelMode) {

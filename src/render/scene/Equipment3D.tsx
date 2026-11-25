@@ -9,7 +9,7 @@ import { useFrame } from '@react-three/fiber';
 import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { useApp } from '../../app/context';
-import { MFCS } from '../../config';
+import { AUTOSTORE, MFCS } from '../../config';
 import type { Equip } from '../../domain/layout';
 import type { FloorNo } from '../../domain/sites/chilgok';
 import { autostorePorts, dasRows, mfcSlotIndex } from '../../sim/site';
@@ -517,22 +517,107 @@ function qtyTexture(qty: number, color: string): THREE.CanvasTexture {
   return t;
 }
 
-/** DPS 박스 컨베이어 — DPS 피킹은 냉동 선반에서, 여기는 MFC 빈 박스가 들어오고 닫은 박스가 나가는 컨베이어만(사용자 2026-11-25) */
+/** DPS 박스 컨베이어 — 냉동 전실 안에서 박스를 받아 에어커튼을 지나 방 밖 출고대기 쪽으로(동 → 서). 길쭉한 쪽으로 뻗는다 */
 function DpsConveyor({ e, floor }: { e: Equip; floor: FloorNo }) {
   const { sim } = useApp();
   const busy = () => sim.speed > 0 && sim.lights.some((l) => l.floor === floor && l.kind === 'DPS');
   const r = e.rect;
-  const len = r.z1 - r.z0 - 1.2;
+  const alongX = r.x1 - r.x0 >= r.z1 - r.z0;
+  const len = (alongX ? r.x1 - r.x0 : r.z1 - r.z0) - 0.6;
+  const cx = (r.x0 + r.x1) / 2;
   const cz = (r.z0 + r.z1) / 2;
-  const xs = [(r.x0 + r.x1) / 2 - 0.9, (r.x0 + r.x1) / 2 + 0.9];
+  const path = alongX ? [new THREE.Vector3(r.x1 - 0.4, 0.86, cz), new THREE.Vector3(r.x0 + 0.4, 0.86, cz)] : [new THREE.Vector3(cx, 0.86, r.z1 - 0.4), new THREE.Vector3(cx, 0.86, r.z0 + 0.4)];
   return (
     <group>
-      {xs.map((x) => (
-        <Conveyor key={x} x={x} z={cz} len={len} dir="z" w={0.7} h={0.8} />
-      ))}
-      {/* 빈 박스 들어옴(남 → 북) · 닫은 박스 나감(북 → 남) */}
-      <FlowBoxes path={[new THREE.Vector3(xs[0], 0.86, r.z1 - 0.6), new THREE.Vector3(xs[0], 0.86, r.z0 + 0.6)]} n={4} busy={busy} color={0xe6e9ee} size={[0.42, 0.28, 0.32]} />
-      <FlowBoxes path={[new THREE.Vector3(xs[1], 0.86, r.z0 + 0.6), new THREE.Vector3(xs[1], 0.86, r.z1 - 0.6)]} n={4} busy={busy} color={0xd2a679} size={[0.42, 0.3, 0.32]} />
+      <Conveyor x={cx} z={cz} len={len} dir={alongX ? 'x' : 'z'} w={0.8} h={0.8} />
+      <FlowBoxes path={path} n={Math.max(4, Math.floor(len / 3))} busy={busy} color={0xd2a679} size={[0.42, 0.3, 0.32]} />
+    </group>
+  );
+}
+
+/** 야채 바닥 적치 레인(6F 냉장) — 자리마다 나무 팔레트 + 초록 크레이트 더미(현물만큼 높이). 크레이트는 입고 용기, 분배 크레이트(MFC 별)는 출고 용기 */
+function VegLanes({ e, floor }: { e: Equip; floor: FloorNo }) {
+  const { backend, layout } = useApp();
+  const f = layout.floors.find((x) => x.floor === floor)!;
+  const cells = useMemo(() => f.shelves.filter((l) => l.lane), [f]);
+  const pal = useRef<THREE.InstancedMesh>(null!);
+  const crates = useRef<THREE.InstancedMesh>(null!);
+  const ver = useRef(-1);
+  useLayoutEffect(() => {
+    cells.forEach((l, i) => {
+      tmp.position.set(l.pos.x, 0.07, l.pos.z);
+      tmp.rotation.set(0, 0, 0);
+      tmp.scale.set(1.0, 0.14, 1.0);
+      tmp.updateMatrix();
+      pal.current.setMatrixAt(i, tmp.matrix);
+    });
+    pal.current.instanceMatrix.needsUpdate = true;
+  }, [cells]);
+  useFrame(() => {
+    if (ver.current === backend.ledger.version) return;
+    ver.current = backend.ledger.version;
+    const stock = backend.ledger.onHandByLocation();
+    cells.forEach((l, i) => {
+      const q = stock.get(l.code) ?? 0;
+      const h = q ? 0.3 + 1.1 * Math.min(1, q / l.capacity) : 0;
+      tmp.position.set(l.pos.x, 0.14 + h / 2, l.pos.z);
+      tmp.rotation.set(0, 0, 0);
+      tmp.scale.set(q ? 0.95 : 0, q ? h : 0, q ? 0.95 : 0);
+      tmp.updateMatrix();
+      crates.current.setMatrixAt(i, tmp.matrix);
+    });
+    crates.current.instanceMatrix.needsUpdate = true;
+  });
+  void e;
+  return (
+    <group>
+      <instancedMesh ref={pal} args={[undefined, undefined, cells.length]} frustumCulled={false}>
+        <boxGeometry />
+        <meshStandardMaterial color={0xd9b98a} roughness={0.85} map={palletTexture()} />
+      </instancedMesh>
+      <instancedMesh ref={crates} args={[undefined, undefined, cells.length]} frustumCulled={false}>
+        <boxGeometry />
+        <meshStandardMaterial color={0x3aa35a} roughness={0.7} />
+      </instancedMesh>
+    </group>
+  );
+}
+
+/** 오토스토어 포트 앞 MFC 박스 다섯(PPC-01~05) + 위 정보판(로봇·대기 통·포트 가동률) [사용자 §5] */
+function PortBoxes({ e }: { e: Equip }) {
+  const { sim } = useApp();
+  const ports = autostorePorts(e.rect);
+  const info = useRef<THREE.Sprite>(null!);
+  const last = useRef('');
+  useFrame(() => {
+    const u = sim.portUtil();
+    const text = `로봇 ${AUTOSTORE.robots} · 대기 통 ${sim.auto.waiting}\n포트 가동률 ${u.length ? u.map((x) => Math.round(x * 100) + '%').join(' / ') : '-'}`;
+    if (text !== last.current && info.current) {
+      last.current = text;
+      (info.current.material as THREE.SpriteMaterial).map = plateTexture(text, { w: 384, h: 128 });
+      (info.current.material as THREE.SpriteMaterial).needsUpdate = true;
+    }
+  });
+  return (
+    <group>
+      {ports.map((px, p) =>
+        MFCS.map((m, i) => (
+          <group key={`${p}${m.id}`} position={[px + (i - (MFCS.length - 1) / 2) * 0.42, 0, e.rect.z1 - 0.3]}>
+            <mesh position={[0, 0.95, 0]}>
+              <boxGeometry args={[0.36, 0.26, 0.3]} />
+              <meshStandardMaterial color={0xd2a679} roughness={0.85} map={boxTexture()} />
+            </mesh>
+            {p === 0 && (
+              <sprite position={[0, 1.4, 0]} scale={[0.5, 0.2, 1]}>
+                <spriteMaterial map={plateTexture(`PPC-${String(m.staging).padStart(2, '0')}`, { w: 192, h: 72 })} depthWrite={false} />
+              </sprite>
+            )}
+          </group>
+        )),
+      )}
+      <sprite ref={info} position={[(e.rect.x0 + e.rect.x1) / 2, 6.2, (e.rect.z0 + e.rect.z1) / 2]} scale={[4.2, 1.4, 1]}>
+        <spriteMaterial map={plateTexture('오토스토어', { w: 384, h: 128 })} depthWrite={false} />
+      </sprite>
     </group>
   );
 }
@@ -541,7 +626,7 @@ function DpsConveyor({ e, floor }: { e: Equip; floor: FloorNo }) {
  * 입고 검수 — 온도대마다(사용자 2026-11-25 "입고 검수 구역 … 온도별로 각각"). 승강기로 올라온 입고 팔레트를 내려놓고 수량·기한·온도를 확인하는 자리.
  * 입고 업무 자체는 시뮬레이션 범위 밖(scope S-3) — 자리·모형만. 저온은 랩 위 은색 보냉 덮개.
  */
-function Inbound({ e }: { e: Equip }) {
+export function Inbound({ e }: { e: Equip }) {
   const r = e.rect;
   const cold = e.temp && e.temp !== 'AMBIENT';
   const cols = Math.max(2, Math.floor((r.x1 - r.x0 - 3) / 1.6));
@@ -746,6 +831,12 @@ export function EquipmentModel({ e, floor }: { e: Equip; floor: FloorNo }) {
   if (e.kind === 'SPLIT') return <DasLines e={e} floor={floor} split />;
   if (e.kind === 'DPS') return <DpsConveyor e={e} floor={floor} />;
   if (e.kind === 'INBOUND') return <Inbound e={e} />;
+  if (e.kind === 'VEG_LANES') return <VegLanes e={e} floor={floor} />;
   if (e.kind === 'OFFICE') return <Office e={e} />;
-  return <AutoStore e={e} />;
+  return (
+    <>
+      <AutoStore e={e} />
+      <PortBoxes e={e} />
+    </>
+  );
 }
