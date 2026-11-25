@@ -35,7 +35,7 @@ MockBackend 가 계약 의미를 흉내 내며 정한 값. 백엔드가 다르�
 | 값 | 내용 | 근거 |
 |---|---|---|
 | 피킹 작업 나눔 | (0.9.0 PR #484 기준) 목은 통로 방식(AISLE_PICK_METHOD)으로 DISCRETE·REGION_BATCH·SKU_BATCH 를 만들고 위치 코드 순으로 20줄씩 자름(서버 batch-max-lines 기본값 없음과 다름), DPS 는 컨베이어 구역 경계에서도 자름(R-20). 내주는 순서는 계약대로 작업 기한 → 만든 순 | 계약 0.9.0 + 시뮬 |
-| 칠곡 통로 피킹 방식 | 5F A 선반 = DPS · 랙 1단 박스 피킹면(5F C·D, 7F G) = BOX_PICK · 6F 야채 레인 93 = DISTRIBUTION · LINE = 6F B 선반 + 5F F·7F G 선반(2026-11-26 — 상온 DAS 로 가는 인기 상품을 모든 MFC 몫으로 묶어 집게) · 5F E 선반·오토스토어(7F H 61~62) = FC | cdc-location 0.5.0 aisle-pick-methods 를 배치로 정함 [시뮬] |
+| 칠곡 통로 피킹 방식 | 5F A 선반 = DPS · 랙 1단 박스 피킹면(5F C·D, 7F G) = BOX_PICK · 6F 야채 레인 93 = DISTRIBUTION · LINE = 6F B 선반 + 5F F·7F G 선반(2026-11-26 — 상온 DAS 로 가는 인기 상품을 모든 MFC 몫으로 묶어 집게) · 5F E 선반·오토스토어(7F H 61~62) = FC — 백엔드 시드 PR #502 반영(80통로: DPS 26·BOX_PICK 16·DISTRIBUTION 1·LINE 31·FC 6) | cdc-location 0.5.0 aisle-pick-methods 를 배치로 정함 [시뮬] |
 | 상품 수·요청 | SKU 11,660 = 선반 목표 칸(칸 하나 = SKU 하나, B-1), 5F C~F 각 190. MFC 요청 600줄 중 35% 를 잘 나가는 상품 2% 묶음에서(모든 MFC 공통) — 라인에서 한 상품이 여러 MFC 칸으로 | 실서버 SKU·요청은 백엔드 — LAN 시작 재고는 실제 LAN 상품(약 504개)만, 기둥 하나 = SKU 하나(섞인 팔레트 없음, 백엔드 회신) |
 | 7F H 오토스토어 | H 피킹 칸(PICK_FACE 61~)을 오토스토어 빈으로 씀 — 선반 없음, 집는 곳은 포트 | 백엔드 회신(2026-11-25): 위치 유형은 PICK_FACE 그대로(할당·피킹·보충 규칙이 선반과 같음), 5F E·F 오토스토어 없앰은 chilgok-dc.md 에 반영(PR #474). **남은 일: 오토스토어 60만 유닛(CAPACITY.autostoreBins × unitsPerBin)과 H 칸 용량(선반 칸 × 80)의 관계를 최종 배치 때 맞춤** |
 | 센터 코드 | `CDC01` | 백엔드 CDC-1 |
