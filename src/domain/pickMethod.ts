@@ -11,7 +11,7 @@ export function pickMethodOf(locationCode: string): PickMethod | undefined {
   if (aisle === AISLE_PICK_METHOD.vegLaneAisle) return 'DISTRIBUTION';
   if (aisle >= 90) return undefined;
   if (zone === AISLE_PICK_METHOD.frozenShelfZone) return 'DPS';
-  if (zone === AISLE_PICK_METHOD.lineShelfZone) return 'LINE';
+  if (zone === AISLE_PICK_METHOD.lineShelfZone || AISLE_PICK_METHOD.ambientLineZones.includes(zone)) return 'LINE';
   return 'FC';
 }
 

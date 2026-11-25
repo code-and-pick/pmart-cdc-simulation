@@ -79,8 +79,8 @@ describe('층 배치 [사용자 §3]', () => {
   });
 });
 
-describe('출고 흐름 배치 [사용자 §9]', () => {
-  it('층마다 휠소터 줄과 DAS 존이 출고대기 바로 앞 — DAS 존 x 가 출고대기 x 와 겹치고, 휠소터 줄은 출고대기와 DAS 존 사이', () => {
+describe('출고 흐름 배치 [기사 — 상온·냉장·냉동 모두 휠소터를 이용한 DAS·DPS]', () => {
+  it('층마다 휠소터 줄과 DAS 존이 출고대기 바로 앞 — DAS 존 x 가 출고대기 x 와 겹치고, 휠소터 줄은 출고대기와 DAS 존 사이. 5F 냉동은 DPS', () => {
     for (const f of L.floors) {
       const das = f.equipment.filter((e) => e.kind === 'DAS');
       expect(das.length).toBeGreaterThan(0);
@@ -92,6 +92,7 @@ describe('출고 흐름 배치 [사용자 §9]', () => {
         expect(sorter.rect.z0 > Math.max(...f.staging.map((s) => s.pos.z)) && sorter.rect.z1 <= d.rect.z0).toBe(true);
       }
     }
+    expect(F(5).equipment.some((e) => e.kind === 'DPS')).toBe(true);
   });
 });
 

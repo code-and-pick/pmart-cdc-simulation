@@ -80,7 +80,7 @@ describe('하루 돌리기', () => {
     expect(sim.events.filter((e) => e.kind === 'warn' && !e.text.includes('결품') && !e.text.includes('검품 불합격') && !e.text.startsWith('라인 1칸만') && !e.text.includes('보충이 끝나지 않아'))).toEqual([]);
 
     // 22:00 R/T 카운팅·배차 → 출차 30분 전 상차(방문 역순) → 노선별 출차(TOUT) → 도착·하차·인계 → MFC 수령 → 복귀
-    await runUntil(sim, 24 + 10.5);
+    await runUntil(sim, 24 + 11.5); // 목포·춘천 01:00 출차 → 05:30 도착 → 06:00 하차 끝 → 10:30 복귀(사용자 노선표)
     expect(sim.events.some((e) => e.text.startsWith('22:00 R/T 카운팅'))).toBe(true);
     const runs = [...sim.runs.values()];
     expect(runs.length).toBeGreaterThan(0);

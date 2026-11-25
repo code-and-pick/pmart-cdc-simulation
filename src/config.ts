@@ -156,8 +156,8 @@ export const AUTOSTORE = {
   minQty: 8,
   /** 로봇·포트 [가정 — 설치비 비례] · 포트당 시간당 통 교환 상한 [가정] */
   robots: 10,
-  /** 포트 2 → 3(2026-11-25 — SKU 2,400 으로 늘어 포트 대기 평균 60초·가동 70%) */
-  ports: 3,
+  /** 포트 2 [가정] — 2026-11-26 빈 포트 아무 데나·다음 통 미리 줄 세우기로 고친 뒤 3개는 가동 26% 라 2개로 */
+  ports: 2,
   portBinsPerHour: 300,
   /** 로봇이 통 하나 가져오는 시간(s) [가정] */
   fetchSec: 40,
@@ -272,19 +272,21 @@ export const FLOW = {
   conveyorSpeed: 0.5,
   divertSec: 4,
   /** 층별 DAS 라인 작업자(나머지 분류 인원은 분배) · 한 줄 사람 수 [가정] */
-  lineWorkers: { 5: 2, 6: 4, 7: 2 } as Record<5 | 6 | 7, number>,
+  // 라인(DAS) 작업자 — 5F 상온 DAS 존·6F 냉장 라인·7F 생활용품 DAS 존(기사 "상온·냉장·냉동 모두 휠소터를 이용한 DAS")
+  lineWorkers: { 5: 1, 6: 2, 7: 2 } as Record<5 | 6 | 7, number>,
   /** DPS(5F 냉동 전실) — 구역 수 · 구역당 작업자 · 컨베이어 속도(m/s) · 동시에 도는 박스 · 구역에서 박스 미는 시간(s) [가정] */
-  dps: { zones: 5, workersPerZone: 2, conveyorSpeed: 0.4, maxBoxes: 20, zoneDwellSec: 3 },
+  dps: { zones: 5, workersPerZone: 1, conveyorSpeed: 0.4, maxBoxes: 20, zoneDwellSec: 3 },
 };
 
 export const WORKFORCE: Record<5 | 6 | 7, { fc: number; sort: number; jockey: number; replDay: number; replEve: number }> = {
   // sort = 6F 라인(DAS)·분배 작업자(번호 홀수 라인 · 짝수 분배). 5F·7F 는 피킹 = 분류라 분류대 사람 없이 FC·DPS 로 [사용자 2026-11-25 설계 §5.4]
   // 5F: 상온 FC 6 + DAS 2(냉동은 DPS 구역 작업자 FLOW.dps), 6F: DAS 4 + 분배 2, 7F: FC 7 + DAS 2 [사용자 §9]
   // 2026-11-25 가동률 분석으로 다시 배분(사용자 "유휴 인원 — 병목인지 인원 과다인지"): 5F·6F FC·자키는 가동 5~32%(일이 적음), 7F FC 는 91%(오토스토어 SKU 2,400 으로 늘어 병목) → 5F FC 6→3·자키 3→2, 6F FC 5→4·자키 3→2, 7F FC 7→10·자키 4→3
-  5: { fc: 3, sort: 2, jockey: 2, replDay: 5, replEve: 1 },
+  // 2026-11-25 다시(사용자 "인원 과다 고쳐"): 상온 DAS 없앰 → 5F·7F 분류 0, 5F FC 3→2 · 6F FC 4→3, 자키 줄임, 6F 라인 2명(+분배 2명, 사용자 "라인 2~3명·분배 2명"). 보충은 13:00 전에 끝나야 해 5명 그대로(3명이면 배포가 늦어 출차 4대 늦음), DPS 도 구역당 2명 그대로(1명이면 마지막 피킹 21:45)
+  5: { fc: 2, sort: 1, jockey: 1, replDay: 5, replEve: 1 },
   // 6F: 라인 6명(줄 3개에 2명씩 — 한 줄에서 색으로 내 몫 구분) + 분배 2명, 자키 3명(라인에 상품 박스 공급) [사용자 2026-11-25 "라인 2~3명·분배 2명", "라인 줄 수에 맞게"]
-  6: { fc: 4, sort: 6, jockey: 2, replDay: 5, replEve: 1 },
-  7: { fc: 10, sort: 2, jockey: 3, replDay: 5, replEve: 1 },
+  6: { fc: 3, sort: 4, jockey: 2, replDay: 5, replEve: 1 },
+  7: { fc: 7, sort: 2, jockey: 2, replDay: 5, replEve: 1 },
 };
 
 /** 작업 시간·속도 [가정] — 라인 1인 하루 약 2만 걸음 [현장] 을 보정 목표로 */
@@ -363,6 +365,8 @@ export const OUTBOUND = {
   inspectorsPerFloor: 1,
   /** 지하 상차 인원 — 상차 전 박스 스캔 대조(사용자 2026-11-25)로 4 → 6 [가정] */
   loaders: 6,
+  /** 층마다 야간 자키(22:00~ R/T 하강) [가정] */
+  nightJockeys: 1,
   /** 지하 상차 근무 22:00~다음 날 04:30 [가정] — 노선별 출차(01:50~03:40, TMS 출차 공식) 30분 전부터 싣는다 */
   loaderShift: { start: 22 * 60, end: 28 * 60 + 30 },
   rtCountAt: 22 * 60,
@@ -401,21 +405,24 @@ export const TMS = {
     { routeId: 'RT-CHUNGCHEONG', region: '충청권', stops: ['MFC-SEJ-01'] },
     { routeId: 'RT-GANGWON', region: '강원권', stops: ['MFC-CHC-01'] },
   ],
-  /** 주행 시간(분) — 'CDC01' 은 칠곡 */
+  /**
+   * 주행 시간(분) — 'CDC01' 은 칠곡 [사용자 2026-11-25 노선표]. 편도 = 칠곡 → 목포 4:30 · 세종 2:30 · 춘천 4:30 · 부산진구 2:30, 부산진구 → 부산남구 0:20.
+   * 돌아오는 길은 같은 시간으로 본다(부산남구 → 칠곡 = 칠곡 → 부산진구 2:30) [가정]. 정차마다 하차·인계 30분(부산 통합 노선 작업 1시간 = 30분 × 2).
+   */
   travelMin: {
-    'CDC01>MFC-BJG-01': 110,
+    'CDC01>MFC-BJG-01': 150,
     'MFC-BJG-01>MFC-BNG-01': 20,
-    'MFC-BNG-01>CDC01': 115,
-    'CDC01>MFC-MOKPO-01': 210,
-    'MFC-MOKPO-01>CDC01': 210,
-    'CDC01>MFC-SEJ-01': 120,
-    'MFC-SEJ-01>CDC01': 120,
-    'CDC01>MFC-CHC-01': 220,
-    'MFC-CHC-01>CDC01': 220,
+    'MFC-BNG-01>CDC01': 150,
+    'CDC01>MFC-MOKPO-01': 270,
+    'MFC-MOKPO-01>CDC01': 270,
+    'CDC01>MFC-SEJ-01': 150,
+    'MFC-SEJ-01>CDC01': 150,
+    'CDC01>MFC-CHC-01': 270,
+    'MFC-CHC-01>CDC01': 270,
   } as Record<string, number>,
-  /** 첫 MFC 도착 목표(분, D일 0시 기준 — 다음 날 05:30) [가정, TMS §3 첫 도착 05:00~06:00] */
+  /** 첫 MFC 도착 목표(분, D일 0시 기준 — 다음 날 05:30) [사용자 2026-11-25 "첫 MFC 도착 목표 05:30"] — 출차 = 05:30 − 첫 구간 주행 */
   firstArrivalTarget: 24 * 60 + 5 * 60 + 30,
-  /** MFC 하차 30분, 한 MFC 동시 하차 최대 3대 [정본 TMS §3] */
+  /** MFC 하차·인계 30분 [사용자 노선표 작업시간 30분], 한 MFC 동시 하차 최대 3대 [정본 TMS §3] */
   unloadMin: 30,
   unloadBaysPerMfc: 3,
   /** 상차는 노선별 출차 30분 전부터 [정본 TMS §3] */
@@ -436,6 +443,8 @@ export const TMS = {
 export const AISLE_PICK_METHOD = {
   frozenShelfZone: 'A',
   lineShelfZone: 'B',
+  /** 상온에서 DAS 로 가는 선반 구역(모든 MFC 몫을 SKU 로 묶어 집는 LINE 통로) [가정] — 5F F 인기상품 · 7F G 생활용품 선반 */
+  ambientLineZones: ['F', 'G'] as readonly string[],
   vegLaneAisle: 93,
 } as const;
 

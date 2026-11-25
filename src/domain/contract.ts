@@ -1,5 +1,5 @@
 // 계약 타입 사본 — 이름·상태값은 pmart-backend/contracts/openapi 를 그대로 따른다(CLAUDE.md "계약이 정본").
-// cdc-outbound-service.yaml 0.9.0(PR #484, 병합 전 — 묶음 피킹: pickMode·pickMethod·regionCode·trfIds·shares, 지역표) · cdc-inventory-service.yaml(할당·출발 전기·Transit·Commit) · _common.yaml.
+// cdc-outbound-service.yaml 0.10.0(PR #484 묶음 피킹: pickMode·pickMethod·regionCode·trfIds·shares, 지역표 + PR #489 DPS 통로 작업: Task.aisle, 다음 작업 받기 aisles[]) · cdc-inventory-service.yaml(할당·출발 전기·Transit·Commit) · _common.yaml.
 // 계약이 바뀌면 여기를 먼저 고치고 MockBackend·HttpBackend 를 맞춘다.
 
 // ── _common.yaml ─────────────────────────────────────
@@ -166,6 +166,8 @@ export interface Task {
   pickMethod?: PickMethod;
   /** (0.9.0) REGION_BATCH 의 지역. 그 밖은 null */
   regionCode: string | null;
+  /** (0.10.0) DPS 작업의 선반 통로(위치 코드 넷째 구간). 그 밖은 null */
+  aisle?: string | null;
   kind: TaskKind;
   state: TaskState;
   version: number;
@@ -182,6 +184,8 @@ export interface NextTaskRequest {
   floor?: string;
   /** (0.9.0) */
   pickMode?: PickMode;
+  /** (0.10.0) 선반 통로(위치 코드 넷째 구간, 30개까지) — 그 통로의 DPS 작업만 받는다(통로 없는 작업은 빠짐) */
+  aisles?: string[];
 }
 
 export interface PickResultRequest {

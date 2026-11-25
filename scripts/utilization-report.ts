@@ -11,7 +11,7 @@ const backend = new MockBackend({ now: () => sim?.time ?? 0, baseDate: BASE, cat
 sim = new Simulation(layout, catalog, backend, { baseDate: BASE, seed: 11 });
 const snaps: string[] = [];
 const acts = new Map<string, Map<string, number>>();
-while (sim.time < 34 * 3600) {
+while (sim.time < 36 * 3600) {
   sim.step(5);
   for (let i = 0; i < 40; i++) await Promise.resolve();
   const h = sim.time / 3600;

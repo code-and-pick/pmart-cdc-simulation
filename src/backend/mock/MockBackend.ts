@@ -90,11 +90,6 @@ export class MockBackend implements CdcOutboundPort {
   private readonly eventListeners: EventListener[] = [];
   private seq = 0;
 
-  /** 작업 자르기 — 같은 묶음 안에서 이 값이 바뀌는 곳에서 자른다(시뮬레이터가 정한 값: DPS 컨베이어 구역, R-20) */
-  private cutKey: ((locationCode: string) => string) | null = null;
-  setTaskCut(f: (locationCode: string) => string) {
-    this.cutKey = f;
-  }
   /** 지역 ↔ MFC (0.9.0 regions) */
   private readonly regions = new Map<string, { regionCode: string; regionName: string }>(REGIONS.flatMap((r) => r.mfcIds.map((m) => [m, { regionCode: r.regionCode, regionName: r.regionName }] as const)));
   /** 작업 기한(몫 TRF 중 가장 이른 dueAt) */
@@ -578,7 +573,7 @@ export class MockBackend implements CdcOutboundPort {
    * 같은 SKU·LOT·위치는 한 줄로 합치고 shares[] 에 TRF 별 몫. 줄은 위치 코드 순, TASK.maxLines 로 자른다(서버 batch-max-lines) [시뮬].
    */
   private buildTasks(waveId: string, per: { trfId: string; holds: { sku: string; lot: string; locationCode: string; qty: number }[] }[]): Task[] {
-    type G = { mode: PickMode; method?: PickMethod; region: string | null; lines: Map<string, TaskLine> };
+    type G = { mode: PickMode; method?: PickMethod; region: string | null; aisle: string | null; lines: Map<string, TaskLine> };
     const groups = new Map<string, G>();
     for (const { trfId, holds } of per) {
       const rec = this.trfs.get(trfId)!;
@@ -588,8 +583,9 @@ export class MockBackend implements CdcOutboundPort {
         const [, zone, floor] = h.locationCode.split('-');
         const method = pickMethodOf(h.locationCode);
         const mode = pickModeOf(method);
-        const k = mode === 'DISCRETE' ? `D|${trfId}|${method ?? ''}|${zone}|${floor}` : mode === 'REGION_BATCH' ? `R|${region}|${method}|${zone}|${floor}` : `S|${method}|${zone}|${floor}`;
-        const g = groups.get(k) ?? groups.set(k, { mode, method, region: mode === 'REGION_BATCH' ? region : null, lines: new Map() }).get(k)!;
+        const aisle = method === 'DPS' ? h.locationCode.split('-')[3] : null;
+        const k = mode === 'DISCRETE' ? `D|${trfId}|${method ?? ''}|${zone}|${floor}|${aisle ?? ''}` : mode === 'REGION_BATCH' ? `R|${region}|${method}|${zone}|${floor}` : `S|${method}|${zone}|${floor}`;
+        const g = groups.get(k) ?? groups.set(k, { mode, method, region: mode === 'REGION_BATCH' ? region : null, aisle, lines: new Map() }).get(k)!;
         const lk = `${h.sku}|${h.lot}|${h.locationCode}`;
         const l = g.lines.get(lk) ?? g.lines.set(lk, { sku: h.sku, lot: h.lot, locationCode: h.locationCode, plannedQty: 0, pickedQty: 0, shortQty: 0, shares: [] }).get(lk)!;
         l.plannedQty += h.qty;
@@ -600,18 +596,11 @@ export class MockBackend implements CdcOutboundPort {
     }
     const out: Task[] = [];
     for (const [, g] of [...groups.entries()].sort(([a], [b]) => (a < b ? -1 : 1))) {
-      // 줄 순서 = 동선 순: 자르기 값(DPS 컨베이어 구역 순) → 위치 코드 순
-      const ord = (l: TaskLine) => `${this.cutKey?.(l.locationCode) ?? ""}|${l.locationCode}`;
-      const lines = [...g.lines.values()].sort((a, b) => (ord(a) < ord(b) ? -1 : 1));
+      const lines = [...g.lines.values()].sort((a, b) => (a.locationCode < b.locationCode ? -1 : 1));
       for (const l of lines) l.shares.sort((a, b) => (a.trfId < b.trfId ? -1 : 1));
-      // 자르기: 줄 수(TASK.maxLines) 또는 자르기 값(cutKey — DPS 구역)이 바뀌는 곳
+      // 자르기: 줄 수(TASK.maxLines — 서버 batch-max-lines)
       const chunks: TaskLine[][] = [];
-      for (const l of lines) {
-        const last = chunks[chunks.length - 1];
-        const ck = this.cutKey?.(l.locationCode) ?? '';
-        if (!last || last.length >= TASK.maxLines || (this.cutKey?.(last[0].locationCode) ?? '') !== ck) chunks.push([l]);
-        else last.push(l);
-      }
+      for (let i = 0; i < lines.length; i += TASK.maxLines) chunks.push(lines.slice(i, i + TASK.maxLines));
       for (const ls of chunks) {
         const trfIds = [...new Set(ls.flatMap((l) => l.shares.map((x) => x.trfId)))].sort();
         const t: Task = {
@@ -622,6 +611,7 @@ export class MockBackend implements CdcOutboundPort {
           pickMode: g.mode,
           ...(g.method ? { pickMethod: g.method } : {}),
           regionCode: g.region,
+          aisle: g.aisle,
           kind: 'PICK',
           state: 'CREATED',
           version: 0,
@@ -693,7 +683,7 @@ export class MockBackend implements CdcOutboundPort {
           if (!w || (w.state !== 'RELEASED' && w.state !== 'IN_PROGRESS')) return false;
           if (!t.trfIds.some((id) => { const r = this.trfs.get(id); return r && !r.cancelled && !r.departed; })) return false;
           const sc = this.taskScope(t);
-          return (!body.kind || t.kind === body.kind) && (!body.zone || sc.zone === body.zone) && (!body.floor || sc.floor === String(body.floor)) && (!body.pickMode || t.pickMode === body.pickMode);
+          return (!body.kind || t.kind === body.kind) && (!body.zone || sc.zone === body.zone) && (!body.floor || sc.floor === String(body.floor)) && (!body.pickMode || t.pickMode === body.pickMode) && (!body.aisles?.length || (!!t.aisle && body.aisles.includes(t.aisle)));
         });
         cands.sort((a, b) => {
           const da = this.taskDue.get(a.taskId)!;

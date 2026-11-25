@@ -2,7 +2,7 @@
 // 값은 MOCK 계약 응답(이관·작업·원장 커밋)과 시뮬레이션 줄에서만. 실서버 모드는 같은 계약 응답을 쓰게 될 자리.
 import { useMemo, useState } from 'react';
 import { useApp, useView } from '../app/context';
-import { MFCS, OUTBOUND } from '../config';
+import { MFCS } from '../config';
 import type { Location } from '../domain/layout';
 import { TEMP_KO } from '../sim/simulation';
 import { trfTemp } from '../sim/supply';
@@ -234,23 +234,30 @@ export function AdminBoard() {
       )}
       {tab === 'rt' && (
         <>
-          <div className="note">R/T 회수(빈 롤테이너를 MFC 에서 되가져오는 일)는 사용자 결정으로 범위 밖입니다(2026-11-25 "회수는 빼"). 아래는 MFC 로 나간 R/T 수입니다.</div>
+          <div className="note">MFC 에 R/T 를 내리고 인계할 때 비워 둔 빈 R/T 를 같은 수만큼 돌려받아 싣고, 칠곡에 돌아오면 지하 B1 에 내립니다. 판매 불가·파손 상품 회수는 계약이 없어 넣지 않았습니다.</div>
           <table className="inv">
             <thead>
               <tr>
                 <th>MFC</th>
                 <th>나간 R/T</th>
-                <th>박스</th>
+                <th>회수(차에 실음)</th>
+                <th>B1 도착</th>
+                <th>남음</th>
               </tr>
             </thead>
             <tbody>
               {MFCS.filter((m) => byMfc(m.id)).map((m) => {
-                const boxes = [...sim.runs.values()].flatMap((r) => r.loaded.filter((b) => b.mfcId === m.id && r.departedAt !== undefined));
+                const stops = [...sim.runs.values()].flatMap((r) => r.stops.filter((x) => x.mfcId === m.id).map((x) => ({ r, x })));
+                const out = stops.reduce((a, { x }) => a + (x.rtOut ?? 0), 0);
+                const back = stops.reduce((a, { x }) => a + (x.rtBack ?? 0), 0);
+                const home = stops.reduce((a, { r, x }) => a + (r.state === 'RETURNED' ? (x.rtBack ?? 0) : 0), 0);
                 return (
                   <tr key={m.id}>
                     <td>{m.name}</td>
-                    <td>{Math.ceil(boxes.length / OUTBOUND.boxesPerRt)}</td>
-                    <td>{boxes.length}</td>
+                    <td>{out}</td>
+                    <td>{back}</td>
+                    <td>{home}</td>
+                    <td>{out - home}</td>
                   </tr>
                 );
               })}

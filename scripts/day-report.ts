@@ -9,7 +9,7 @@ const catalog = buildCatalog(layout, BASE);
 let sim!: Simulation;
 const backend = new MockBackend({ now: () => sim?.time ?? 0, baseDate: BASE, catalog });
 sim = new Simulation(layout, catalog, backend, { baseDate: BASE, seed: 11 });
-while (sim.time < 34 * 3600) {
+while (sim.time < 36 * 3600) {
   sim.step(5);
   for (let i = 0; i < 40; i++) await Promise.resolve();
 }

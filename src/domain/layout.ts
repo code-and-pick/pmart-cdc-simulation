@@ -654,10 +654,10 @@ export function buildLayout(): Layout {
   const nAf = aislesFit(width - frzX0);
   f5.racks([{ spec: f5.zone('A'), aisles: nAf }], frzX0, width, '냉동');
   f5.liftsAndStaging();
-  // [사용자 2026-11-25 §9] 출고 흐름: 상품 박스 → 컨베이어 → 휠소터 ─ 박스째: PPC 롤테이너 슈트로 / 낱개: DAS 존 라인. DAS·롤테이너는 출고대기 바로 앞.
+  // 출고 흐름(기사 "상온·냉장·냉동 모두 … 휠소터를 이용한 DAS·DPS"): 상품 → 휠소터 ─ MFC 박스는 PPC 롤테이너 슈트로 / 여러 MFC 가 받는 인기 상품(F 선반, 모든 MFC 몫을 한꺼번에 집음)은 DAS 존으로.
   const [c0, c1] = f5.stagingSpan('C');
   const [a0] = f5.stagingSpan('A');
-  f5.equip('WHEEL_SORTER', '휠소터 (상온 — 박스째 → PPC 슈트 / 낱개 → DAS)', { x0: c0, z0: SORT_Z0, x1: amb5 - 0.6, z1: SORT_Z1 }, 'AMBIENT');
+  f5.equip('WHEEL_SORTER', '휠소터 (상온 — MFC 박스 → PPC 슈트 / 인기 상품 → DAS)', { x0: c0, z0: SORT_Z0, x1: amb5 - 0.6, z1: SORT_Z1 }, 'AMBIENT');
   f5.equip('DAS', 'DAS 존 (상온)', { x0: c0, z0: DAS_Z0, x1: c1, z1: sz1 }, 'AMBIENT');
   f5.shelvesIn('E', [{ x0: 2.5, z0: DAS_Z0, x1: c0 - 1, z1: sz1 }], SKU_PLACE.efShelf);
   f5.shelvesIn('F', [{ x0: c1 + 1, z0: DAS_Z0, x1: amb5 - 0.6, z1: sz1 }], SKU_PLACE.efShelf);
@@ -714,7 +714,7 @@ export function buildLayout(): Layout {
   const gW = f7.shelvesIn('G', [{ x0: g1 + 1, z0: DAS_Z0, x1: width - 8, z1: sz1 }], gShelf - gWest, '생활용품 G 피킹 선반 (동쪽)', '-E');
   const autoX0 = g1 + 1 + gW + 1.0;
   const autoInfo = f7.autostore('H', autoX0, DAS_Z0, sz1, width - autoX0 - 0.5);
-  f7.equip('WHEEL_SORTER', '휠소터 (생활용품 — 박스째 → PPC 슈트 / 낱개 → DAS)', { x0: g0, z0: SORT_Z0, x1: autoInfo.rect.x1, z1: SORT_Z1 }, 'AMBIENT');
+  f7.equip('WHEEL_SORTER', '휠소터 (생활용품 — MFC 박스 → PPC 슈트 / G 선반 → DAS)', { x0: g0, z0: SORT_Z0, x1: autoInfo.rect.x1, z1: SORT_Z1 }, 'AMBIENT');
   f7.equip('OFFICE', 'DC 관리자 사무실', { x0: amb7 + 1, z0: bandDepth + 1, x1: width - 1, z1: bandDepth + 18 });
   f7.equip('INBOUND', '입고 검수 (상온)', { x0: amb7 + 1, z0: bandDepth + 20, x1: width - 1, z1: bandDepth + 36 }, 'AMBIENT');
   const L7 = f7.done({ northZ, northX1: width - 1, roomZ, rackZ, links: [1.2, g1 + 0.5], westX: 1.2 });
