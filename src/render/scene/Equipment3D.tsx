@@ -9,7 +9,7 @@ import { useFrame } from '@react-three/fiber';
 import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { useApp } from '../../app/context';
-import { AUTOSTORE, FLOW, MFCS } from '../../config';
+import { FLOW, MFCS } from '../../config';
 import type { Equip } from '../../domain/layout';
 import type { FloorNo } from '../../domain/sites/chilgok';
 import { autostorePorts, dasRows, mfcSlotIndex } from '../../sim/site';
@@ -355,9 +355,6 @@ function WheelSorter({ e, floor }: { e: Equip; floor: FloorNo }) {
       </StaticMerge>
       <TowerLight x={r.x1 - 0.4} z={r.z1 + 0.3} busy={busy} />
       <FlowBoxes path={[new THREE.Vector3(r.x1 - 0.5, 0.86, cz), new THREE.Vector3(r.x0 + 0.5, 0.86, cz)]} n={Math.max(4, Math.floor(len / 4))} busy={busy} />
-      <sprite position={[r.x1 - 3, 2.2, cz]} scale={[3.2, 0.8, 1]}>
-        <spriteMaterial map={plateTexture(`휠소터 → PPC-01~05 슈트`, { w: 384, h: 96 })} depthWrite={false} />
-      </sprite>
     </group>
   );
 }
@@ -626,27 +623,9 @@ function VegLanes({ e, floor }: { e: Equip; floor: FloorNo }) {
   );
 }
 
-/** 오토스토어 포트 앞 MFC 박스 다섯(PPC-01~05) + 위 정보 카드 하나(통 수·SKU·로봇·포트·대기 통·포트 가동률) [사용자 §5, 2026-11-25 "빈 수 표시"] */
+/** 오토스토어 포트 앞 MFC 박스 다섯(PPC-01~05) — 숫자(통·포트 가동률)는 3D 에 띄우지 않고 왼쪽 구역 패널에(사용자 2026-11-25) [사용자 §5] */
 function PortBoxes({ e }: { e: Equip }) {
-  const { sim, layout } = useApp();
-  const a = layout.autostore;
   const ports = autostorePorts(e.rect);
-  const info = useRef<THREE.Sprite>(null!);
-  const last = useRef('');
-  useFrame(() => {
-    const u = sim.portUtil();
-    const text = [
-      '오토스토어',
-      `통 ${(a?.bins ?? 0).toLocaleString()}개 (자리 ${(a?.binsFit ?? 0).toLocaleString()}) · SKU ${(a?.skus ?? 0).toLocaleString()}`,
-      `로봇 ${AUTOSTORE.robots} · 포트 ${AUTOSTORE.ports} · 대기 통 ${sim.auto.waiting}`,
-      `포트 가동률 ${u.length ? u.map((x) => Math.round(x * 100) + '%').join(' · ') : '아직 없음'}`,
-    ].join('\n');
-    if (text !== last.current && info.current) {
-      last.current = text;
-      (info.current.material as THREE.SpriteMaterial).map = plateTexture(text, { w: 512, h: 240 });
-      (info.current.material as THREE.SpriteMaterial).needsUpdate = true;
-    }
-  });
   return (
     <group>
       {ports.map((px, p) =>
@@ -656,17 +635,9 @@ function PortBoxes({ e }: { e: Equip }) {
               <boxGeometry args={[0.36, 0.26, 0.3]} />
               <meshStandardMaterial color={0xd2a679} roughness={0.85} map={boxTexture()} />
             </mesh>
-            {p === 0 && (
-              <sprite position={[0, 1.4, 0]} scale={[0.5, 0.2, 1]}>
-                <spriteMaterial map={plateTexture(`PPC-${String(m.staging).padStart(2, '0')}`, { w: 192, h: 72 })} depthWrite={false} />
-              </sprite>
-            )}
           </group>
         )),
       )}
-      <sprite ref={info} position={[(e.rect.x0 + e.rect.x1) / 2, 6.4, (e.rect.z0 + e.rect.z1) / 2]} scale={[4.8, 2.25, 1]}>
-        <spriteMaterial map={plateTexture('오토스토어', { w: 512, h: 240 })} depthWrite={false} />
-      </sprite>
     </group>
   );
 }

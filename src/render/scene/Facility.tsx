@@ -8,7 +8,7 @@ import { useLayoutEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { plateTexture } from '../sprites';
 import { useApp } from '../../app/context';
-import { RACK, SHELF } from '../../config';
+import { AUTOSTORE, RACK, SHELF } from '../../config';
 import type { FloorLayout, Layout, Rect, ZoneArea, Door } from '../../domain/layout';
 import { SCENE, ZONE_FLOOR, ZONE_PILL } from '../colors';
 
@@ -377,7 +377,11 @@ export function zoneCards(f: FloorLayout): Card[] {
       out.push(card(z.id, title, `${note}통로 ${aisles} · ${f.locations.filter((l) => l.zone === letter).length.toLocaleString()}칸`, style, cx, RACK_TOP + 0.4, Math.min(...f.rows.map((w) => w.z0)) - 0.6, 3.4, (r.x1 - r.x0) * 0.96));
     } else if (z.kind === 'EQUIP') {
       const m = /^(.*?)\s*\((.*)\)$/.exec(z.label);
-      out.push(card(z.id, m ? m[1] : z.label, m ? m[2] : null, style, cx, 2.6, r.z0 + 0.3, 2.6, (r.x1 - r.x0) * 0.96));
+      if (z.id.endsWith('AUTOSTORE')) {
+        // 오토스토어 — 다른 구역과 같은 이름표(제목 + 핵심 숫자 하나), 격자(높이 4.4 m) 위에. 자세한 숫자는 누르면 왼쪽 구역 패널(사용자 2026-11-25 "PPT 로 우겨 넣은 듯한 카드")
+        const bins = Math.max(0, ...f.shelves.filter((l) => l.bin).map((l) => l.binNo ?? 0));
+        out.push(card(z.id, '오토스토어', `통 ${bins.toLocaleString()} · 포트 ${AUTOSTORE.ports}`, style, cx, 4.9, (r.z0 + r.z1) / 2, 2.6, (r.x1 - r.x0) * 0.96));
+      } else out.push(card(z.id, m ? m[1] : z.label, m ? m[2] : null, style, cx, 2.6, r.z0 + 0.3, 2.6, (r.x1 - r.x0) * 0.96));
     }
   }
   // 피킹 선반 — 선반 구역 전체에 하나
