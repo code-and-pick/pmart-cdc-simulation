@@ -36,6 +36,16 @@ function Summary() {
   ];
   const all: [string, string][] = [
     ['피킹 작업', `${d.tasksDone}/${d.tasks}`],
+    ...(() => {
+      const by = new Map<string, number>();
+      for (const p of sim.pickLog) by.set(p.handling ?? 'FC', (by.get(p.handling ?? 'FC') ?? 0) + p.qty);
+      const all = [...by.values()].reduce((a, b) => a + b, 0) || 1;
+      const pct = (k: string[]) => `${Math.round((100 * k.reduce((a, x) => a + (by.get(x) ?? 0), 0)) / all)}%`;
+      return [
+        ['오토스토어 처리 비율', pct(['PORT'])],
+        ['FC 처리 비율', pct(['FC', 'BOX', 'LINE'])],
+      ] as [string, string][];
+    })(),
     ['보충 남은 칸', d.replNeeds.toLocaleString()],
     ['상차(LOADED)', d.loaded.toLocaleString()],
     ['운행', `${d.tripsDone}/${d.trips} 복귀`],

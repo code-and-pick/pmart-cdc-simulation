@@ -116,7 +116,7 @@ export const SKU_PLACE = {
   /** 6F 야채(바닥 적치 → 분배) SKU [가정] */
   veg: 300,
   /** 5F E·F 선반 SKU(구역마다) [가정] — 5F 띠 공간에 들어가는 만큼 */
-  efShelf: 840,
+  efShelf: 630,
   /** 7F H 오토스토어 SKU [가정] — 작고 가벼운 비식재 일부만(사용자 §5) */
   autostore: 1_500,
   /** 랙 1단이 박스 피킹면(PICK_FACE)인 구역 [가정] — 5F C·D 무거운 상자, 7F G·H 대용량 */
@@ -257,12 +257,29 @@ export const SHELF = {
  * 작업자 수(층마다) [가정] — 자료에 없음(설계 §6). 일용직은 시작할 때 FC·분배·라인에 배정 [현장].
  * repl = 지게차 선반 보충(주간조 08~17 + 석간 1명 — 부족 재할당분 보충), fc = FC 피커, sort = 분배·라인(DAS·DPS·분류기 앞), jockey = 자키(롤테이너를 출고대기로).
  */
+/**
+ * 출고 흐름 [사용자 2026-11-25 §9 — 배민 인천기지 구조: 휠소터 · DAS · DPS · 오토스토어].
+ * 어떤 상품이 어디로: 박스째 PPC 1곳 → 휠소터 → PPC 슈트(롤테이너) · 여러 PPC 가 같이(낱개) → DAS · 냉동(PPC 별 다양한 소량) → DPS · 소형 비식재 → 오토스토어.
+ */
+export const FLOW = {
+  /** 이 수 이상의 PPC 가 같은 날 같이 주문하면 DAS [가정] */
+  dasMinPpc: 2,
+  /** 컨베이어·휠소터 속도(m/s) · 갈래 나누는 시간(s) [가정] */
+  conveyorSpeed: 0.5,
+  divertSec: 4,
+  /** 층별 DAS 라인 작업자(나머지 분류 인원은 분배) · 한 줄 사람 수 [가정] */
+  lineWorkers: { 5: 2, 6: 4, 7: 2 } as Record<5 | 6 | 7, number>,
+  /** DPS(5F 냉동 전실) — 구역 수 · 구역당 작업자 · 컨베이어 속도(m/s) · 동시에 도는 박스 · 구역에서 박스 미는 시간(s) [가정] */
+  dps: { zones: 5, workersPerZone: 2, conveyorSpeed: 0.4, maxBoxes: 20, zoneDwellSec: 3 },
+};
+
 export const WORKFORCE: Record<5 | 6 | 7, { fc: number; sort: number; jockey: number; replDay: number; replEve: number }> = {
   // sort = 6F 라인(DAS)·분배 작업자(번호 홀수 라인 · 짝수 분배). 5F·7F 는 피킹 = 분류라 분류대 사람 없이 FC·DPS 로 [사용자 2026-11-25 설계 §5.4]
-  5: { fc: 8, sort: 0, jockey: 2, replDay: 5, replEve: 1 },
+  // 5F: 상온 FC 6 + DAS 2(냉동은 DPS 구역 작업자 FLOW.dps), 6F: DAS 4 + 분배 2, 7F: FC 7 + DAS 2 [사용자 §9]
+  5: { fc: 6, sort: 2, jockey: 3, replDay: 5, replEve: 1 },
   // 6F: 라인 6명(줄 3개에 2명씩 — 한 줄에서 색으로 내 몫 구분) + 분배 2명, 자키 3명(라인에 상품 박스 공급) [사용자 2026-11-25 "라인 2~3명·분배 2명", "라인 줄 수에 맞게"]
-  6: { fc: 5, sort: 8, jockey: 3, replDay: 5, replEve: 1 },
-  7: { fc: 7, sort: 0, jockey: 2, replDay: 5, replEve: 1 },
+  6: { fc: 5, sort: 6, jockey: 3, replDay: 5, replEve: 1 },
+  7: { fc: 7, sort: 2, jockey: 4, replDay: 5, replEve: 1 },
 };
 
 /** 작업 시간·속도 [가정] — 라인 1인 하루 약 2만 걸음 [현장] 을 보정 목표로 */
@@ -288,7 +305,7 @@ export const WORK = {
   splitPerUnit: 1.3,
   regionScan: 4,
   /** 지역 카트에 MFC 작업을 몇 개까지 모으나 [가정] */
-  cartMaxTasks: 3,
+  cartMaxTasks: 5,
   /** 6F 라인 작업자 수(나머지 분류 인원은 분배), 한 줄에 몇 명 [가정] */
   lineWorkers: 6,
   perLine: 2,
@@ -339,7 +356,8 @@ export const TASK = {
 export const OUTBOUND = {
   /** 층마다 검품원(석간) · 지하 상차 작업자(19~23시) 수 [가정] */
   inspectorsPerFloor: 1,
-  loaders: 4,
+  /** 지하 상차 인원 — 상차 전 박스 스캔 대조(사용자 2026-11-25)로 4 → 6 [가정] */
+  loaders: 6,
   /** 지하 상차 근무 22:00~다음 날 04:30 [가정] — 노선별 출차(01:50~03:40, TMS 출차 공식) 30분 전부터 싣는다 */
   loaderShift: { start: 22 * 60, end: 28 * 60 + 30 },
   rtCountAt: 22 * 60,

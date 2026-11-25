@@ -67,7 +67,7 @@ describe('하루 돌리기', () => {
     expect(backend.ledger.check()).toEqual([]);
     // 설계 §5.4 1단계: DPS(냉동)·박스/FC 바로 출고대기·라인(DAS)·분배(야채)가 다 돌았고, 표시등이 켜졌다
     expect(sim.sealedBy.DPS).toBeGreaterThan(0);
-    expect(sim.sealedBy.DIRECT).toBeGreaterThan(0);
+    expect(sim.sealedBy.SORTER).toBeGreaterThan(0); // 박스째 → 휠소터 → PPC 슈트
     expect(sim.sealedBy.LINE).toBeGreaterThan(0);
     expect(sim.sealedBy.SPLIT).toBeGreaterThan(0);
     expect(sim.sealedBy.SORTER).toBeGreaterThan(0); // C·D 박스는 휠소터

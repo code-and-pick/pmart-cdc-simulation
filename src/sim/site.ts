@@ -2,7 +2,7 @@
 //   북쪽 통로(승강기·출고대기 앞) · 보관 방 북쪽 벽 앞 통로 · 선반 통로(남북) · 랙 앞 가로 통로 · 랙 통로(남북) · 서쪽 벽 연결 통로.
 // React·three 에 의존하지 않는다.
 
-import { AUTOSTORE, MFCS, SHELF, VEG_LANES } from '../config';
+import { AUTOSTORE, FLOW, MFCS, SHELF, VEG_LANES } from '../config';
 const SHELF_BASE = SHELF.aisleBase;
 import type { EquipKind } from '../domain/sites/chilgok';
 import type { FloorLayout, Layout, Location, Rect } from '../domain/layout';
@@ -133,6 +133,31 @@ export class FloorSite {
     return { x: l.x, z: l.z, lane: 'N' };
   }
 
+  /** 그 온도대 휠소터 — 투입 x(동쪽 끝)·DAS 쪽 x·투입 자리 */
+  sorter(temp: string) {
+    const e = this.f.equipment.find((x) => x.kind === 'WHEEL_SORTER' && x.temp === temp) ?? this.f.equipment.find((x) => x.kind === 'WHEEL_SORTER')!;
+    const das = this.f.equipment.find((x) => x.kind === 'DAS' && x.temp === temp);
+    return {
+      rect: e.rect,
+      inX: e.rect.x1 - 0.6,
+      dasX: das ? (das.rect.x0 + das.rect.x1) / 2 : e.rect.x0,
+      inPoint: { x: e.rect.x1 - 0.6, z: e.rect.z1 + 0.5, lane: 'S' as const },
+    };
+  }
+
+  /** DPS 구역 i 의 컨베이어 x(가운데) · 작업자 서는 자리(그 구역 가운데 선반 통로, 컨베이어 남쪽) */
+  dpsZoneX(i: number): number {
+    const as = this.f.shelfAisles.filter((a) => a.zone === 'A').map((a) => a.cx);
+    const xs = [...new Set(as.map((x) => +x.toFixed(2)))].sort((p, q) => p - q);
+    const n = FLOW.dps.zones;
+    const g = xs.filter((_, k) => Math.floor((k * n) / xs.length) === i);
+    return g.length ? g[Math.floor(g.length / 2)] : xs[0] ?? 0;
+  }
+  dpsStand(i: number): WalkPoint {
+    const e = this.f.equipment.find((x) => x.kind === 'DPS')!;
+    return { x: this.dpsZoneX(i), z: e.rect.z1 + 0.5, lane: 'S' };
+  }
+
   /** 대기 자리 — 첫 승강기 앞 */
   home(): WalkPoint {
     const l = this.f.lifts[0];
@@ -227,12 +252,13 @@ export interface DasRow {
   slots: number[];
 }
 export function dasRows(r: Rect): DasRow[] {
-  const rows = Math.max(1, Math.floor((r.z1 - r.z0) / 6.5));
+  const pitch = 4.4;
+  const rows = Math.max(1, Math.floor((r.z1 - r.z0 - 0.4) / pitch));
   const len = r.x1 - r.x0 - 3;
   const cx = (r.x0 + r.x1) / 2;
   return Array.from({ length: rows }, (_, k) => {
     const n = Math.floor(len / 1.0);
-    return { z: r.z0 + 3 + k * ((r.z1 - r.z0 - 4) / rows), cx, len, slots: Array.from({ length: n }, (_, i) => cx - len / 2 + (i + 0.5) * (len / n)) };
+    return { z: r.z0 + 1.6 + k * pitch, cx, len, slots: Array.from({ length: n }, (_, i) => cx - len / 2 + (i + 0.5) * (len / n)) };
   });
 }
 /** MFC m(0~)이 쓰는 칸 번호 — 줄 앞쪽부터 띄엄띄엄 */
@@ -256,4 +282,15 @@ export function sorterLanes(r: Rect): { x: number; z: number; side: number }[] {
     const side = i % 2 ? 1 : -1;
     return { x: cx + side * (laneLen + 1.1), z: z0 + ((i + 0.7) * (z1 - z0)) / (MFCS.length + 0.4), side };
   });
+}
+
+/** 냉동 A 선반 칸 → DPS 구역 번호(선반 통로 x 순서로 FLOW.dps.zones 개로 나눔) */
+export function dpsZoneOf(f: FloorLayout): (l: Location) => number {
+  const xs = [...new Set(f.shelfAisles.filter((a) => a.zone === 'A').map((a) => +a.cx.toFixed(2)))].sort((p, q) => p - q);
+  const n = FLOW.dps.zones;
+  return (l: Location) => {
+    let best = 0;
+    for (let k = 1; k < xs.length; k++) if (Math.abs(xs[k] - l.pos.x) < Math.abs(xs[best] - l.pos.x)) best = k;
+    return Math.min(n - 1, Math.floor((best * n) / Math.max(1, xs.length)));
+  };
 }

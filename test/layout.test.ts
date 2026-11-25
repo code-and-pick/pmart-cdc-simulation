@@ -37,12 +37,12 @@ describe('층 배치 [사용자 §3]', () => {
       expect(l.pos.x > frzRack.x0 && l.pos.x < frzRack.x1).toBe(true);
     }
     const amb = f.rooms.find((r) => r.temp === 'AMBIENT')!.rect;
-    for (const k of ['WHEEL_SORTER', 'INBOUND'] as const) {
-      const e = f.equipment.find((x) => x.kind === k)!;
-      expect(e.rect.x0 >= amb.x0 && e.rect.x1 <= amb.x1).toBe(true);
-    }
-    expect(f.equipment.some((e) => e.kind === 'INBOUND' && e.temp === 'FROZEN')).toBe(false);
+    const s = f.equipment.find((x) => x.kind === 'WHEEL_SORTER' && x.temp === 'AMBIENT')!;
+    expect(s.rect.x0 >= amb.x0 && s.rect.x1 <= amb.x1).toBe(true);
+    expect(f.equipment.some((e) => e.kind === 'INBOUND')).toBe(false); // 5F 띠가 모자라 입고 검수는 B1 도크 쪽
     expect(L.b1Equipment.some((e) => e.kind === 'INBOUND' && e.temp === 'FROZEN')).toBe(true);
+    const dps = f.equipment.find((x) => x.kind === 'DPS')!;
+    expect(inRects((dps.rect.x0 + dps.rect.x1) / 2, (dps.rect.z0 + dps.rect.z1) / 2, frz.rects)).toBe(true);
     expect(frz.doors.map((d) => d.kind).sort()).toEqual(['AIR_CURTAIN', 'ANTEROOM', 'FORKLIFT']);
   });
 
@@ -55,10 +55,9 @@ describe('층 배치 [사용자 §3]', () => {
       const e = f.equipment.find((x) => x.kind === k)!;
       expect(inRects((e.rect.x0 + e.rect.x1) / 2, (e.rect.z0 + e.rect.z1) / 2, ch.rects)).toBe(true);
     }
-    const das = f.equipment.find((x) => x.kind === 'DAS')!.rect;
     const split = f.equipment.find((x) => x.kind === 'SPLIT')!.rect;
     const lanes = f.equipment.find((x) => x.kind === 'VEG_LANES')!.rect;
-    expect(das.z1 <= split.z0 && split.z1 <= lanes.z0).toBe(true); // 출고대기(북) 쪽부터 라인 → 분배 → 레인
+    expect(split.z1 <= lanes.z0).toBe(true); // 분배 → 야채 레인(남)
     expect(f.aisles.length).toBeGreaterThanOrEqual(CHILLED_RACK.startAisles);
     expect(f.shelves.filter((l) => l.lane).length).toBeGreaterThanOrEqual(300);
   });
@@ -76,6 +75,22 @@ describe('층 배치 [사용자 §3]', () => {
     for (const f of L.floors) {
       for (const r of f.rows) expect((r.z1 - r.z0) / RACK.bayW).toBeCloseTo(RACK.bundleBays, 6);
       for (const r of f.rows) expect(f.rows.filter((o) => o !== r && o.z0 === r.z0 && Math.abs(Math.abs(o.cx - r.cx) - RACK.depth) < 1e-6)).toHaveLength(1);
+    }
+  });
+});
+
+describe('출고 흐름 배치 [사용자 §9]', () => {
+  it('층마다 휠소터 줄과 DAS 존이 출고대기 바로 앞 — DAS 존 x 가 출고대기 x 와 겹치고, 휠소터 줄은 출고대기와 DAS 존 사이', () => {
+    for (const f of L.floors) {
+      const das = f.equipment.filter((e) => e.kind === 'DAS');
+      expect(das.length).toBeGreaterThan(0);
+      for (const d of das) {
+        const letter = d.temp === 'CHILLED' ? 'B' : f.floor === 7 ? 'G' : 'C';
+        const xs = f.staging.filter((s) => s.zone === letter).map((s) => s.pos.x);
+        expect(d.rect.x0 <= Math.min(...xs) && d.rect.x1 >= Math.max(...xs)).toBe(true);
+        const sorter = f.equipment.find((e) => e.kind === 'WHEEL_SORTER' && e.temp === d.temp)!;
+        expect(sorter.rect.z0 > Math.max(...f.staging.map((s) => s.pos.z)) && sorter.rect.z1 <= d.rect.z0).toBe(true);
+      }
     }
   });
 });

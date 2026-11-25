@@ -361,7 +361,7 @@ class FloorBuilder {
    * 피킹 선반 — [rect] 안에 남북으로 뻗은 선반 통로(MFC 선반 1.25m · 5단 × 3칸). need 칸 이상이 되게 통로 수를 정하고, 블록 여럿(zs)에 나눠 놓는다.
    * 통로 번호는 구역마다 61 부터 이어 간다 [시뮬 R-13]. 쓴 폭(m)을 돌려준다.
    */
-  shelvesIn(letter: string, rects: Rect[], need: number, label?: string): number {
+  shelvesIn(letter: string, rects: Rect[], need: number, label?: string, idSuffix = ''): number {
     const z = this.zone(letter);
     const pitch = SHELF.depth * 2 + SHELF.aisleW + 0.6;
     const blocks = rects.map((r) => ({ r, units: Math.floor((r.z1 - r.z0 - 0.8) / SHELF.unitLen) }));
@@ -403,7 +403,7 @@ class FloorBuilder {
           }
         }
       }
-      this.zones.push({ id: `${this.floor}-${letter}-SHELF${rects.length > 1 ? `-${rects.indexOf(r) + 1}` : ''}`, label: label ?? `${z.label} 피킹 선반`, temp: z.temp, kind: 'SHELF', rect: { x0: r.x0, z0: r.z0, x1: r.x0 + w, z1: r.z1 } });
+      this.zones.push({ id: `${this.floor}-${letter}-SHELF${idSuffix}${rects.length > 1 ? `-${rects.indexOf(r) + 1}` : ''}`, label: label ?? `${z.label} 피킹 선반`, temp: z.temp, kind: 'SHELF', rect: { x0: r.x0, z0: r.z0, x1: r.x0 + w, z1: r.z1 } });
     }
     this.nextShelfAisle.set(letter, no);
     return w;
@@ -539,6 +539,12 @@ class FloorBuilder {
     return sx;
   }
 
+  /** 출고대기 구역 글자(letter)의 x 범위 */
+  stagingSpan(letter: string): [number, number] {
+    const xs = this.staging.filter((s) => s.zone === letter).map((s) => s.pos.x);
+    return [Math.min(...xs) - 1.5, Math.max(...xs) + 1.5];
+  }
+
   /** 온도 방 — 사각형 합의 바깥 둘레를 벽으로(건물 바깥벽과 겹치는 선은 뺀다), 문은 따로 */
   coldRoom(temp: 'FROZEN' | 'CHILLED', rects: Rect[], doors: Door[]) {
     const walls = perimeter(rects).filter((s) => !onOuterWall(s, this.B.width, this.B.depth));
@@ -622,9 +628,12 @@ export function buildLayout(): Layout {
   const Bd = building();
   const { width, depth, bandDepth, Ds } = Bd;
   const northZ = SHELF.northStrip - 0.6;
-  const sz0 = northZ + 1.5;
   const sz1 = bandDepth - 1.6;
   const roomZ = bandDepth - 0.8;
+  // 휠소터 줄(북쪽 통로 바로 남쪽)·DAS 존·선반 블록 시작 [사용자 §9 — 휠소터 끝·롤테이너·DAS 존이 출고대기 바로 앞]
+  const SORT_Z0 = northZ + 0.9;
+  const SORT_Z1 = SORT_Z0 + 1.2;
+  const DAS_Z0 = SORT_Z1 + 0.5;
   const rackZ = bandDepth + RACK.crossAisle / 2;
   const specOf = (fl: FloorNo) => CHILGOK_FLOORS.find((f) => f.floor === fl)!;
   const roomW = (spec: FloorSpec, key: string) => (spec.docPyeong.storage[key] * PYEONG_M2) / Ds;
@@ -644,20 +653,28 @@ export function buildLayout(): Layout {
   const frzX0 = amb5;
   const nAf = aislesFit(width - frzX0);
   f5.racks([{ spec: f5.zone('A'), aisles: nAf }], frzX0, width, '냉동');
-  const sx5 = f5.liftsAndStaging();
-  // 상온 랙 앞(x 0 ~ 상온 폭): E·F 선반 → 휠소터 → 상온 입고 검수
-  let x = 2.5;
-  for (const l of ['E', 'F']) x += f5.shelvesIn(l, [{ x0: x, z0: sz0, x1: amb5 - 2, z1: sz1 }], SKU_PLACE.efShelf) + 0.6;
-  const sorterW = 14;
-  f5.equip('WHEEL_SORTER', '1차 고속분류기(휠소터) (C·D 박스 → MFC 롤테이너)', { x0: x + 1, z0: sz0, x1: x + 1 + sorterW, z1: sz1 });
-  x += sorterW + 2;
-  if (amb5 - 1 - x < 6) throw new Error('5F 상온 입고 검수 자리 부족');
-  f5.equip('INBOUND', '입고 검수 (상온)', { x0: x, z0: sz0, x1: amb5 - 1, z1: sz1 }, 'AMBIENT');
-  // 냉동 전실(냉동 랙 앞 띠 전체): 북쪽에 DPS 박스 컨베이어(에어커튼으로 방 밖 출고대기 쪽까지), 그 남쪽에 냉동 피킹 선반
-  const dpsZ0 = 1.4;
-  const dpsZ1 = 3.4;
-  f5.equip('DPS', 'DPS 박스 컨베이어 (냉동 → 에어커튼 → 출고대기)', { x0: Math.max(sx5 + 0.5, frzX0 - 7), z0: dpsZ0, x1: frzX0 + 12, z1: dpsZ1 });
-  f5.shelvesIn('A', [{ x0: frzX0 + 1.2, z0: dpsZ1 + 1.2, x1: width - 0.3, z1: sz1 }], SKU_TARGET.FROZEN, '냉동 A 피킹 선반 (DPS — 전실)');
+  f5.liftsAndStaging();
+  // [사용자 2026-11-25 §9] 출고 흐름: 상품 박스 → 컨베이어 → 휠소터 ─ 박스째: PPC 롤테이너 슈트로 / 낱개: DAS 존 라인. DAS·롤테이너는 출고대기 바로 앞.
+  const [c0, c1] = f5.stagingSpan('C');
+  const [a0] = f5.stagingSpan('A');
+  f5.equip('WHEEL_SORTER', '휠소터 (상온 — 박스째 → PPC 슈트 / 낱개 → DAS)', { x0: c0, z0: SORT_Z0, x1: amb5 - 0.6, z1: SORT_Z1 }, 'AMBIENT');
+  f5.equip('DAS', 'DAS 존 (상온)', { x0: c0, z0: DAS_Z0, x1: c1, z1: sz1 }, 'AMBIENT');
+  f5.shelvesIn('E', [{ x0: 2.5, z0: DAS_Z0, x1: c0 - 1, z1: sz1 }], SKU_PLACE.efShelf);
+  f5.shelvesIn('F', [{ x0: c1 + 1, z0: DAS_Z0, x1: amb5 - 0.6, z1: sz1 }], SKU_PLACE.efShelf);
+  // 냉동 전실: DPS 컨베이어(가운데 동서) — 위·아래 선반 블록을 지나 에어커튼 밖 냉동 휠소터 줄로, 슈트가 A 출고대기 롤테이너로
+  const frzLineZ0 = 5.0;
+  const frzLineZ1 = 6.2;
+  f5.equip('WHEEL_SORTER', '휠소터 (냉동 — DPS 박스 → PPC 슈트)', { x0: a0, z0: frzLineZ0, x1: frzX0, z1: frzLineZ1 }, 'FROZEN');
+  f5.equip('DPS', 'DPS 컨베이어 (냉동 전실 — 구역마다 불·수량)', { x0: frzX0, z0: frzLineZ0, x1: width - 0.5, z1: frzLineZ1 });
+  f5.shelvesIn(
+    'A',
+    [
+      { x0: frzX0 + 1.2, z0: 0.4, x1: width - 0.3, z1: frzLineZ0 - 0.3 },
+      { x0: frzX0 + 1.2, z0: frzLineZ1 + 0.3, x1: width - 0.3, z1: sz1 },
+    ],
+    SKU_TARGET.FROZEN,
+    '냉동 A 피킹 선반 (DPS 구역)',
+  );
   f5.coldRoom(
     'FROZEN',
     [
@@ -665,12 +682,12 @@ export function buildLayout(): Layout {
       { x0: frzX0, z0: bandDepth, x1: width, z1: depth },
     ],
     [
-      { kind: 'AIR_CURTAIN', x0: frzX0, z0: dpsZ0, x1: frzX0, z1: dpsZ1 },
+      { kind: 'AIR_CURTAIN', x0: frzX0, z0: frzLineZ0 - 0.1, x1: frzX0, z1: frzLineZ1 + 0.1 },
       { kind: 'ANTEROOM', x0: frzX0, z0: roomZ - 1.2, x1: frzX0, z1: roomZ + 1.2 },
       { kind: 'FORKLIFT', x0: frzX0, z0: rackZ - 2, x1: frzX0, z1: rackZ + 2 },
     ],
   );
-  const L5 = f5.done({ northZ, northX1: frzX0 - 0.6, roomZ, rackZ, links: [1.2, 29.5 - 1], westX: 1.2 });
+  const L5 = f5.done({ northZ, northX1: frzX0 - 0.6, roomZ, rackZ, links: [1.2, c1 + 0.5], westX: 1.2 });
 
   // ── 7F 생활용품(G·H) ─────────────────────────────────
   const f7 = new FloorBuilder(specOf(7), Bd);
@@ -688,11 +705,19 @@ export function buildLayout(): Layout {
   const faceCount = [...L5.locations, ...f7.locations].filter((l) => l.type === 'PICK_FACE').length;
   const gShelf = SKU_TARGET.AMBIENT - faceCount - SKU_PLACE.efShelf * 2 - SKU_PLACE.autostore;
   if (gShelf < 0) throw new Error(`상온 SKU 목표보다 피킹면이 많음(${faceCount})`);
-  const gW = f7.shelvesIn('G', [{ x0: 2.5, z0: sz0, x1: width - 20, z1: sz1 }], gShelf, '생활용품 G 피킹 선반');
-  const autoInfo = f7.autostore('H', 2.5 + gW + 1.5, sz0, sz1, width - (2.5 + gW + 1.5) - 15);
-  f7.equip('INBOUND', '입고 검수 (상온)', { x0: autoInfo.rect.x1 + 1.5, z0: sz0, x1: Math.min(width - 1, autoInfo.rect.x1 + 15.5), z1: sz1 }, 'AMBIENT');
+  const [g0, g1] = f7.stagingSpan('G');
+  f7.equip('DAS', 'DAS 존 (상온 생활용품)', { x0: g0, z0: DAS_Z0, x1: g1, z1: sz1 }, 'AMBIENT');
+  const westUnits = Math.floor((sz1 - DAS_Z0 - 0.8) / SHELF.unitLen) * 2 * SHELF.levels * SHELF.slots;
+  const westAisles = Math.floor((g0 - 1 - 2.5) / (SHELF.depth * 2 + SHELF.aisleW + 0.6));
+  const gWest = Math.min(gShelf, westAisles * westUnits);
+  f7.shelvesIn('G', [{ x0: 2.5, z0: DAS_Z0, x1: g0 - 1, z1: sz1 }], gWest, '생활용품 G 피킹 선반 (서쪽)', '-W');
+  const gW = f7.shelvesIn('G', [{ x0: g1 + 1, z0: DAS_Z0, x1: width - 8, z1: sz1 }], gShelf - gWest, '생활용품 G 피킹 선반 (동쪽)', '-E');
+  const autoX0 = g1 + 1 + gW + 1.0;
+  const autoInfo = f7.autostore('H', autoX0, DAS_Z0, sz1, width - autoX0 - 0.5);
+  f7.equip('WHEEL_SORTER', '휠소터 (생활용품 — 박스째 → PPC 슈트 / 낱개 → DAS)', { x0: g0, z0: SORT_Z0, x1: autoInfo.rect.x1, z1: SORT_Z1 }, 'AMBIENT');
   f7.equip('OFFICE', 'DC 관리자 사무실', { x0: amb7 + 1, z0: bandDepth + 1, x1: width - 1, z1: bandDepth + 18 });
-  const L7 = f7.done({ northZ, northX1: width - 1, roomZ, rackZ, links: [1.2, 2.5 + gW + 0.75], westX: 1.2 });
+  f7.equip('INBOUND', '입고 검수 (상온)', { x0: amb7 + 1, z0: bandDepth + 20, x1: width - 1, z1: bandDepth + 36 }, 'AMBIENT');
+  const L7 = f7.done({ northZ, northX1: width - 1, roomZ, rackZ, links: [1.2, g1 + 0.5], westX: 1.2 });
 
   // ── 6F 냉장 — 층 전체가 냉장 방 ─────────────────────
   const f6 = new FloorBuilder(specOf(6), Bd);
@@ -704,7 +729,7 @@ export function buildLayout(): Layout {
   const rack6W = rackWidth(nB) + 1;
   f6.racks([{ spec: f6.zone('B'), aisles: nB }], 0, rack6W, '냉장');
   f6.liftsAndStaging();
-  const coldZ0 = northZ + 0.8;
+  const coldZ0 = SORT_Z0 - 0.25;
   // 냉장 피킹 선반(라인 상품 = 냉장 목표 − 야채): 랙 동쪽, 남북 두 블록
   const shX0 = rack6W + 1;
   const mid = bandDepth + 2 + (depth - bandDepth - 4) / 2;
@@ -717,24 +742,24 @@ export function buildLayout(): Layout {
     SKU_TARGET.CHILLED - SKU_PLACE.veg,
     '냉장 B 피킹 선반 (라인 상품)',
   );
-  // 동쪽: 출고대기 쪽(북)부터 라인(DAS) → 분배(크레이트) → 야채 바닥 레인
+  // 냉장 방 안, 출고대기 바로 앞: 휠소터 줄 → DAS 존(컨베이어로 상품이 들어옴 — 핸드자키 대신, 사용자 §9). 동쪽: 분배(크레이트) → 야채 바닥 레인
+  const [b0, b1] = f6.stagingSpan('B');
   const ex0 = shX0 + shW + 1.2;
-  const lineZ1 = bandDepth + 9;
-  const splitZ1 = lineZ1 + 21;
-  f6.equip('DAS', '라인 (DAS)', { x0: ex0, z0: sz0, x1: width - 1, z1: lineZ1 });
-  f6.equip('SPLIT', '분배 (MFC 크레이트 — 출고 용기)', { x0: ex0, z0: lineZ1 + 1, x1: width - 1, z1: splitZ1 });
+  f6.equip('WHEEL_SORTER', '휠소터 (냉장 — 박스째 → PPC 슈트 / 낱개 → DAS)', { x0: b0, z0: SORT_Z0, x1: ex0 - 0.5, z1: SORT_Z1 }, 'CHILLED');
+  f6.equip('DAS', 'DAS 존 (냉장)', { x0: b0, z0: DAS_Z0, x1: b1, z1: sz1 }, 'CHILLED');
+  const splitZ1 = bandDepth + 10;
+  f6.equip('SPLIT', '분배 (MFC 크레이트 — 출고 용기)', { x0: ex0, z0: DAS_Z0, x1: width - 1, z1: splitZ1 });
   f6.vegLanes('B', { x0: ex0, z0: splitZ1 + 1, x1: width - 1, z1: depth - 1 }, SKU_PLACE.veg);
-  f6.equip('INBOUND', '입고 검수 (냉장)', { x0: 2, z0: sz0, x1: 16, z1: sz1 }, 'CHILLED');
+  f6.equip('INBOUND', '입고 검수 (냉장)', { x0: 2, z0: DAS_Z0, x1: Math.min(16, b0 - 1), z1: sz1 }, 'CHILLED');
   f6.coldRoom(
     'CHILLED',
     [{ x0: 0, z0: coldZ0, x1: width, z1: depth }],
     [
       { kind: 'FORKLIFT', x0: 2.5, z0: coldZ0, x1: 6.5, z1: coldZ0 },
-      { kind: 'AIR_CURTAIN', x0: 24, z0: coldZ0, x1: 30, z1: coldZ0 },
-      { kind: 'AIR_CURTAIN', x0: 38, z0: coldZ0, x1: 44, z1: coldZ0 },
+      { kind: 'AIR_CURTAIN', x0: b0, z0: coldZ0, x1: b1, z1: coldZ0 },
     ],
   );
-  const L6 = f6.done({ northZ, northX1: width - 1, roomZ, rackZ, links: [4.5, 41], westX: 4.5 });
+  const L6 = f6.done({ northZ, northX1: width - 1, roomZ, rackZ, links: [4.5, (b0 + b1) / 2], westX: 4.5 });
 
   const floors = [L5, L6, L7];
 
@@ -748,7 +773,10 @@ export function buildLayout(): Layout {
     }
   }
   const b1x0 = 6 + docks.length * 4.5 + 2;
-  const b1Equipment: Equip[] = [{ kind: 'INBOUND', label: '입고 검수 (냉동 — 지하 도크)', rect: { x0: b1x0, z0: -8.5, x1: b1x0 + 12, z1: -0.5 }, temp: 'FROZEN' }];
+  const b1Equipment: Equip[] = [
+    { kind: 'INBOUND', label: '입고 검수 (냉동 — 지하 도크)', rect: { x0: b1x0, z0: -8.5, x1: b1x0 + 12, z1: -0.5 }, temp: 'FROZEN' },
+    { kind: 'INBOUND', label: '입고 검수 (5F 상온 — 지하 도크)', rect: { x0: b1x0 + 13, z0: -8.5, x1: b1x0 + 25, z1: -0.5 }, temp: 'AMBIENT' },
+  ];
 
   const capacity = capacityReport(floors);
   layoutCache = { width, depth, bandDepth, floors, docks, b1Equipment, autostore: autoInfo, capacity, totalCapacity: capacity.total };

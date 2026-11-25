@@ -2,7 +2,7 @@
 import { lazy, Suspense, useEffect, useState, type ReactNode } from 'react';
 import { checkReadiness, READINESS_KO, type ProbeResult } from '../backend/http/readiness';
 import { useApp, useTick, useView } from '../app/context';
-import { CDC_FACTS, MFCS, OUTBOUND, SHIFT, WORK, WORKFORCE, RACK } from '../config';
+import { CDC_FACTS, MFCS, OUTBOUND, SHIFT, WORK, WORKFORCE, RACK, FLOW, AUTOSTORE } from '../config';
 import { ROLE_KO, type Role } from '../sim/agent';
 import { equipZoneId } from '../domain/layout';
 import type { FloorNo } from '../domain/sites/chilgok';
@@ -49,8 +49,9 @@ function Slider(props: { name: string; value: number; min: number; max: number; 
 }
 
 const VW_ROLES: { role: Role; name: string; shift?: 'DAY' | 'EVENING'; max: number }[] = [
-  { role: 'FC', name: 'FC·DPS 피커', max: 20 },
-  { role: 'SORT', name: '라인·분배', max: 16 },
+  { role: 'FC', name: 'FC 피커', max: 20 },
+  { role: 'DPS', name: 'DPS 구역(5F)', max: 20 },
+  { role: 'SORT', name: 'DAS·분배', max: 16 },
   { role: 'JOCKEY', name: '자키', max: 10 },
   { role: 'REPL', name: '지게차(주간)', shift: 'DAY', max: 12 },
   { role: 'INSPECT', name: '검품', max: 6 },
@@ -211,7 +212,7 @@ function Settings() {
         <Row k="사용 층" v={`${CDC_FACTS.floors[0]}~${CDC_FACTS.floors[CDC_FACTS.floors.length - 1]}층 (차량은 지하 B1)`} />
         <Row k="보관 용량" v={`${(CDC_FACTS.capacityUnits / 10_000).toLocaleString()}만 유닛`} />
       </Sec>
-      <Sec title="층 배치" aside="문서 평수 그대로">
+      <Sec title="층 배치" aside="보관 = 팔레트 랙 면적">
         {layout.floors.map((f) => (
           <Row key={f.floor} k={f.label} v={`보관 ${Math.round(f.layoutPyeong.storage).toLocaleString()} · DT ${Math.round(f.layoutPyeong.band).toLocaleString()}평 · 팔레트 ${f.locations.length.toLocaleString()} · 선반 ${f.shelves.length.toLocaleString()}칸`} />
         ))}
@@ -294,7 +295,7 @@ function ZoneInfo() {
 }
 
 function ZoneBody({ zoneId }: { zoneId: string }) {
-  const { backend, sim, catalog } = useApp();
+  const { backend, sim, catalog, layout } = useApp();
   const view = useView();
   const f = view.floorLayout()!;
   const zone = f.zones.find((z) => z.id === zoneId)!;
@@ -415,10 +416,14 @@ function ZoneBody({ zoneId }: { zoneId: string }) {
   const rows: [ReactNode, string][] =
     e?.kind === 'DAS'
       ? [
-          [people(['SORT']).filter((a) => Number(a.id.slice(-2)) % 2 === 1).length, '라인 작업자 일하는 중'],
-          [q.line, '라인 대기 상품 박스'],
-          [lit.filter((l) => l.kind === 'LINE').length, '켜진 칸 불'],
-          [sim.sealedBy.LINE.toLocaleString(), '닫은 MFC 박스'],
+          [sim.lineQueue.get(f.floor)?.length ?? 0, 'DAS 대기 상품 박스'],
+          [lit.filter((l) => l.kind === 'LINE').length, '지금 켜진 칸 불'],
+          [(sim.dasRt.get(f.floor) ?? 0).toFixed(1), '다 찬 롤테이너(R/T)'],
+          [(() => {
+            const h = sim.lineLitByFloor.get(f.floor) ?? [];
+            const n = h.reduce((a, b) => a + (b ?? 0), 0);
+            return n ? (h.reduce((a, b, i) => a + (b ?? 0) * i, 0) / n).toFixed(1) : '—';
+          })(), '스캔 1회당 켜진 칸(평균)'],
         ]
       : e?.kind === 'SPLIT'
         ? [
@@ -428,12 +433,36 @@ function ZoneBody({ zoneId }: { zoneId: string }) {
           ]
         : e?.kind === 'DPS'
           ? [
+              [sim.dps.boxes.length, '컨베이어 위 PPC 박스'],
               [lit.filter((l) => l.kind === 'DPS').length, '켜진 선반 불'],
-              [sim.sealedBy.DPS.toLocaleString(), '닫은 MFC 박스'],
+              ...Array.from({ length: FLOW.dps.zones }, (_, i): [ReactNode, string] => {
+                const p = sim.dps.pass[i] ?? [];
+                return [`${sim.dps.queues[i]?.length ?? 0} · ${p.length ? Math.round(p.reduce((a, b) => a + b, 0) / p.length / 60) : 0}분`, `${i + 1}구역 대기 박스 · 통과 시간`];
+              }),
             ]
           : e?.kind === 'WHEEL_SORTER'
-            ? [['—', '거의 안 씀 (박스 피킹 → 바로 출고대기)']]
-            : [['20,000', '빈(bin) [가정]'], ['비식재', '낱개 상품']];
+            ? (() => {
+                const lg = sim.sorterLog.filter((x) => x.floor === f.floor && x.temp === e.temp);
+                const hour = lg.filter((x) => x.kind === 'IN' && sim.time - x.at < 3600).length;
+                return [
+                  [hour, '시간당 투입 박스'],
+                  [sim.sorterTransit.get(`${f.floor}-${e.temp}`) ?? 0, '대기(이동 중) 박스'],
+                  [lg.filter((x) => x.kind === 'DAS').length, 'DAS 존으로'],
+                  ...MFCS.map((m, i): [ReactNode, string] => [lg.filter((x) => x.kind === 'CHUTE' && x.mfc === i).length, `PPC-${String(m.staging).padStart(2, '0')} 슈트 도착 (${m.name.replace(/^d호점 /, '')})`]),
+                ];
+              })()
+            : (() => {
+                const A = layout.autostore!;
+                const u = sim.portUtil();
+                return [
+                  [`${A.bins.toLocaleString()} / ${A.binsFit.toLocaleString()}`, '통 필요 / 그린 면적에 들어가는 통'],
+                  [`${A.skus.toLocaleString()} · ${A.capacity.toLocaleString()}`, 'SKU · 용량(유닛)'],
+                  [AUTOSTORE.robots, '로봇'],
+                  [sim.auto.waiting, '대기 통(로봇이 가져오는 중)'],
+                  [u.length ? u.map((x) => Math.round(x * 100) + '%').join(' / ') : '—', `포트 ${AUTOSTORE.ports}개 가동률`],
+                  [`${A.floorLoadKgM2.toLocaleString()} / ${A.floorLoadAllowedKgM2.toLocaleString()}`, '바닥 하중 kg/㎡ (16단 / 허용 [확인 필요])'],
+                ];
+              })();
   return (
     <>
       <div className="stats">
@@ -443,11 +472,13 @@ function ZoneBody({ zoneId }: { zoneId: string }) {
       </div>
       <div className="note">
         {e?.kind === 'DAS'
-          ? '자키가 가져온 상품 박스를 스캔하면 그 상품을 받는 MFC 칸에 작업자 색 불과 숫자가 켜지고, 숫자만큼 넣으면 꺼집니다.'
+          ? `휠소터 컨베이어로 들어온 상품을 스캔하면 받을 PPC 칸들에 작업자 색 불과 수량이 켜집니다. 다 찬 롤테이너는 바로 앞 출고대기로. 라인 작업자: ${sim.agents.filter((a) => a.floor === f.floor && a.role === 'SORT' && Number(a.id.slice(-2)) <= FLOW.lineWorkers[f.floor]).map((a) => `${a.name.split(' ').pop()} ${sim.colorOf(a).name}`).join(', ')}`
           : e?.kind === 'SPLIT'
             ? 'FC 가 가져온 지역 카트(야채)를 PDA 로 스캔 → MFC 별 수량 → MFC 크레이트에 담고 지역 바코드로 확인합니다.'
             : e?.kind === 'DPS'
-              ? '냉동 피킹 — 작업자 색 불·숫자가 켜진 선반 칸에서 집어 MFC 박스에 담고, 박스를 닫아 컨베이어로 보냅니다.'
+              ? `PPC 별 빈 박스가 컨베이어를 타고 ${FLOW.dps.zones}개 구역을 지나며, 박스가 구역에 오면 그 구역 선반 칸에 불·수량이 켜집니다. 작업자는 자기 구역에 서서 집어 넣고, 박스는 다음 구역으로(구역당 ${FLOW.dps.workersPerZone}명·컨베이어 ${FLOW.dps.conveyorSpeed}m/s).`
+              : e?.kind === 'WHEEL_SORTER'
+                ? '박스째 가는 상품은 PPC 별 롤테이너 슈트로 바로, 낱개로 나눌 상품은 DAS 존 라인으로 갑니다.'
               : ''}
       </div>
     </>

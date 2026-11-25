@@ -84,6 +84,12 @@ export class MockBackend implements CdcOutboundPort {
   private readonly eventListeners: EventListener[] = [];
   private seq = 0;
 
+  /** 작업 묶기 기준(시뮬레이터가 정한 값 — 오늘 출고 길, R-18·§9) */
+  private grouping: ((sku: string) => string) | null = null;
+  setTaskGrouping(f: (sku: string) => string) {
+    this.grouping = f;
+  }
+
   constructor(private readonly opt: MockOptions) {
     this.ledger = new CdcLedger({ cdcId: CENTER_ID, isoNow: () => this.iso(), today: () => this.today() });
     this.ledger.initialBalance(opt.catalog.skus.flatMap((s) => s.seed.map((l) => ({ sku: s.sku, ...l }))));
@@ -533,7 +539,7 @@ export class MockBackend implements CdcOutboundPort {
     // 작업 방식 × 선반 통로로 묶는다 — 같은 통로 작업이 MFC 끼리 같은 범위가 되어, 내주는 순서(첫 칸 순)대로 MFC 몫이 함께 나간다 [시뮬]
     const groups = new Map<string, typeof holds>();
     for (const h of holds) {
-      const k = `${this.opt.catalog.bySku.get(h.sku)?.handling ?? 'FC'}|${h.locationCode.split('-').slice(0, 4).join('-')}`;
+      const k = `${this.grouping?.(h.sku) ?? this.opt.catalog.bySku.get(h.sku)?.handling ?? 'FC'}|${h.locationCode.split('-').slice(0, 4).join('-')}`;
       groups.set(k, [...(groups.get(k) ?? []), h]);
     }
     const out: Task[] = [];

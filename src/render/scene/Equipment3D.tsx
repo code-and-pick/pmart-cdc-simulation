@@ -9,7 +9,7 @@ import { useFrame } from '@react-three/fiber';
 import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { useApp } from '../../app/context';
-import { AUTOSTORE, MFCS } from '../../config';
+import { AUTOSTORE, FLOW, MFCS } from '../../config';
 import type { Equip } from '../../domain/layout';
 import type { FloorNo } from '../../domain/sites/chilgok';
 import { autostorePorts, dasRows, mfcSlotIndex } from '../../sim/site';
@@ -322,46 +322,81 @@ function FlowBoxes({ path, n, busy, color = 0xd2a679, size = [0.5, 0.32, 0.38] }
 }
 
 /**
- * 1차 고속분류기(휠소터) — 남북 본선(투입은 남쪽: FC 카트가 오는 북쪽 통로 반대편이 아니라 띠 남쪽 끝), 갈래 5개(MFC 별)를 동서로 번갈아,
- * 갈래 끝에 그 MFC 롤테이너. 분류 작업자가 일하면 박스가 본선 → 갈래로 흐른다.
+ * 휠소터 줄 [사용자 §9 — 배민 인천기지 구조] — 출고대기 바로 앞을 동서로 지나는 본선, PPC-01~05 출고대기 롤테이너 자리로 북쪽 슈트(짧은 갈래).
+ * 박스째 가는 상품은 슈트로 롤테이너에 바로, 낱개로 나눌 상품은 남쪽 DAS 존으로. 실제로 투입된 때만(최근 90초) 박스가 흐른다.
  */
-function WheelSorter({ e }: { e: Equip; floor: FloorNo }) {
-  const { sim } = useApp();
-  // 박스는 실제로 투입된 때만(최근 90초) 흐른다 — 장식 흐름 없앰(사용자 2026-11-25)
-  const busy = () => sim.speed > 0 && sim.sorterIn.length > 0 && sim.time - sim.sorterIn[sim.sorterIn.length - 1] < 90;
+function WheelSorter({ e, floor }: { e: Equip; floor: FloorNo }) {
+  const { sim, layout } = useApp();
+  const f = layout.floors.find((x) => x.floor === floor)!;
+  const letter = e.temp === 'FROZEN' ? 'A' : e.temp === 'CHILLED' ? 'B' : floor === 7 ? 'G' : 'C';
+  const slots = f.staging.filter((s) => s.zone === letter && s.bay <= MFCS.length);
+  const busy = () => sim.speed > 0 && sim.sorterLog.some((x) => x.floor === floor && x.temp === e.temp && x.kind === 'IN' && sim.time - x.at < 90);
   const r = e.rect;
-  const cx = (r.x0 + r.x1) / 2;
-  const z0 = r.z0 + 1.2;
-  const z1 = r.z1 - 1.2;
-  const lanes = MFCS.map((m, i) => ({ m, z: z0 + ((i + 0.7) * (z1 - z0)) / (MFCS.length + 0.4), side: i % 2 ? 1 : -1 }));
-  const laneLen = Math.min(4.2, (r.x1 - r.x0) / 2 - 1.4);
-  const paths = useMemo(
-    () =>
-      lanes.map((l) => [new THREE.Vector3(cx, 0.86, z1), new THREE.Vector3(cx, 0.86, l.z), new THREE.Vector3(cx + l.side * (laneLen + 0.4), 0.86, l.z)]),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [cx, z1, laneLen],
-  );
+  const cz = (r.z0 + r.z1) / 2;
+  const len = r.x1 - r.x0;
   return (
     <group>
-      <Conveyor x={cx} z={(z0 + z1) / 2} len={z1 - z0} dir="z" w={1.0} />
-      {lanes.map((l) => (
-        <group key={l.m.id}>
-          <Conveyor x={cx + l.side * (0.5 + laneLen / 2)} z={l.z} len={laneLen} dir="x" w={0.8} h={0.72} />
-          {/* 휠 디버터(본선 위 작은 바퀴 줄) */}
-          <mesh position={[cx, 0.9, l.z]}>
-            <boxGeometry args={[0.9, 0.04, 0.5]} />
-            <meshStandardMaterial color={0x404650} />
-          </mesh>
-          <RollContainer x={cx + l.side * (laneLen + 1.1)} z={l.z} rot={Math.PI / 2} fill={0.5} />
-          <sprite position={[cx + l.side * (laneLen + 1.1), 2.4, l.z]} scale={[1.6, 0.6, 1]}>
-            <spriteMaterial map={plateTexture(l.m.name.replace(/^\d호점 /, ''), { w: 256, h: 96 })} depthWrite={false} />
-          </sprite>
-        </group>
+      <Conveyor x={(r.x0 + r.x1) / 2} z={cz} len={len} dir="x" w={0.9} h={0.8} />
+      {slots.map((s) => {
+        const cl = r.z0 - (s.pos.z + 0.6);
+        return (
+          <group key={s.code}>
+            {/* 슈트(갈래) — 본선에서 그 PPC 롤테이너로 */}
+            <Conveyor x={s.pos.x} z={(r.z0 + s.pos.z + 0.6) / 2} len={Math.max(0.6, cl)} dir="z" w={0.6} h={0.7} />
+            <mesh position={[s.pos.x, 0.86, cz]}>
+              <boxGeometry args={[0.8, 0.04, 0.5]} />
+              <meshStandardMaterial color={0x404650} />
+            </mesh>
+          </group>
+        );
+      })}
+      <TowerLight x={r.x1 - 0.4} z={r.z1 + 0.3} busy={busy} />
+      <FlowBoxes path={[new THREE.Vector3(r.x1 - 0.5, 0.86, cz), new THREE.Vector3(r.x0 + 0.5, 0.86, cz)]} n={Math.max(4, Math.floor(len / 4))} busy={busy} />
+      <sprite position={[r.x1 - 3, 2.2, cz]} scale={[3.2, 0.8, 1]}>
+        <spriteMaterial map={plateTexture(`휠소터 → PPC-01~05 슈트`, { w: 384, h: 96 })} depthWrite={false} />
+      </sprite>
+    </group>
+  );
+}
+
+/** DPS 구역 표시 — 컨베이어 위 구역 판(1~N) + 지금 그 구역에 있는 PPC 박스 [사용자 §9 DPS] */
+function DpsZones({ floor }: { floor: FloorNo }) {
+  const { sim } = useApp();
+  const site = sim.sites.get(floor)!;
+  const e = site.f.equipment.find((x) => x.kind === 'DPS');
+  const boxes = useRef<THREE.InstancedMesh>(null!);
+  useFrame(() => {
+    if (!e || !boxes.current) return;
+    let i = 0;
+    for (const b of sim.dps.boxes) {
+      if (i >= 40) break;
+      const x = b.zone < 0 ? e.rect.x1 - 1 : site.dpsZoneX(b.zone);
+      const n = sim.dps.queues[b.zone]?.indexOf(b) ?? 0;
+      tmp.position.set(x + Math.max(0, n) * 0.5, 1.0, (e.rect.z0 + e.rect.z1) / 2);
+      tmp.rotation.set(0, 0, 0);
+      tmp.scale.set(1, 1, 1);
+      tmp.updateMatrix();
+      boxes.current.setMatrixAt(i++, tmp.matrix);
+    }
+    for (; i < 40; i++) {
+      tmp.scale.set(0, 0, 0);
+      tmp.updateMatrix();
+      boxes.current.setMatrixAt(i, tmp.matrix);
+    }
+    boxes.current.instanceMatrix.needsUpdate = true;
+  });
+  if (!e) return null;
+  return (
+    <group>
+      {Array.from({ length: FLOW.dps.zones }, (_, i) => (
+        <sprite key={i} position={[site.dpsZoneX(i), 2.4, (e.rect.z0 + e.rect.z1) / 2]} scale={[1.8, 0.6, 1]}>
+          <spriteMaterial map={plateTexture(`DPS ${i + 1}구역`, { bg: '#2f6fd6', fg: '#ffffff', w: 256, h: 84 })} depthWrite={false} />
+        </sprite>
       ))}
-      <TowerLight x={cx + 0.9} z={z1 - 0.4} busy={busy} />
-      {paths.map((p, i) => (
-        <FlowBoxes key={i} path={p} n={3} busy={busy} />
-      ))}
+      <instancedMesh ref={boxes} args={[undefined, undefined, 40]} frustumCulled={false}>
+        <boxGeometry args={[0.42, 0.3, 0.34]} />
+        <meshStandardMaterial color={0xd2a679} roughness={0.85} map={boxTexture()} />
+      </instancedMesh>
     </group>
   );
 }
@@ -829,7 +864,13 @@ export function EquipmentModel({ e, floor }: { e: Equip; floor: FloorNo }) {
   if (e.kind === 'WHEEL_SORTER') return <WheelSorter e={e} floor={floor} />;
   if (e.kind === 'DAS') return <DasLines e={e} floor={floor} split={false} />;
   if (e.kind === 'SPLIT') return <DasLines e={e} floor={floor} split />;
-  if (e.kind === 'DPS') return <DpsConveyor e={e} floor={floor} />;
+  if (e.kind === 'DPS')
+    return (
+      <>
+        <DpsConveyor e={e} floor={floor} />
+        <DpsZones floor={floor} />
+      </>
+    );
   if (e.kind === 'INBOUND') return <Inbound e={e} />;
   if (e.kind === 'VEG_LANES') return <VegLanes e={e} floor={floor} />;
   if (e.kind === 'OFFICE') return <Office e={e} />;
