@@ -165,10 +165,19 @@ export class FloorSite {
     return { x: this.dpsZoneX(i), z: e.rect.z1 + 0.5, lane: 'S' };
   }
 
-  /** 대기 자리 — 첫 승강기 앞 */
+  /** 대기 자리 — 승강기 옆(동쪽), 승강기 문 앞은 비운다(사용자 2026-11-26 "승강기 다 막고 있네") */
   home(): WalkPoint {
-    const l = this.f.lifts[0];
-    return { x: (l.rect.x0 + l.rect.x1) / 2, z: this.f.walk.northZ, lane: 'N' };
+    const x1 = Math.max(...this.f.lifts.map((l) => l.rect.x1));
+    return { x: x1 + 1.5, z: this.f.walk.northZ, lane: 'N' };
+  }
+  /** n 번째 대기 자리 — 승강기 옆에서 동쪽으로(출고대기 앞까지), 사람은 북쪽 줄·지게차는 그 남쪽 줄(차가 커서 간격 1.8m) */
+  homeSpot(n: number, forklift = false): WalkPoint {
+    const h = this.home();
+    const gap = forklift ? 1.8 : 0.7;
+    const room = Math.max(4, Math.min(...this.f.staging.map((st) => st.pos.x)) - 2 - h.x);
+    const per = Math.max(1, Math.floor(room / gap));
+    const row = Math.floor(n / per);
+    return { ...h, x: h.x + (n % per) * gap, z: forklift ? h.z + 1.8 + 2.4 * row : h.z - 1.0 * row };
   }
 
   /**

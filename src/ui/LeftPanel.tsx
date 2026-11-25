@@ -347,7 +347,7 @@ function ZoneInfo() {
               {Math.round(((r.x1 - r.x0) * (r.z1 - r.z0)) / 3.3058).toLocaleString()}평 · {zone.temp ? TEMP_NAME[zone.temp] : '작업장(DT)'}
             </span>
           </h4>
-          <ZoneBody zoneId={zone.id} />
+          <ZoneBody key={zone.id} zoneId={zone.id} />
         </>
       ) : (
         <div className="scan-empty">
@@ -359,11 +359,62 @@ function ZoneInfo() {
   );
 }
 
+/** 오토스토어 — 설계(격자·통·칸·로봇·포트·하중)와 작동(포트 가동률·로봇·통 교환·대기·실사·보충) [사용자 2026-11-26 "누르면 안에 설계랑 작동"] */
+function AutoStoreInfo() {
+  const { sim, layout } = useApp();
+  useTick();
+  const A = layout.autostore!;
+  const st = sim.auto;
+  const u = sim.portUtil();
+  const busyRobots = st.robotFree.filter((t) => t > sim.time).length;
+  const m2 = (A.rect.x1 - A.rect.x0) * (A.rect.z1 - A.rect.z0);
+  const fill = A.binsFit ? A.bins / A.binsFit : 0;
+  const atPort = sim.agents.filter((a) => a.floor === 7 && /포트|오토스토어|로봇이 통/.test(a.activity));
+  return (
+    <>
+      <Sec title="설계" aside="[가정] 값은 설정에서">
+        <Row k="격자" v={`${A.nx} × ${A.nz} 칸 (칸 ${AUTOSTORE.cell.x} × ${AUTOSTORE.cell.z} m) · ${Math.round(m2).toLocaleString()}㎡ (${Math.round(m2 / 3.3058)}평)`} />
+        <Row k="쌓는 단" v={`${AUTOSTORE.stack}단 · 통 높이 ${AUTOSTORE.binHeightsMm.join('/')}mm · 통 최대 ${AUTOSTORE.maxBinKg}kg`} />
+        <Row k="통" v={`필요 ${A.bins.toLocaleString()} / 들어가는 ${A.binsFit.toLocaleString()} (${Math.round(fill * 100)}%)`} />
+        <Meter value={A.bins} max={A.binsFit} tone={fill > 0.9 ? 'warn' : 'accent'} />
+        <Row k="칸·SKU" v={`통당 ${AUTOSTORE.compartmentsPerBin}칸 · SKU 당 ${AUTOSTORE.compartmentsPerSku}칸 · SKU ${A.skus.toLocaleString()}`} />
+        <Row k="용량" v={`${A.capacity.toLocaleString()} 유닛 (칸당 ${AUTOSTORE.unitsPerCompartment})`} />
+        <Row k="로봇·포트" v={`로봇 ${A.robots}대 · 포트 ${A.ports}개(포트당 시간당 ${AUTOSTORE.portBinsPerHour}통 상한)`} />
+        <Row k="통 가져오기" v={`로봇 ${AUTOSTORE.fetchSec}초 · 다음 통 미리 줄 세움`} />
+        <Row k="바닥 하중" v={`${A.floorLoadKgM2.toLocaleString()} / 허용 ${A.floorLoadAllowedKgM2.toLocaleString()} kg/㎡`} />
+      </Sec>
+      <Sec title="작동" aside={sim.clockText()}>
+        {u.length ? (
+          u.map((x, i) => (
+            <div key={i}>
+              <Row k={`포트 ${i + 1} 가동률`} v={`${Math.round(x * 100)}%`} />
+              <Meter value={x} max={1} tone={x > 0.85 ? 'warn' : 'ok'} />
+            </div>
+          ))
+        ) : (
+          <Row k="포트" v="아직 통이 오지 않음(석간 피킹 13:00~)" />
+        )}
+        <Row k="로봇" v={`일하는 ${busyRobots} / ${A.robots}대`} />
+        <Meter value={busyRobots} max={A.robots} />
+        <Row k="오늘 꺼낸 통" v={st.bins.toLocaleString()} />
+        <Row k="로봇이 가져오는 중" v={`${st.waiting}통`} />
+        <Row k="포트 대기" v={`${st.waits}회 · 평균 ${st.waits ? Math.round(st.waitSec / st.waits) : 0}초`} />
+        <Row k="순환 실사 · 보충" v={`${st.counts}회 · ${st.refills}회`} />
+        <Row k="포트 앞 작업자" v={atPort.length ? atPort.map((a) => `${a.name} — ${a.activity}`).join(', ') : '없음'} />
+        <div className="note">
+          FC 피커가 포트에 서면 로봇이 격자 위에서 그 상품의 통을 꺼내 포트로 가져옵니다 → 칸에서 수량만큼 집어 MFC 박스에 → 통은 로봇이 다시 격자로. 다음 통은 미리 줄을 세워 포트가 쉬지 않게 합니다. 칸이 최소 수량({AUTOSTORE.minQty}) 아래로 내려가면 주간조가 입고 포트에서 통을 채웁니다.
+        </div>
+      </Sec>
+    </>
+  );
+}
+
 function ZoneBody({ zoneId }: { zoneId: string }) {
   const { backend, sim, catalog, layout } = useApp();
   const view = useView();
   const f = view.floorLayout()!;
   const zone = f.zones.find((z) => z.id === zoneId)!;
+  if (zone.id.endsWith('AUTOSTORE')) return <AutoStoreInfo />;
   const letter = zone.id.split('-')[1];
   const stock = sim.live('stock', 500, () => backend.ledger.onHandByLocation());
   const people = (roles: string[]) => sim.agents.filter((a) => a.floor === f.floor && roles.includes(a.role) && !a.idle);

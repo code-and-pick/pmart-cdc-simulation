@@ -170,22 +170,15 @@ function Walls({ f, L }: { f: FloorLayout; L: Layout }) {
           if (!on || c1 <= a0 || c0 >= a1) continue;
           walls.push({ r: along === 'x' ? { x0: c0, z0: s.z0 - t / 2, x1: c1, z1: s.z0 + t / 2 } : { x0: s.x0 - t / 2, z0: c0, x1: s.x0 + t / 2, z1: c1 }, cold: true, h: H, y0: doorTop(d.kind) });
         }
-        // 벽 위 온도 표시 — 긴 벽마다 하나(문이 가운데면 조금 비켜서)
-        if (a1 - a0 > 8) {
-          // 도크 문 앞(북쪽 벽 쪽 벽의 도크 x 범위)은 피한다(사용자 2026-11-26 "냉장 3도는 왜 도크 앞에 있냐")
-          let mid = (a0 + a1) / 2;
-          if (along === 'x' && f.docks.length) {
-            const d0 = Math.min(...f.docks.map((d) => d.pos.x)) - 4;
-            const d1 = Math.max(...f.docks.map((d) => d.pos.x)) + 4;
-            if (mid > d0 && mid < d1) mid = a1 - d1 > 6 ? (d1 + a1) / 2 : d0 - a0 > 6 ? (a0 + d0) / 2 : mid;
-          }
-          labels.push({ text: room.label, x: along === 'x' ? mid : s.x0, z: along === 'x' ? s.z0 : mid, temp: room.temp });
-        }
       }
-      // 긴 벽이 없는 방도 표시 하나는 — 가장 긴 벽 위
-      if (!labels.some((l) => l.text === room.label) && room.walls.length) {
-        const w = [...room.walls].sort((a, b) => Math.hypot(b.x1 - b.x0, b.z1 - b.z0) - Math.hypot(a.x1 - a.x0, a.z1 - a.z0))[0];
-        labels.push({ text: room.label, x: (w.x0 + w.x1) / 2, z: (w.z0 + w.z1) / 2, temp: room.temp });
+      // 온도 표 — 그 방(구역)의 가운데 통로 위에 하나(사용자 2026-11-26 "온도카드는 그냥 그 구역 중앙 통로에").
+      // 가장 큰 사각형의 가운데에서 가장 가까운 랙 통로(같은 온도) x, 깊이는 가운데
+      {
+        const big = room.rects.reduce((p, q) => ((q.x1 - q.x0) * (q.z1 - q.z0) > (p.x1 - p.x0) * (p.z1 - p.z0) ? q : p));
+        const mx = (big.x0 + big.x1) / 2;
+        const ax = f.aisles.filter((x) => x.temp === room.temp && x.cx > big.x0 && x.cx < big.x1).map((x) => x.cx);
+        const x = ax.length ? ax.reduce((p, q) => (Math.abs(q - mx) < Math.abs(p - mx) ? q : p)) : mx;
+        labels.push({ text: room.label, x, z: (big.z0 + big.z1) / 2, temp: room.temp });
       }
       for (const d of room.doors) doors.push({ d, h: H });
     }
@@ -255,7 +248,7 @@ function Walls({ f, L }: { f: FloorLayout; L: Layout }) {
           ref={(g) => {
             if (g) groups.current[doors.length + i] = g;
           }}
-          position={[l.x, WALL_H + 0.9, l.z]}
+          position={[l.x, 8.6, l.z]}
           scale={[5.2, 1.3, 1]}
         >
           <spriteMaterial map={plateTexture(l.text, { bg: l.temp === 'FROZEN' ? '#2f6fd6' : '#2aa36b', fg: '#ffffff', w: 384, h: 96 })} depthWrite={false} />
@@ -372,16 +365,14 @@ const CARD_H = 2.6;
 const CARD_ALL_Y = (RACK.levels - 1) * RACK.levelH + RACK.levelH * 0.9 + 0.4 + CARD_H / 2;
 /** 북쪽 벽에 붙이는 카드 z(벽 바로 앞) */
 const WALL_Z = 0.35;
-/** 벽 카드 높이 — 도크 문(5.2m) 바로 위. 랙 위 높이로 두면 전체 보기에서 화면 위 조작 줄에 가렸음 */
-const WALL_Y = 5.4 + CARD_H / 2;
+const WALL_Y = CARD_ALL_Y; // 모든 카드 같은 높이(사용자 2026-11-26 "낮게 하라고 한 적 없다 — 낮으면 구역을 가린다")
 const CARD_GAP = 0.5;
 /**
  * 띄운 높이만큼 남쪽으로 — 전체 보기 카메라(약 69° 내려다봄)에서 높이 y 인 카드는 y × cot(69°) ≈ 0.39y 만큼 북쪽에 보인다.
  * 그만큼 남쪽에 세워야 화면에서 구역 북쪽 끝에 맞는다(전엔 랙 카드가 DAS 존 아래에, DAS 카드가 휠소터 위에 보였음 — 사용자 2026-11-26).
  */
 const LIFT_K = 0.39;
-/** 띠 구역 북쪽 끝 카드 높이 — 설비(DAS 틀 2.4m·선반) 바로 위 */
-const EDGE_Y = 2.7 + CARD_H / 2;
+const EDGE_Y = CARD_ALL_Y;
 const TEMP_SHORT: Record<string, string> = { AMBIENT: '상온', CHILLED: '냉장', FROZEN: '냉동' };
 
 /** 괄호 설명 중 첫 구절만 짧게 — "생활용품 — 박스째 → …" → "생활용품" */

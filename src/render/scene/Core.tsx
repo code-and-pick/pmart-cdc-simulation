@@ -140,6 +140,16 @@ export function Picker() {
       }
       const f = controller.floorLayout();
       if (!f) return;
+      // 1-2) 오토스토어 — 격자 상자를 누르면 왼쪽 구역 탭에 설계·작동(사용자 2026-11-26). 통 칸은 칸 고르기에서 빠져 있어 바닥에 닿기 전에 상자로 잡는다
+      const auto = f.equipment.find((x) => x.kind === 'AUTOSTORE');
+      if (auto) {
+        box.min.set(auto.rect.x0, 0, auto.rect.z0);
+        box.max.set(auto.rect.x1, 4.6, auto.rect.z1);
+        if (ray.ray.intersectBox(box, hit)) {
+          controller.openZone(`${f.floor}-AUTOSTORE`);
+          return;
+        }
+      }
       // 2) 칸 — 통로 쪽 앞면이 카메라를 보는 칸 먼저, 없으면(위에서 내려다볼 때 등) 앞뒤 가리지 않고
       const cells = [...f.shelves.filter((l) => !l.bin), ...f.locations];
       let best: { loc: Location; d: number } | null = null;

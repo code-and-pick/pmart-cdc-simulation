@@ -236,6 +236,12 @@ export class ViewController extends Emitter {
     this.emit();
   }
 
+  /** 구역을 고르고 왼쪽 구역 탭을 연다(닫혀 있어도) — 3D 설비(오토스토어)를 눌렀을 때 */
+  openZone(key: string) {
+    this.leftView = 'zone';
+    this.focusZone(key);
+  }
+
   toggleLeft(v: LeftView) {
     this.leftView = this.leftView === v ? null : v;
     this.emit();

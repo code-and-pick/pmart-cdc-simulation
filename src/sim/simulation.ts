@@ -339,14 +339,13 @@ export class Simulation implements DutyClock {
   setHeadcount(fl: FloorNo, role: Role, n: number, shift: Shift = role === 'REPL' ? 'DAY' : 'EVENING') {
     const cur = this.agents.filter((a) => a.floor === fl && a.role === role && a.shift === shift && !a.retired);
     if (n > cur.length) {
-      const home = this.sites.get(fl)!.home();
       const used = new Set(this.agents.filter((a) => a.floor === fl && a.role === role).map((a) => Number(a.id.slice(-2))));
       for (let k = cur.length; k < n; k++) {
         let no = 1;
         while (used.has(no)) no++;
         used.add(no);
         const id = `${role.toLowerCase()}-${fl}-${String(no).padStart(2, '0')}`;
-        const a = new Agent(id, `${ROLE_KO[role]} ${fl}F-${String(no).padStart(2, '0')}`, role, fl, shift, { ...home, x: home.x + this.agents.length * 0.3 }, this);
+        const a = new Agent(id, `${ROLE_KO[role]} ${fl}F-${String(no).padStart(2, '0')}`, role, fl, shift, this.sites.get(fl)!.homeSpot(this.agents.filter((x) => x.floor === fl && (x.role === 'REPL') === (role === 'REPL')).length, role === 'REPL'), this);
         this.agents.push(a);
         void this.run(a);
       }
@@ -356,12 +355,14 @@ export class Simulation implements DutyClock {
 
   private hire(fl: FloorNo) {
     const w = WORKFORCE[fl];
-    const home = this.sites.get(fl)!.home();
+    const site = this.sites.get(fl)!;
     const add = (role: Role, shift: Shift, n: number, from = 1) => {
       for (let i = 0; i < n; i++) {
         const no = String(from + i).padStart(2, '0');
         const id = `${role.toLowerCase()}-${fl}-${no}`;
-        this.agents.push(new Agent(id, `${ROLE_KO[role]} ${fl}F-${no}`, role, fl, shift, { ...home, x: home.x + this.agents.length * 0.3 }, this));
+        // 대기 자리 — 승강기 옆(문 앞은 비움), 지게차는 따로 한 줄
+        const k = this.agents.filter((x) => x.floor === fl && (x.role === 'REPL') === (role === 'REPL')).length;
+        this.agents.push(new Agent(id, `${ROLE_KO[role]} ${fl}F-${no}`, role, fl, shift, site.homeSpot(k, role === 'REPL'), this));
       }
     };
     add('REPL', 'DAY', w.replDay);
