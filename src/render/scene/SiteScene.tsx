@@ -12,6 +12,7 @@ import { SCENE, ZONE_COLOR, zoneBoxColor } from '../colors';
 import { plateTexture } from '../sprites';
 import { Agents, SimDriver } from './Agents';
 import { Facility, Lights } from './Facility';
+import { EquipmentModel, RollContainer } from './Equipment3D';
 import { CameraRig, CellLabels, Picker } from './Core';
 import { Shelves } from './Shelves';
 import { BEAM_H, beamY, LOAD_MAX } from '../rackGeom';
@@ -252,17 +253,9 @@ function Staging({ f }: { f: FloorLayout }) {
               <planeGeometry args={[1.2, 1.9]} />
               <meshBasicMaterial color={SCENE.hazard} transparent opacity={0.35} />
             </mesh>
-            {used && rolls === 0 && (
-              <mesh position={[0, 0.9, 0]}>
-                <boxGeometry args={[0.8, 1.7, 0.7]} />
-                <meshStandardMaterial color={SCENE.rollContainer} wireframe />
-              </mesh>
-            )}
+            {used && rolls === 0 && <RollContainer x={0} z={0} fill={0} />}
             {Array.from({ length: rolls }, (_, i) => (
-              <mesh key={i} position={[(i % 2) * 0.45 - 0.22, 0.9, Math.floor(i / 2) * 0.8 - 0.4]}>
-                <boxGeometry args={[0.8, 1.7, 0.7]} />
-                <meshStandardMaterial color={cold ? SCENE.coldCover : SCENE.rollContainer} metalness={cold ? 0.5 : 0} roughness={cold ? 0.35 : 0.8} />
-              </mesh>
+              <RollContainer key={i} x={(i % 2) * 0.45 - 0.22} z={Math.floor(i / 2) * 0.8 - 0.4} cold={cold} fill={0.8} />
             ))}
           </group>
         );
@@ -271,26 +264,13 @@ function Staging({ f }: { f: FloorLayout }) {
   );
 }
 
-const EQUIP_COLOR: Record<string, number> = { WHEEL_SORTER: SCENE.conveyor, DPS: SCENE.conveyor, DAS: SCENE.conveyor, SPLIT: 0x3aa35a, AUTOSTORE: SCENE.autostore };
-
-/** 설비 자리 — 높이 있는 판(설비 모양은 다음 단계). 이름은 구역 카드 */
+/** 설비 모형(Equipment3D) — 휠소터·DAS·분배·DPS·오토스토어. 이름은 구역 카드 */
 function Equipment({ f }: { f: FloorLayout }) {
   return (
     <>
-      {f.equipment.map((e) => {
-        const cx = (e.rect.x0 + e.rect.x1) / 2;
-        const cz = (e.rect.z0 + e.rect.z1) / 2;
-        const h = e.kind === 'AUTOSTORE' ? 5 : 0.9;
-        return (
-          <group key={e.label}>
-            <mesh position={[cx, h / 2, cz]}>
-              <boxGeometry args={[(e.rect.x1 - e.rect.x0) * 0.9, h, (e.rect.z1 - e.rect.z0) * (e.kind === 'AUTOSTORE' ? 0.8 : 0.35)]} />
-              <meshStandardMaterial color={EQUIP_COLOR[e.kind]} transparent opacity={0.85} />
-            </mesh>
-            {/* 이름은 구역 카드(Facility.ZoneCards)로 */}
-          </group>
-        );
-      })}
+      {f.equipment.map((e) => (
+        <EquipmentModel key={e.label} e={e} floor={f.floor} />
+      ))}
     </>
   );
 }
@@ -349,8 +329,40 @@ function Basement() {
             <planeGeometry args={[3.6, B1.truckZ1 - B1.truckZ0 + 2]} />
             <meshBasicMaterial color={ZONE_COLOR[d.temp]} transparent opacity={0.3} />
           </mesh>
-          <sprite position={[0, 3, B1.doorZ - 0.6]} scale={[3.2, 1.6, 1]}>
-            <spriteMaterial map={plateTexture(d.short)} />
+          {/* 접안 문(사진: 셔터 반쯤 열림·문틀) + 도크 레벨러(무늬 강판) + 양옆 볼라드(주황 띠) + 노란 바닥선 */}
+          <mesh position={[0, 2.6, B1.doorZ + 1.2]}>
+            <boxGeometry args={[3.4, 5.2, 0.25]} />
+            <meshStandardMaterial color={0x8f969f} transparent opacity={0.35} />
+          </mesh>
+          <mesh position={[0, 4.4, B1.doorZ + 1.1]}>
+            <boxGeometry args={[3.0, 1.6, 0.3]} />
+            <meshStandardMaterial color={0xd2d6db} metalness={0.1} roughness={0.6} />
+          </mesh>
+          <mesh rotation-x={-Math.PI / 2} position={[0, 0.03, B1.doorZ + 0.3]}>
+            <planeGeometry args={[2.4, 1.6]} />
+            <meshStandardMaterial color={0xc3c8ce} metalness={0.1} roughness={0.6} />
+          </mesh>
+          {[-1.45, 1.45].map((bx) => (
+            <group key={bx} position={[bx, 0, B1.doorZ - 0.5]}>
+              <mesh position={[0, 0.6, 0]}>
+                <cylinderGeometry args={[0.08, 0.08, 1.2, 12]} />
+                <meshStandardMaterial color={0xe3e6ea} metalness={0.15} roughness={0.4} />
+              </mesh>
+              {[0.35, 0.65, 0.95].map((by) => (
+                <mesh key={by} position={[0, by, 0]}>
+                  <cylinderGeometry args={[0.083, 0.083, 0.08, 12]} />
+                  <meshStandardMaterial color={0xf07a1a} />
+                </mesh>
+              ))}
+            </group>
+          ))}
+          <mesh rotation-x={-Math.PI / 2} position={[0, 0.02, B1.doorZ - 1.4]}>
+            <planeGeometry args={[3.4, 0.12]} />
+            <meshBasicMaterial color={SCENE.hazard} />
+          </mesh>
+          {/* 문 번호 — 사진의 둥근 판("4-16")처럼 */}
+          <sprite position={[0, 5.6, B1.doorZ + 0.9]} scale={[1.6, 1.6, 1]}>
+            <spriteMaterial map={plateTexture(d.short.replace('B1-', 'B1·'), { bg: '#2fa7c9', fg: '#ffffff', w: 192, h: 192 })} />
           </sprite>
         </group>
       ))}
