@@ -9,6 +9,7 @@
 import { CENTER_ID, MFCS, OUTBOUND, SHIFT, SIM_START, SUPPLY, TMS, WORK, WORKFORCE } from '../config';
 // 시간표 근거: 정본 CDC-8(PR #447) — 21:30 WMS 완료 · 22:00 R/T 카운팅 · 22:30 상차 · 23:00~ 출차
 import type { MockBackend } from '../backend/mock/MockBackend';
+import type { ApiCallRecord, DomainEventRecord } from '../backend/port';
 import { fmt, MockTms, type TripPlan } from '../backend/mock/MockTms';
 import type { Catalog, Handling } from '../domain/catalog';
 import { ApiProblem, type Task, type TemperatureZone } from '../domain/contract';
@@ -138,6 +139,13 @@ export class Simulation implements DutyClock {
   readonly sites = new Map<FloorNo, FloorSite>();
   readonly b1: B1Site;
   readonly events: SimEvent[] = [];
+  /** 오른쪽 API·이벤트 탭 — 계약 호출과 도메인 사건(최근 500) */
+  readonly apiLog: ApiCallRecord[] = [];
+  readonly domainEvents: DomainEventRecord[] = [];
+  /** 피킹 기록(시각·개수) — 최근 1시간 피킹 */
+  readonly pickLog: { at: number; qty: number }[] = [];
+  /** 결품 보고 개수 */
+  shortUnits = 0;
   /** 라인(DAS)에 들어온 상품 박스 · 분배대에 들어온 지역 카트 */
   readonly lineQueue = new Map<FloorNo, Drop[]>(FLOORS.map((f) => [f, []]));
   readonly splitQueue = new Map<FloorNo, { region: string; drops: Drop[] }[]>(FLOORS.map((f) => [f, []]));
@@ -182,12 +190,24 @@ export class Simulation implements DutyClock {
     this.rng = new Rng(opt.seed ?? 20261125);
     this.b1 = new B1Site(layout);
     this.tms = new MockTms({ now: () => this.time, baseDate: opt.baseDate, outbound: backend });
-    this.tms.onEvent((e) => this.log('flow', `${e.type} · ${e.summary}`));
+    const keep = <T,>(arr: T[], x: T) => {
+      arr.push(x);
+      if (arr.length > 500) arr.splice(0, arr.length - 500);
+    };
+    this.tms.onEvent((e) => {
+      keep(this.domainEvents, e);
+      this.log('flow', `${e.type} · ${e.summary}`);
+    });
+    this.tms.onApi((r) => keep(this.apiLog, r));
+    backend.onApi((r) => keep(this.apiLog, r));
     for (const f of layout.floors) {
       this.sites.set(f.floor, new FloorSite(f, layout));
       for (const l of [...f.locations, ...f.shelves, ...f.staging]) this.locs.set(l.code, l);
     }
-    backend.onEvent((e) => this.log('flow', `${e.type} · ${e.summary}`));
+    backend.onEvent((e) => {
+      keep(this.domainEvents, e);
+      this.log('flow', `${e.type} · ${e.summary}`);
+    });
     for (const fl of FLOORS) this.hire(fl);
     for (let i = 1; i <= OUTBOUND.loaders; i++) {
       const no = String(i).padStart(2, '0');
@@ -682,6 +702,8 @@ export class Simulation implements DutyClock {
         { workerId: a.id, lines: [{ sku: l.sku, lot: l.lot, locationCode: l.locationCode, pickedQty: take, ...(short ? { shortQty: short, shortReason: 'NOT_FOUND' as const } : {}) }] },
         newId('pick'),
       );
+      if (take > 0) this.pickLog.push({ at: this.time, qty: take });
+      this.shortUnits += short;
       if (take > 0) took.set(`${l.sku}|${l.lot}`, (took.get(`${l.sku}|${l.lot}`) ?? 0) + take);
       basket[i].picked += take;
       basket[i].state = short ? 'SHORT' : 'DONE';
@@ -1079,6 +1101,40 @@ export class Simulation implements DutyClock {
   }
 
   // ── 화면 요약 ───────────────────────────────────────
+  /** 지금 하루 단계(시간표 CDC-8) */
+  phase(): string {
+    const m = this.time / 60;
+    const runs = [...this.runs.values()];
+    if (m < 13 * 60) return '주간 · TRF 할당·선반 보충';
+    if (m < OUTBOUND.lowerFrom) return '석간 · 피킹·분류·검품';
+    if (m < OUTBOUND.loadFrom) return '하강 · R/T 카운팅·배차';
+    if (!runs.some((r) => r.departedAt !== undefined)) return '지하 상차';
+    if (runs.some((r) => r.state !== 'RETURNED' && r.state !== 'CANCELLED')) return '운송 · MFC 인계';
+    return '마감 · 복귀';
+  }
+
+  /** 지금 줄 서 있는 일 — 오른쪽 숫자 모두 */
+  queues() {
+    const staged = [...this.staged.values()].flat();
+    return {
+      line: [...this.lineQueue.values()].reduce((s, q) => s + q.length, 0),
+      split: [...this.splitQueue.values()].reduce((s, q) => s + q.length, 0),
+      jockey: [...this.jockeyQueue.values()].reduce((s, q) => s + q.length, 0),
+      stagedWait: staged.filter((b) => b.state !== 'PASSED' && b.state !== 'MOVING').length,
+      stagedPassed: staged.filter((b) => b.state === 'PASSED').length,
+      atB1: this.atB1.length,
+      carts: this.carts.size,
+      lights: this.lights.length,
+    };
+  }
+
+  /** 최근 1시간 피킹 개수 */
+  pickedLastHour(): number {
+    let n = 0;
+    for (let i = this.pickLog.length - 1; i >= 0 && this.pickLog[i].at > this.time - 3600; i--) n += this.pickLog[i].qty;
+    return n;
+  }
+
   summary() {
     const tasks = this.backend.allTasks();
     const done = tasks.filter((t) => t.state === 'DONE' || t.state === 'PARTIAL').length;

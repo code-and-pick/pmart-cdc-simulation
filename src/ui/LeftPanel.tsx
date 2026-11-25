@@ -4,7 +4,6 @@ import { checkReadiness, READINESS_KO, type ProbeResult } from '../backend/http/
 import { useApp, useTick, useView } from '../app/context';
 import { CDC_FACTS, MFCS, OUTBOUND, SHIFT, WORK, WORKFORCE, RACK } from '../config';
 import { ROLE_KO, type Role } from '../sim/agent';
-import type { ZoneArea } from '../domain/layout';
 
 function Sec({ title, aside, children }: { title: string; aside?: ReactNode; children: ReactNode }) {
   return (
@@ -27,6 +26,7 @@ function Row({ k, v }: { k: string; v: ReactNode }) {
   );
 }
 
+const TEMP_NAME = { AMBIENT: '상온', CHILLED: '냉장', FROZEN: '냉동' } as const;
 const hm = (m: number) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
 
 export function LeftPanel() {
@@ -36,7 +36,7 @@ export function LeftPanel() {
 }
 
 function Settings() {
-  const { real } = useApp();
+  const { real, layout } = useApp();
   return (
     <>
       {real && <RealCheck />}
@@ -46,6 +46,12 @@ function Settings() {
         <Row k="면적" v={`${CDC_FACTS.areaPyeong.toLocaleString()}평`} />
         <Row k="사용 층" v={`${CDC_FACTS.floors[0]}~${CDC_FACTS.floors[CDC_FACTS.floors.length - 1]}층 (차량은 지하 B1)`} />
         <Row k="보관 용량" v={`${(CDC_FACTS.capacityUnits / 10_000).toLocaleString()}만 유닛`} />
+      </Sec>
+      <Sec title="층 배치" aside="문서 평수 그대로">
+        {layout.floors.map((f) => (
+          <Row key={f.floor} k={f.label} v={`보관 ${Math.round(f.layoutPyeong.storage).toLocaleString()} · DT ${Math.round(f.layoutPyeong.band).toLocaleString()}평 · 팔레트 ${f.locations.length.toLocaleString()} · 선반 ${f.shelves.length.toLocaleString()}칸`} />
+        ))}
+        <Row k="랙" v={`6m 4단 · 묶음 12개 × 양면 · 지게차 통로 ${RACK.aisleW}m`} />
       </Sec>
       <Sec title="하루 시간표">
         <Row k="주간조" v={`${hm(SHIFT.day.start)}~${hm(SHIFT.day.end)}`} />
@@ -70,56 +76,267 @@ function Settings() {
   );
 }
 
+function Stat({ v, k }: { v: ReactNode; k: string }) {
+  return (
+    <div>
+      <b>{v}</b>
+      <span>{k}</span>
+    </div>
+  );
+}
+
+/**
+ * 왼쪽 "구역" — MFC ZonePanel 과 같은 구조: 위 구역 칩(누르면 그 구역으로), 고른 구역 이름·평, 숫자 칸(stats)·채움 막대·누르면 가는 목록(lows),
+ * 그 아래 고른 칸. (사용자 2026-11-25 "탭 UI 가 MFC 랑 완전 다른데 정보도 별로")
+ */
 function ZoneInfo() {
-  const { layout, backend, catalog } = useApp();
+  const { layout } = useApp();
   const view = useView();
+  useTick();
+  if (view.floor === 'B1') return <B1Info />;
+  const f = view.floorLayout()!;
+  const views = view.zoneViews().filter((v) => v.key !== 'ALL');
+  const zone = f.zones.find((z) => z.id === view.focusedZone);
   const loc = view.selected;
-  if (view.floor === 'B1') {
-    return (
-      <Sec title="B1 지하 차량 접안" aside={`${layout.docks.length}자리`}>
-        {layout.docks.map((d) => (
-          <Row key={d.code} k={d.short} v={d.code} />
+  const r = zone?.rect;
+  return (
+    <section className="sec zone-panel">
+      <div className="chips zone-chips">
+        {views.map((v) => (
+          <button key={v.key} className={v.key === view.focusedZone ? 'on' : ''} onClick={() => view.focusZone(v.key)}>
+            {v.label}
+          </button>
         ))}
-      </Sec>
+      </div>
+      {zone && r ? (
+        <>
+          <h4 className="zone-h">
+            {zone.kind === 'SHELF' ? zone.label.replace(/ \(.*\)/, '') : zone.label}
+            <span>
+              {' '}
+              {Math.round(((r.x1 - r.x0) * (r.z1 - r.z0)) / 3.3058).toLocaleString()}평 · {zone.temp ? TEMP_NAME[zone.temp] : '작업장(DT)'}
+            </span>
+          </h4>
+          <ZoneBody zoneId={zone.id} />
+        </>
+      ) : (
+        <div className="scan-empty">
+          구역을 고르면(위 칩 또는 3D 바닥) 칸 수·현물·채움률, 보충 남은 칸, 지금 일하는 사람이 여기에 나옵니다. {layout.floors.length}개 층 · 층 고르기는 위 층 단추.
+        </div>
+      )}
+      {loc && <CellCard />}
+    </section>
+  );
+}
+
+function ZoneBody({ zoneId }: { zoneId: string }) {
+  const { backend, sim, catalog } = useApp();
+  const view = useView();
+  const f = view.floorLayout()!;
+  const zone = f.zones.find((z) => z.id === zoneId)!;
+  const letter = zone.id.split('-')[1];
+  const stock = backend.ledger.onHandByLocation();
+  const people = (roles: string[]) => sim.agents.filter((a) => a.floor === f.floor && roles.includes(a.role) && !a.idle);
+  const Bar = ({ pct, color }: { pct: number; color: string }) => (
+    <div className="bar">
+      <i style={{ width: `${pct}%`, background: color }} />
+    </div>
+  );
+  const tempColor = zone.temp === 'FROZEN' ? '#4f8ff7' : zone.temp === 'CHILLED' ? '#27ae60' : '#e0a040';
+  if (zone.kind === 'RACK' || zone.kind === 'SHELF') {
+    const cells = zone.kind === 'RACK' ? f.locations.filter((l) => l.zone === letter) : f.shelves.filter((l) => l.zone === letter);
+    const on = cells.reduce((a, l) => a + (stock.get(l.code) ?? 0), 0);
+    const cap = cells.reduce((a, l) => a + l.capacity, 0);
+    const filled = cells.filter((l) => (stock.get(l.code) ?? 0) > 0).length;
+    const pct = cap ? Math.round((on / cap) * 100) : 0;
+    const needs = backend.replenishmentNeeds().filter((n) => n.from.split('-')[1] === letter && n.from.split('-')[2] === String(f.floor));
+    const aisles = (zone.kind === 'RACK' ? f.aisles : f.shelfAisles).filter((a) => a.zone === letter);
+    const skus = catalog.skus.filter((s) => s.zone === letter).length;
+    const working = zone.kind === 'RACK' ? people(['REPL']) : people(['FC']);
+    // 선반: 비어 가는 칸(현물/용량 낮은 순) · 랙: 보충으로 선반에 옮길 것
+    const low =
+      zone.kind === 'SHELF'
+        ? cells
+            .map((l) => ({ l, q: stock.get(l.code) ?? 0 }))
+            .filter((x) => x.q < x.l.capacity * 0.25)
+            .sort((a, b) => a.q - b.q)
+            .slice(0, 8)
+        : [];
+    const go = (code: string) => {
+      const l = [...f.locations, ...f.shelves].find((x) => x.code === code);
+      if (l) view.focusLocation(l);
+    };
+    return (
+      <>
+        <div className="stats">
+          <Stat v={aisles.length} k={zone.kind === 'RACK' ? `통로 (${aisles[0]?.plate ?? ''}~)` : `선반 통로 (${aisles[0]?.plate ?? ''}~)`} />
+          <Stat v={zone.kind === 'RACK' ? f.rows.filter((r) => r.zone === letter).length / 2 : skus.toLocaleString()} k={zone.kind === 'RACK' ? '랙 묶음 줄(12개)' : 'SKU'} />
+          <Stat v={cells.length.toLocaleString()} k={`칸 (재고 ${filled.toLocaleString()})`} />
+          <Stat v={on.toLocaleString()} k="현물(유닛)" />
+          <Stat v={zone.kind === 'RACK' ? needs.length : low.length} k={zone.kind === 'RACK' ? '선반 보충 남은 것' : '거의 빈 칸(<25%)'} />
+          <Stat v={working.length} k={zone.kind === 'RACK' ? '지게차 일하는 중' : 'FC 일하는 중(층)'} />
+        </div>
+        <Bar pct={pct} color={tempColor} />
+        <div className="note">
+          채움 {pct}% ({on.toLocaleString()} / {cap.toLocaleString()} 유닛)
+        </div>
+        {zone.kind === 'RACK' && needs.length > 0 && (
+          <>
+            <div className="note">선반으로 보충할 것 (팔레트 → 선반) — 누르면 그 팔레트 칸으로</div>
+            <div className="lows">
+              {needs.slice(0, 8).map((n) => (
+                <div key={`${n.sku}${n.from}`} onClick={() => go(n.from)}>
+                  <span>{n.from.split('-').slice(3).join('-')}</span>
+                  <span>{catalog.bySku.get(n.sku)?.name ?? n.sku}</span>
+                  <span>{n.qty}개</span>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+        {low.length > 0 && (
+          <>
+            <div className="note">거의 빈 선반 칸 — 누르면 그 칸으로</div>
+            <div className="lows">
+              {low.map(({ l, q }) => (
+                <div key={l.code} onClick={() => go(l.code)}>
+                  <span>{l.short}</span>
+                  <span>{catalog.skus.find((s) => s.shelf.code === l.code)?.name ?? ''}</span>
+                  <span>
+                    {q}/{l.capacity}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+      </>
     );
   }
-  const f = view.floorLayout()!;
-  const stock = loc ? backend.ledger.cellsAt(loc.code) : [];
-  const zone = f.zones.find((z) => z.id === view.focusedZone);
+  if (zone.kind === 'BAND') {
+    const staged = f.staging.map((s) => ({ s, boxes: sim.staged.get(s.code) ?? [] })).filter((x) => x.boxes.length);
+    return (
+      <>
+        <div className="stats">
+          <Stat v={f.lifts.length} k="화물 승강기(92)" />
+          <Stat v={f.staging.length} k="출고대기 자리(91)" />
+          <Stat v={staged.reduce((a, x) => a + x.boxes.length, 0)} k="출고대기 박스" />
+          <Stat v={staged.reduce((a, x) => a + x.boxes.filter((b) => b.state === 'PASSED').length, 0)} k="검품 합격" />
+        </div>
+        {staged.length ? (
+          <div className="lows">
+            {staged.map(({ s, boxes }) => (
+              <div key={s.code} onClick={() => view.focusLocation(s)}>
+                <span>{s.short}</span>
+                <span>{MFCS.find((m) => m.id === boxes[0].mfcId)?.name ?? ''}</span>
+                <span>
+                  {boxes.length}박스 · 합격 {boxes.filter((b) => b.state === 'PASSED').length}
+                </span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="note">출고대기에 박스가 없습니다.</div>
+        )}
+      </>
+    );
+  }
+  // 설비
+  const e = f.equipment.find((x) => `${f.floor}-${x.kind}` === zone.id);
+  const q = sim.queues();
+  const lit = sim.lights.filter((l) => l.floor === f.floor);
+  const rows: [ReactNode, string][] =
+    e?.kind === 'DAS'
+      ? [
+          [people(['SORT']).filter((a) => Number(a.id.slice(-2)) % 2 === 1).length, '라인 작업자 일하는 중'],
+          [q.line, '라인 대기 상품 박스'],
+          [lit.filter((l) => l.kind === 'LINE').length, '켜진 칸 불'],
+          [sim.sealedBy.LINE.toLocaleString(), '닫은 MFC 박스'],
+        ]
+      : e?.kind === 'SPLIT'
+        ? [
+            [people(['SORT']).filter((a) => Number(a.id.slice(-2)) % 2 === 0).length, '분배 작업자 일하는 중'],
+            [q.split, '분배 대기 지역 카트'],
+            [sim.sealedBy.SPLIT.toLocaleString(), '닫은 MFC 크레이트'],
+          ]
+        : e?.kind === 'DPS'
+          ? [
+              [lit.filter((l) => l.kind === 'DPS').length, '켜진 선반 불'],
+              [sim.sealedBy.DPS.toLocaleString(), '닫은 MFC 박스'],
+            ]
+          : e?.kind === 'WHEEL_SORTER'
+            ? [['—', '거의 안 씀 (박스 피킹 → 바로 출고대기)']]
+            : [['20,000', '빈(bin) [가정]'], ['비식재', '낱개 상품']];
   return (
     <>
-      {zone && <ZoneCard zone={zone} />}
-      {loc && (
-        <Sec title="고른 칸" aside={loc.type === 'PICK_FACE' ? '피킹 선반' : '팔레트 보관'}>
-          <Row k="위치 코드" v={loc.code} />
-          <Row k="번호판" v={loc.short} />
-          <Row k="통로·베이·단·슬롯" v={`${loc.aisle} · ${loc.bay} · ${loc.level} · ${loc.slot}`} />
-          <Row k="용량" v={`${loc.capacity.toLocaleString()} 유닛`} />
-          {stock.length === 0 && <Row k="재고" v="비어 있음" />}
-          {stock.map((c) => (
-            <div key={c.lot}>
-              <Row k="상품" v={`${catalog.bySku.get(c.sku)?.name ?? ''} (${c.sku})`} />
-              <Row k="LOT · 기한" v={`${c.lot} · ${c.expiresAt}`} />
-              <Row k="현물 · 예약" v={`${c.onHand.toLocaleString()} · ${c.reserved.toLocaleString()} 유닛`} />
-            </div>
-          ))}
-        </Sec>
-      )}
-      <Sec title={f.label} aside={`문서 ${(Object.values(f.spec.docPyeong.storage).reduce((a, b) => a + b, 0) + f.spec.docPyeong.dt).toLocaleString()}평`}>
-        {f.spec.zones.map((z) => (
-          <Row key={z.letter} k={z.label} v={`통로 ${f.aisles.filter((a) => a.zone === z.letter).length} · ${z.levels}단`} />
+      <div className="stats">
+        {rows.map(([v, k]) => (
+          <Stat key={k} v={v} k={k} />
         ))}
-        <Row k="팔레트 칸" v={f.locations.length.toLocaleString()} />
-        <Row k="선반 칸" v={`${f.shelves.length.toLocaleString()} (통로 ${f.shelfAisles.map((a) => a.plate).join('·')})`} />
-        <Row k="출고대기(91)" v={`${f.staging.length}자리`} />
-        <Row k="승강기 문(92)" v={`${f.lifts.length}대`} />
-        {f.equipment.map((e) => (
-          <Row key={e.label} k="설비" v={e.label} />
-        ))}
-        <Row k="배치 면적" v={`보관 ${Math.round(f.layoutPyeong.storage).toLocaleString()} · DT ${Math.round(f.layoutPyeong.band).toLocaleString()}평 (문서 그대로)`} />
-        <Row k="랙 묶음" v={`${f.rows.length / 2}개 (12개 × 양면 = 24개, 통로 ${RACK.aisleW}m)`} />
-      </Sec>
+      </div>
+      <div className="note">
+        {e?.kind === 'DAS'
+          ? '자키가 가져온 상품 박스를 스캔하면 그 상품을 받는 MFC 칸에 작업자 색 불과 숫자가 켜지고, 숫자만큼 넣으면 꺼집니다.'
+          : e?.kind === 'SPLIT'
+            ? 'FC 가 가져온 지역 카트(야채)를 PDA 로 스캔 → MFC 별 수량 → MFC 크레이트에 담고 지역 바코드로 확인합니다.'
+            : e?.kind === 'DPS'
+              ? '냉동 피킹 — 작업자 색 불·숫자가 켜진 선반 칸에서 집어 MFC 박스에 담고, 박스를 닫아 컨베이어로 보냅니다.'
+              : ''}
+      </div>
     </>
+  );
+}
+
+/** 고른 칸 — 위치 코드·재고(LOT·기한·현물·예약) */
+function CellCard() {
+  const { backend, catalog } = useApp();
+  const view = useView();
+  const loc = view.selected!;
+  const stock = backend.ledger.cellsAt(loc.code);
+  return (
+    <Sec title="고른 칸" aside={loc.type === 'PICK_FACE' ? '피킹 선반' : loc.type === 'RESERVE' ? '팔레트 보관' : loc.type === 'STAGING' ? '출고대기' : '접안'}>
+      <Row k="위치 코드" v={loc.code} />
+      <Row k="통로·베이·단·슬롯" v={`${loc.aisle} · ${loc.bay} · ${loc.level} · ${loc.slot}`} />
+      {loc.capacity > 0 && <Row k="용량" v={`${loc.capacity.toLocaleString()} 유닛`} />}
+      {stock.length === 0 && loc.type !== 'STAGING' && <Row k="재고" v="비어 있음" />}
+      {stock.map((c) => (
+        <div key={c.lot}>
+          <Row k="상품" v={`${catalog.bySku.get(c.sku)?.name ?? ''} (${c.sku})`} />
+          <Row k="LOT · 기한" v={`${c.lot} · ${c.expiresAt}`} />
+          <Row k="현물 · 예약" v={`${c.onHand.toLocaleString()} · ${c.reserved.toLocaleString()} 유닛`} />
+        </div>
+      ))}
+    </Sec>
+  );
+}
+
+/** B1 지하 — 접안 자리·차·마당 R/T */
+function B1Info() {
+  const { layout, sim } = useApp();
+  const runs = [...sim.runs.values()];
+  return (
+    <section className="sec zone-panel">
+      <h4 className="zone-h">
+        B1 지하 차량 접안 <span>8,600평 밖</span>
+      </h4>
+      <div className="stats">
+        <Stat v={layout.docks.length} k="접안 자리(90)" />
+        <Stat v={runs.filter((r) => r.state === 'LOADING' || r.state === 'PLANNED').length} k="대기·상차 중 차" />
+        <Stat v={sim.atB1.length} k="마당 R/T" />
+        <Stat v={runs.filter((r) => r.departedAt !== undefined).length} k="출차한 차" />
+      </div>
+      <div className="lows">
+        {runs.map((r) => (
+          <div key={r.plan.tripId}>
+            <span>{r.plateNo}</span>
+            <span>
+              {r.plan.region} {TEMP_NAME[r.plan.temp]}
+            </span>
+            <span>R/T {Math.ceil(r.loaded.length / OUTBOUND.boxesPerRt)}</span>
+          </div>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -183,44 +400,6 @@ function Workers() {
   );
 }
 
-const TEMP_NAME = { AMBIENT: '상온', CHILLED: '냉장', FROZEN: '냉동' } as const;
-
-/** 고른 구역 카드 — MFC "구역을 고르면 왼쪽 구역 화면에 그 구역 정보를 고정해 보인다" */
-function ZoneCard({ zone }: { zone: ZoneArea }) {
-  const { backend, sim } = useApp();
-  const view = useView();
-  useTick();
-  const f = view.floorLayout()!;
-  const letter = zone.id.split('-')[1];
-  const kindKo = zone.kind === 'RACK' ? '팔레트 보관 랙' : zone.kind === 'SHELF' ? '피킹 선반' : zone.kind === 'BAND' ? '승강기·출고대기' : '분류 설비';
-  const stock = backend.ledger.onHandByLocation();
-  const cells = zone.kind === 'RACK' ? f.locations.filter((l) => l.zone === letter) : zone.kind === 'SHELF' ? f.shelves.filter((l) => l.zone === letter) : [];
-  const onHand = cells.reduce((a, l) => a + (stock.get(l.code) ?? 0), 0);
-  const cap = cells.reduce((a, l) => a + l.capacity, 0);
-  const filled = cells.filter((l) => (stock.get(l.code) ?? 0) > 0).length;
-  const w = zone.rect.x1 - zone.rect.x0;
-  const d = zone.rect.z1 - zone.rect.z0;
-  return (
-    <Sec title={zone.kind === 'SHELF' ? `${letter} 피킹 선반` : zone.label} aside={kindKo}>
-      {zone.temp && <Row k="온도대" v={TEMP_NAME[zone.temp]} />}
-      {zone.kind === 'RACK' && <Row k="통로" v={f.aisles.filter((a) => a.zone === letter).map((a) => a.plate).join(' · ')} />}
-      {zone.kind === 'SHELF' && <Row k="통로" v={f.shelfAisles.filter((a) => a.zone === letter).map((a) => a.plate).join(' · ')} />}
-      {cells.length > 0 && (
-        <>
-          <Row k="칸" v={`${cells.length.toLocaleString()} (재고 있는 칸 ${filled.toLocaleString()})`} />
-          <Row k="현물 / 용량" v={`${onHand.toLocaleString()} / ${cap.toLocaleString()} 유닛 (${cap ? Math.round((onHand / cap) * 100) : 0}%)`} />
-        </>
-      )}
-      {zone.kind === 'BAND' && (
-        <>
-          <Row k="승강기" v={`${f.lifts.length}대 (92)`} />
-          <Row k="출고대기 R/T" v={`${f.staging.reduce((a, s) => a + (sim.staged.get(s.code)?.length ?? 0), 0)}박스 · 자리 ${f.staging.length}`} />
-        </>
-      )}
-      <Row k="넓이" v={`${w.toFixed(1)} × ${d.toFixed(1)} m · ${Math.round((w * d) / 3.3058).toLocaleString()}평`} />
-    </Sec>
-  );
-}
 
 function Help() {
   return (

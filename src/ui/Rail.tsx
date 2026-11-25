@@ -3,10 +3,11 @@ import { useView } from '../app/context';
 import type { LeftView, RightView } from '../render/controller';
 
 const RIGHT: [RightView, string, string][] = [
-  ['summary', '▤', '지표'],
   ['logs', '☰', '현장'],
-  ['inventory', '▦', '재고'],
   ['transport', '⛟', '운송'],
+  ['api', '⧉', 'API'],
+  ['events', '⇄', '이벤트'],
+  ['inventory', '▦', '재고'],
 ];
 const LEFT: [LeftView, string, string][] = [
   ['settings', '⚙', '설정'],

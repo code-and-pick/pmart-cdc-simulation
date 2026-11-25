@@ -42,7 +42,7 @@ export interface CameraRequest {
 
 /** all = 랙 번호판 + 가까이 확대하면 칸 번호 · rack = 랙 번호판만 · off = 끔 (MFC 와 같음) */
 export type LabelMode = 'all' | 'rack' | 'off';
-export type RightView = 'summary' | 'inventory' | 'logs' | 'transport';
+export type RightView = 'logs' | 'transport' | 'api' | 'events' | 'inventory';
 export type LeftView = 'settings' | 'zone' | 'workers' | 'help';
 export type Theme = 'dark' | 'light';
 export type FloorKey = FloorNo | 'B1';
@@ -62,7 +62,7 @@ export class ViewController extends Emitter {
   labelMode: LabelMode = 'all';
   theme: Theme = loadTheme();
   leftView: LeftView | null = 'settings';
-  rightView: RightView | null = 'summary';
+  rightView: RightView | null = 'logs';
   /** 누른 칸 */
   selected: Location | null = null;
   /** 누른 작업자(PDA 카드) */
