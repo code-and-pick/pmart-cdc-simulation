@@ -6,12 +6,13 @@
 //  - 롤테이너: 파란 철망 카트, 저온은 은색 보냉 커버(앞 창)
 // 시뮬레이션과 묶이는 것은 "돌고 있는지"(분류 작업자가 일하는지)뿐 — 수량은 원장·계약에서만.
 import { useFrame } from '@react-three/fiber';
-import { useLayoutEffect, useMemo, useRef } from 'react';
+import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { useApp } from '../../app/context';
 import { MFCS } from '../../config';
 import type { Equip } from '../../domain/layout';
 import type { FloorNo } from '../../domain/sites/chilgok';
+import { dasRows, mfcSlotIndex } from '../../sim/site';
 import { boxTexture, plateTexture } from '../sprites';
 import { StaticMerge } from './StaticMerge';
 
@@ -430,40 +431,88 @@ function BlueFrame({ x, z, len, depth, h, dir, levels = 2 }: { x: number; z: num
  */
 function DasLines({ e, floor, split }: { e: Equip; floor: FloorNo; split: boolean }) {
   const busy = useBusy(floor);
-  const r = e.rect;
-  const rows = Math.max(1, Math.floor((r.z1 - r.z0) / 6.5));
-  const len = r.x1 - r.x0 - 3;
-  const cx = (r.x0 + r.x1) / 2;
+  const off = () => false;
   return (
     <group>
-      {Array.from({ length: rows }, (_, k) => {
-        const z = r.z0 + 3 + k * ((r.z1 - r.z0 - 4) / rows);
-        const rts = Math.floor(len / 1.0);
+      {dasRows(e.rect).map((row, k) => {
+        const { z, cx, len, slots } = row;
+        const mfcAt = new Map(MFCS.map((m, i) => [mfcSlotIndex(i, slots.length), m]));
         return (
           <group key={k}>
             <Conveyor x={cx} z={z} len={len} dir="x" w={0.8} h={0.78} />
-            {Array.from({ length: rts }, (_, i) => (
-              <RollContainer key={i} x={cx - len / 2 + (i + 0.5) * (len / rts)} z={z + 1.35} cold={false} fill={((i * 37) % 10) / 14} />
-            ))}
-            <BlueFrame x={cx} z={z + 1.35} len={len} depth={1.0} h={2.4} dir="x" levels={1} />
-            <LightStrip x={cx} y={2.4} z={z + 0.83} len={len} dir="x" busy={busy} />
-            {split && (
-              // 분배: 롤러 작업대 위에 야채 크레이트(초록) 몇 개
-              <>
-                {Array.from({ length: Math.floor(len / 3) }, (_, i) => (
-                  <mesh key={`c${i}`} position={[cx - len / 2 + 1.5 + i * 3, 0.98, z]}>
-                    <boxGeometry args={[0.55, 0.3, 0.4]} />
+            {slots.map((x, i) =>
+              split ? (
+                // 분배: MFC 별 초록 크레이트(LPN = MFC 하나) — MFC 칸만
+                mfcAt.has(i) && (
+                  <mesh key={i} position={[x, 0.98, z + 1.0]}>
+                    <boxGeometry args={[0.6, 0.32, 0.42]} />
                     <meshStandardMaterial color={0x3aa35a} />
                   </mesh>
-                ))}
-              </>
+                )
+              ) : (
+                <RollContainer key={i} x={x} z={z + 1.35} cold={false} fill={mfcAt.has(i) ? 0.5 : 0} />
+              ),
             )}
+            {!split && <BlueFrame x={cx} z={z + 1.35} len={len} depth={1.0} h={2.4} dir="x" levels={1} />}
+            {/* 표시등 줄(꺼진 상태) — 켜지는 불은 WorkLights 가 실제 작업대로 그린다 */}
+            {!split && <LightStrip x={cx} y={2.4} z={z + 0.83} len={len} dir="x" busy={off} />}
+            {/* MFC 칸 이름(PPC 번호·MFC) */}
+            {[...mfcAt].map(([i, m]) => (
+              <sprite key={m.id} position={[slots[i], split ? 1.7 : 3.0, z + (split ? 1.0 : 1.35)]} scale={[1.5, 0.56, 1]}>
+                <spriteMaterial map={plateTexture(`PPC-${String(m.staging).padStart(2, '0')}\n${m.name.replace(/^\d호점 /, '')}`, { w: 256, h: 96 })} depthWrite={false} />
+              </sprite>
+            ))}
             <FlowBoxes path={[new THREE.Vector3(cx - len / 2, 0.84, z), new THREE.Vector3(cx + len / 2, 0.84, z)]} n={Math.max(3, Math.floor(len / 5))} busy={busy} color={split ? 0x3aa35a : 0xd7b07c} />
           </group>
         );
       })}
     </group>
   );
+}
+
+/** 켜진 작업 표시등 — DPS 선반 칸·라인 칸에 그 작업자 색 불 + 숫자(시뮬레이션 lights) [현장 "스캐너 색과 같은 불이 켜진 칸에 숫자만큼"] */
+export function WorkLights({ floor }: { floor: FloorNo }) {
+  const { sim } = useApp();
+  const [, force] = useState(0);
+  const sig = useRef('');
+  useFrame(() => {
+    const s = sim.lights
+      .filter((l) => l.floor === floor)
+      .map((l) => `${l.x.toFixed(2)},${l.z.toFixed(2)},${l.color},${l.qty}`)
+      .join('|');
+    if (s !== sig.current) {
+      sig.current = s;
+      force((n) => n + 1);
+    }
+  });
+  return (
+    <>
+      {sim.lights
+        .filter((l) => l.floor === floor)
+        .map((l, i) => (
+          <group key={`${l.who}-${i}`} position={[l.x, l.y, l.z]}>
+            <mesh>
+              <boxGeometry args={[0.22, 0.12, 0.08]} />
+              <meshStandardMaterial color={l.color} emissive={l.color} emissiveIntensity={2.2} toneMapped={false} />
+            </mesh>
+            <sprite position={[0, 0.42, 0]} scale={[0.7, 0.52, 1]} renderOrder={6}>
+              <spriteMaterial map={qtyTexture(l.qty, l.color)} depthTest={false} depthWrite={false} />
+            </sprite>
+          </group>
+        ))}
+    </>
+  );
+}
+
+const qtyCache = new Map<string, THREE.CanvasTexture>();
+function qtyTexture(qty: number, color: string): THREE.CanvasTexture {
+  const key = `${qty}|${color}`;
+  let t = qtyCache.get(key);
+  if (!t) {
+    t = plateTexture(String(qty), { bg: color, fg: '#ffffff', w: 128, h: 96 });
+    qtyCache.set(key, t);
+  }
+  return t;
 }
 
 /** DPS(냉동) — 흐름 선반 두 줄(표시등) + 사이 빈 박스 컨베이어 */
@@ -485,7 +534,7 @@ function Dps({ e, floor }: { e: Equip; floor: FloorNo }) {
               <meshStandardMaterial color={0xcfe0f5} />
             </mesh>
           ))}
-          <LightStrip x={cx + s * 1.35} y={1.0} z={cz} len={len} dir="z" busy={busy} />
+          <LightStrip x={cx + s * 1.35} y={1.0} z={cz} len={len} dir="z" busy={() => false} />
         </group>
       ))}
       <FlowBoxes path={[new THREE.Vector3(cx, 0.86, r.z1 - 1.2), new THREE.Vector3(cx, 0.86, r.z0 + 1.2)]} n={Math.max(3, Math.floor(len / 3))} busy={busy} color={0xd2a679} size={[0.42, 0.28, 0.32]} />

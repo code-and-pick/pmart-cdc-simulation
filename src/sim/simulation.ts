@@ -10,7 +10,7 @@ import { CENTER_ID, MFCS, OUTBOUND, SHIFT, SIM_START, SUPPLY, TMS, WORK, WORKFOR
 // 시간표 근거: 정본 CDC-8(PR #447) — 21:30 WMS 완료 · 22:00 R/T 카운팅 · 22:30 상차 · 23:00~ 출차
 import type { MockBackend } from '../backend/mock/MockBackend';
 import { fmt, MockTms, type TripPlan } from '../backend/mock/MockTms';
-import type { Catalog } from '../domain/catalog';
+import type { Catalog, Handling } from '../domain/catalog';
 import { ApiProblem, type Task, type TemperatureZone } from '../domain/contract';
 import { stagingCodeFor, type FloorLayout, type Layout, type Location } from '../domain/layout';
 import type { FloorKey, FloorNo } from '../domain/sites/chilgok';
@@ -25,14 +25,47 @@ export interface SimEvent {
   text: string;
 }
 
-interface SortJob {
+type Contents = { sku: string; lot: string; qty: number }[];
+
+/** 피킹한 MFC 몫 하나(작업 하나) — 카트·라인·분배로 간다 */
+interface Drop {
   taskId: string;
   trfId: string;
   waveId: string;
   mfcId: string;
+  contents: Contents;
+  temp: TemperatureZone;
+  stagingCode: string;
 }
-
-type Contents = { sku: string; lot: string; qty: number }[];
+/** 작업자 손의 지역 카트(또는 DPS 박스·핸드자키) */
+interface Cart {
+  region: string;
+  handling: Handling;
+  drops: Drop[];
+}
+/** 켜진 표시등 — DPS 선반 칸·라인 칸, 작업자 색과 숫자 [현장] */
+export interface WorkLight {
+  floor: FloorNo;
+  kind: 'DPS' | 'LINE';
+  x: number;
+  y: number;
+  z: number;
+  color: string;
+  qty: number;
+  who: string;
+}
+/** 작업자 스캐너 색 [시뮬] */
+const WORKER_COLORS = [
+  { hex: '#ff3b30', name: '빨강' },
+  { hex: '#34c759', name: '초록' },
+  { hex: '#0a84ff', name: '파랑' },
+  { hex: '#ffcc00', name: '노랑' },
+  { hex: '#bf5af2', name: '보라' },
+  { hex: '#ff9f0a', name: '주황' },
+  { hex: '#64d2ff', name: '하늘' },
+  { hex: '#ff375f', name: '분홍' },
+];
+const HANDLING_TITLE: Record<Handling, string> = { DPS: 'DPS 피킹 (냉동)', BOX: '박스 피킹', FC: 'FC 피킹', SPLIT: 'FC 피킹 (야채 → 분배)', LINE: '자키 (라인에 상품 박스)' };
 
 interface JockeyJob {
   trfId: string;
@@ -42,6 +75,8 @@ interface JockeyJob {
   temp: TemperatureZone;
   stagingCode: string;
   contents: Contents;
+  /** 박스를 집으러 가는 곳(DPS 컨베이어 끝·라인·분배 칸) */
+  from: WalkPoint;
 }
 
 /** 출고대기·하강·상차를 따라가는 박스(LPN) — 수량은 서버 분류 결과 그대로 */
@@ -103,7 +138,20 @@ export class Simulation implements DutyClock {
   readonly sites = new Map<FloorNo, FloorSite>();
   readonly b1: B1Site;
   readonly events: SimEvent[] = [];
-  readonly sortQueue = new Map<FloorNo, SortJob[]>(FLOORS.map((f) => [f, []]));
+  /** 라인(DAS)에 들어온 상품 박스 · 분배대에 들어온 지역 카트 */
+  readonly lineQueue = new Map<FloorNo, Drop[]>(FLOORS.map((f) => [f, []]));
+  readonly splitQueue = new Map<FloorNo, { region: string; drops: Drop[] }[]>(FLOORS.map((f) => [f, []]));
+  /** 작업자 손의 카트(agentId →) */
+  private readonly carts = new Map<string, Cart>();
+  /** 나눠 담는 중인 TRF 수 */
+  private readonly busy = new Map<string, number>();
+  /** 켜진 표시등(DPS·라인) — 화면이 그린다 */
+  readonly lights: WorkLight[] = [];
+  private lpnSeq = 0;
+  /** 방식별 닫은 박스 수(DPS·박스·FC 바로 출고대기·라인·분배) — 시험·지표용 */
+  readonly sealedBy: Record<'DPS' | 'DIRECT' | 'LINE' | 'SPLIT', number> = { DPS: 0, DIRECT: 0, LINE: 0, SPLIT: 0 };
+  /** 켜진 적 있는 표시등 수 */
+  litCount = 0;
   readonly jockeyQueue = new Map<FloorNo, JockeyJob[]>(FLOORS.map((f) => [f, []]));
   /** 출고대기 자리(91 코드) → 그 자리에 놓인 박스 */
   readonly staged = new Map<string, StagedBox[]>();
@@ -346,8 +394,7 @@ export class Simulation implements DutyClock {
     if (!this.day.released || !r.loaded.length || this.loading.has(r.plan.tripId)) return false;
     const ids = new Set(r.plan.stops.flatMap((s) => s.trfIds));
     if (this.backend.allTasks().some((t) => ids.has(t.trfId) && !TERMINAL.includes(t.state))) return false;
-    for (const q of this.sortQueue.values()) if (q.some((j) => ids.has(j.trfId))) return false;
-    for (const q of this.jockeyQueue.values()) if (q.some((j) => ids.has(j.trfId))) return false;
+    for (const id of ids) if (this.pendingTrf(id)) return false;
     if ([...this.staged.values()].flat().some((b) => ids.has(b.trfId))) return false;
     return !this.atB1.some((x) => ids.has(x.trfId));
   }
@@ -540,13 +587,34 @@ export class Simulation implements DutyClock {
   }
 
   /** FC 피커 — 다음 작업 받기 → 착수 → 선반마다 지역 바코드·상품 스캔 → 담기 → 분류대 [현장 알바몬 FC] */
+  /** 작업자 색(DPS·라인 표시등 = 그 작업자 스캐너 색) [현장 "스캐너 색과 같은 불"] */
+  colorOf(a: Agent): { hex: string; name: string } {
+    const same = this.agents.filter((x) => x.floor === a.floor && (x.role === 'FC' || x.role === 'SORT'));
+    return WORKER_COLORS[Math.max(0, same.indexOf(a)) % WORKER_COLORS.length];
+  }
+
+  /**
+   * 피킹 — 작업(TRF = MFC 하나 × 구역·작업 방식)을 PDA 로 받는다 [계약 그대로, 설계 §5.4 1단계].
+   * FC·박스·분배용 야채: **지역 카트**에 담는다 — 같은 지역·같은 방식 작업을 이어 받으면 한 카트에 더 담고(MFC 별 칸 유지), 지역이 바뀌거나 차면 내려놓는다.
+   * DPS(냉동): 빈 박스를 들고 작업자 색 불·숫자가 켜진 선반 칸에서 집는다 → 박스 닫아 DPS 컨베이어에.
+   * 라인용 상자 상품(6F): 자키가 상품 박스를 핸드자키로 라인에 가져다준다.
+   */
   private async pickOnce(a: Agent) {
     const site = this.floorSite(a);
+    const held = this.carts.get(a.id);
+    if (held && this.time / 60 >= this.window(a).end - 20) {
+      await this.deliver(a, held);
+      return;
+    }
     let task: Task;
     try {
       ({ task } = await this.backend.pullNextTask(CENTER_ID, a.id, { kind: 'PICK', floor: String(a.floor) }, newId('next')));
     } catch (e) {
       if (e instanceof ApiProblem && e.problem.code === 'NO_TASK_AVAILABLE') {
+        if (held) {
+          await this.deliver(a, held);
+          return;
+        }
         a.pda = { title: 'FC 피킹', step: '받을 작업 없음', rows: [] };
         await a.wait(WORK.idlePoll, '작업 대기');
         return;
@@ -556,6 +624,18 @@ export class Simulation implements DutyClock {
     if (task.state === 'ACCEPTED') task = await this.backend.startTask(task.taskId, a.id, newId('start'), task.version);
     const trf = await this.backend.getTransferIntake(task.trfId);
     const mfc = MFCS.find((m) => m.id === trf.mfcId);
+    const handling: Handling = this.catalog.bySku.get(task.lines[0].sku)?.handling ?? 'FC';
+    const region = mfc?.region ?? '';
+    let cart = this.carts.get(a.id);
+    if (cart && (cart.region !== region || cart.handling !== handling || cart.drops.length >= WORK.cartMaxTasks)) {
+      await this.deliver(a, cart);
+      cart = undefined;
+    }
+    if (!cart) {
+      cart = { region, handling, drops: [] };
+      this.carts.set(a.id, cart);
+    }
+    const color = this.colorOf(a);
     const basket = task.lines.map((l) => ({
       name: this.catalog.bySku.get(l.sku)?.name ?? l.sku,
       loc: this.locs.get(l.locationCode)?.short ?? l.locationCode,
@@ -563,18 +643,20 @@ export class Simulation implements DutyClock {
       picked: l.pickedQty,
       state: (l.pickedQty + l.shortQty >= l.plannedQty ? 'DONE' : 'TODO') as 'TODO' | 'NOW' | 'DONE' | 'SHORT',
     }));
-    a.carrying = 'CART';
+    a.carrying = handling === 'LINE' ? 'PALLET' : 'CART';
     a.pda = {
-      title: 'FC 피킹',
-      step: '지역 바코드 스캔',
+      title: HANDLING_TITLE[handling],
+      step: handling === 'DPS' ? `빈 박스 받기 — 내 불 ${color.name}` : '지역 바코드 스캔',
       rows: [
         ['작업', task.taskId],
-        ['지역', `${mfc?.region ?? ''} (${mfc?.name ?? trf.mfcId})`],
-        ['TRF', task.trfId],
+        ['지역', `${region} → ${mfc?.name ?? trf.mfcId}`],
+        [handling === 'DPS' ? '박스' : handling === 'LINE' ? '핸드자키' : '지역 카트', handling === 'DPS' ? `MFC 박스 (${mfc?.name ?? ''})` : `${region} ${cart.drops.length + 1}번째 MFC 몫`],
         ['진행', `0/${task.lines.length}`],
       ],
       basket,
     };
+    await a.wait(WORK.regionScan, handling === 'DPS' ? '빈 박스 받기' : '지역 바코드 스캔');
+    const took = new Map<string, number>();
     for (let i = 0; i < task.lines.length; i++) {
       const l = task.lines[i];
       const remaining = l.plannedQty - l.pickedQty - l.shortQty;
@@ -585,80 +667,249 @@ export class Simulation implements DutyClock {
       await this.go(a, site.front(loc), WORK.cart, `선반으로 (${loc.short})`);
       const short = this.rng.next() < WORK.shortRate ? Math.min(remaining, 1 + Math.floor(this.rng.next() * 3)) : 0;
       const take = remaining - short;
-      a.pda.step = `${basket[i].name} ${take}개 담기`;
-      await a.wait(WORK.pickScan + take * WORK.pickPerUnit, '지역 바코드·상품 스캔 → 담기');
+      let light: WorkLight | null = null;
+      if (handling === 'DPS' && take > 0) {
+        // DPS: 그 칸에 내 색 불과 숫자 [현장 DPS "진열 칸에 불과 수량"]
+        light = { floor: a.floor as FloorNo, kind: 'DPS', x: loc.pos.x + (loc.face ?? 1) * 0.3, y: loc.pos.y + 0.32, z: loc.pos.z, color: color.hex, qty: take, who: a.id };
+        this.lights.push(light);
+        this.litCount++;
+        a.pda.step = `${color.name} 불 ${take} → 박스에 담기`;
+      } else a.pda.step = `${basket[i].name} ${take}개 ${handling === 'LINE' ? '박스째 싣기' : '카트에 담기'}`;
+      await a.wait(WORK.pickScan + take * WORK.pickPerUnit, handling === 'DPS' ? '불 보고 집기' : '상품 스캔 → 담기');
+      if (light) this.lights.splice(this.lights.indexOf(light), 1);
       await this.backend.reportPickResult(
         task.taskId,
         { workerId: a.id, lines: [{ sku: l.sku, lot: l.lot, locationCode: l.locationCode, pickedQty: take, ...(short ? { shortQty: short, shortReason: 'NOT_FOUND' as const } : {}) }] },
         newId('pick'),
       );
+      if (take > 0) took.set(`${l.sku}|${l.lot}`, (took.get(`${l.sku}|${l.lot}`) ?? 0) + take);
       basket[i].picked += take;
       basket[i].state = short ? 'SHORT' : 'DONE';
       if (short) this.log('warn', `${a.name} 결품 보고 ${loc.short} ${basket[i].name} ${short}개`);
       a.pda.rows[3] = ['진행', `${basket.filter((b) => b.state === 'DONE' || b.state === 'SHORT').length}/${task.lines.length}`];
     }
-    a.pda.step = '분류대로 카트 가져가기';
-    await this.go(a, site.station(), WORK.cart, '분류대로');
-    await a.wait(WORK.cartDrop, '분류대에 카트 내려놓기');
-    this.sortQueue.get(a.floor as FloorNo)!.push({ taskId: task.taskId, trfId: task.trfId, waveId: task.waveId, mfcId: trf.mfcId });
-    a.carrying = null;
+    const contents: Contents = [...took].map(([k, qty]) => ({ sku: k.split('|')[0], lot: k.split('|')[1], qty }));
+    if (contents.length)
+      cart.drops.push({
+        taskId: task.taskId,
+        trfId: task.trfId,
+        waveId: task.waveId,
+        mfcId: trf.mfcId,
+        contents,
+        temp: this.catalog.bySku.get(contents[0].sku)?.temp ?? 'AMBIENT',
+        stagingCode: stagingCodeFor(task.lines[0].locationCode, mfc?.staging ?? 1),
+      });
     a.done += 1;
+    if (handling === 'DPS' || handling === 'LINE') await this.deliver(a, cart);
+  }
+
+  /** 박스 닫기 — OUTBOUND.boxMaxUnits 개씩 나눠 LPN(한 LPN = 한 TRF) → 분류 결과(BOX SEALED) */
+  private async seal(a: Agent, d: { trfId: string; waveId: string; contents: Contents; temp: TemperatureZone }) {
+    const boxes: Contents[] = [[]];
+    let room: number = OUTBOUND.boxMaxUnits;
+    for (const c of d.contents) {
+      let left = c.qty;
+      while (left > 0) {
+        if (room === 0) {
+          boxes.push([]);
+          room = OUTBOUND.boxMaxUnits;
+        }
+        const q = Math.min(left, room);
+        boxes[boxes.length - 1].push({ sku: c.sku, lot: c.lot, qty: q });
+        left -= q;
+        room -= q;
+      }
+    }
+    const lpns = boxes.filter((b) => b.length).map((cs) => ({ lpn: `BOX-${d.trfId}-${++this.lpnSeq}`, unitType: 'BOX' as const, state: 'SEALED' as const, temperatureZone: d.temp, contents: cs }));
+    if (lpns.length) await this.backend.reportSortingResult({ waveId: d.waveId, trfId: d.trfId, workerId: a.id, lpns }, newId('sort'));
+    return lpns;
+  }
+
+  /** 카트·박스 내려놓기 — 방식마다 다른 곳으로 */
+  private async deliver(a: Agent, cart: Cart) {
+    const site = this.floorSite(a);
+    const fl = a.floor as FloorNo;
+    const mfcName = (id: string) => MFCS.find((m) => m.id === id)?.name ?? id;
+    if (cart.drops.length) {
+      if (cart.handling === 'SPLIT' || cart.handling === 'LINE') {
+        const kind = cart.handling === 'SPLIT' ? 'SPLIT' : 'DAS';
+        a.pda = { title: HANDLING_TITLE[cart.handling], step: kind === 'SPLIT' ? '분배대로 지역 카트 가져가기' : '라인으로 상품 박스 가져다주기', rows: [['지역', cart.region], ['MFC', [...new Set(cart.drops.map((d) => mfcName(d.mfcId)))].join(' · ')]] };
+        await this.go(a, site.dropAt(kind), WORK.cart, kind === 'SPLIT' ? '분배대로' : '라인으로');
+        await a.wait(WORK.cartDrop, kind === 'SPLIT' ? '지역 카트 내려놓기' : '상품 박스 내려놓기');
+        if (kind === 'SPLIT') this.splitQueue.get(fl)!.push({ region: cart.region, drops: cart.drops });
+        else this.lineQueue.get(fl)!.push(...cart.drops);
+      } else if (cart.handling === 'DPS') {
+        const at = site.dropAt('DPS');
+        a.pda = { title: HANDLING_TITLE.DPS, step: '박스 닫아 컨베이어에', rows: [['MFC', mfcName(cart.drops[0].mfcId)]] };
+        await this.go(a, at, WORK.cart, 'DPS 컨베이어로');
+        await a.wait(WORK.cartDrop, '박스 닫아 컨베이어에');
+        for (const d of cart.drops) {
+          const lpns = await this.seal(a, d);
+          this.sealedBy.DPS += lpns.length;
+          for (const l of lpns) this.jockeyQueue.get(fl)!.push({ trfId: d.trfId, mfcId: d.mfcId, lpn: l.lpn, units: l.contents.reduce((x, c) => x + c.qty, 0), temp: d.temp, stagingCode: d.stagingCode, contents: l.contents, from: at });
+        }
+      } else {
+        // 박스·FC: 피킹 = 분류 — 출고대기 MFC 롤테이너로 바로 [현장 "DPS·박스 피킹 → 바로 출고대기"]
+        for (const code of [...new Set(cart.drops.map((d) => d.stagingCode))]) {
+          const dest = this.loc(code);
+          const ds = cart.drops.filter((d) => d.stagingCode === code);
+          a.pda = { title: HANDLING_TITLE[cart.handling], step: `${dest.short} 로 — MFC 박스 내려놓기`, rows: [['지역', cart.region], ['MFC', mfcName(ds[0].mfcId)]] };
+          await this.go(a, site.front(dest), WORK.cart, `출고대기로 (${dest.short})`);
+          await a.wait(WORK.cartDrop, '박스 닫고 MFC 롤테이너에');
+          for (const d of ds) {
+            const lpns = await this.seal(a, d);
+            this.sealedBy.DIRECT += lpns.length;
+            const arr = this.staged.get(code) ?? [];
+            arr.push(...lpns.map((l) => ({ lpn: l.lpn, trfId: d.trfId, mfcId: d.mfcId, units: l.contents.reduce((x, c) => x + c.qty, 0), temp: d.temp, state: 'WAIT' as const, contents: l.contents })));
+            this.staged.set(code, arr);
+          }
+        }
+      }
+    }
+    this.carts.delete(a.id);
+    a.carrying = null;
     a.pda = null;
   }
 
-  /** 분배·라인 — 카트 상품 스캔 → MFC 칸(롤테이너)에 불·숫자대로 담기 → 분류 결과(BOX SEALED) [현장 분배·라인, 설계 §5.3] */
+  /** 6F 분류 작업자 — 번호 홀수 = 라인(DAS), 짝수 = 분배 */
   private async sortOnce(a: Agent) {
-    const site = this.floorSite(a);
-    const q = this.sortQueue.get(a.floor as FloorNo)!;
-    const job = q.shift();
-    const st = site.station();
-    const slot = Number(a.id.slice(-2));
-    const spot: WalkPoint = { ...st, x: st.x + (slot - 1.5) * 2 };
-    if (a.at.x !== spot.x || a.at.z !== spot.z) await this.go(a, spot, WORK.walk, '분류대로');
-    if (!job) {
-      a.pda = null;
-      await a.wait(WORK.idlePoll / 3, '카트 대기');
+    const k = Number(a.id.slice(-2));
+    if (a.floor !== 6) {
+      await a.wait(WORK.idlePoll, '대기');
       return;
     }
-    const task = await this.backend.getTask(job.taskId);
-    const contents = task.lines.filter((l) => l.pickedQty > 0).map((l) => ({ sku: l.sku, lot: l.lot, qty: l.pickedQty }));
-    const units = contents.reduce((s, c) => s + c.qty, 0);
-    const mfc = MFCS.find((m) => m.id === job.mfcId);
-    a.pda = { title: '분배·라인', step: '상품 스캔 → 불·숫자대로 담기', rows: [['카트', job.taskId], ['MFC 칸', `PPC-${String(mfc?.staging ?? 0).padStart(2, '0')} ${mfc?.name ?? ''}`], ['수량', `${units}`]] };
-    await a.wait(WORK.sortStart + units * WORK.sortPerUnit, '상품 스캔 → MFC 칸에 담기');
-    if (units > 0) {
-      // 박스 하나에 OUTBOUND.boxMaxUnits 개까지 — 넘으면 나눈다(LPN 은 박스마다, 한 LPN = 한 TRF)
-      const temp: TemperatureZone = this.catalog.bySku.get(contents[0].sku)?.temp ?? 'AMBIENT';
-      const boxes: { sku: string; lot: string; qty: number }[][] = [[]];
-      let room: number = OUTBOUND.boxMaxUnits;
-      for (const c of contents) {
-        let left = c.qty;
-        while (left > 0) {
-          if (room === 0) {
-            boxes.push([]);
-            room = OUTBOUND.boxMaxUnits;
-          }
-          const q = Math.min(left, room);
-          boxes[boxes.length - 1].push({ sku: c.sku, lot: c.lot, qty: q });
-          left -= q;
-          room -= q;
-        }
-      }
-      const lpns = boxes.map((cs, i) => ({ lpn: `BOX-${job.taskId}-${i + 1}`, unitType: 'BOX' as const, state: 'SEALED' as const, temperatureZone: temp, contents: cs }));
-      await this.backend.reportSortingResult({ waveId: job.waveId, trfId: job.trfId, workerId: a.id, lpns }, newId('sort'));
-      const stagingCode = stagingCodeFor(task.lines[0].locationCode, mfc?.staging ?? 1);
-      for (const l of lpns) this.jockeyQueue.get(a.floor as FloorNo)!.push({ trfId: job.trfId, mfcId: job.mfcId, lpn: l.lpn, units: l.contents.reduce((x, c) => x + c.qty, 0), temp, stagingCode, contents: l.contents });
+    if (k % 2 === 1) await this.lineOnce(a, (k - 1) / 2);
+    else await this.splitOnce(a, k / 2 - 1);
+  }
+
+  /**
+   * 라인(DAS) — 자키가 가져다준 상품 박스를 스캔 → 그 상품을 받는 MFC 칸마다 **내 스캐너 색 불과 숫자**가 켜진다 → 칸마다 숫자만큼 넣는다.
+   * 다 넣으면 칸(MFC 박스)을 닫아 분류 결과(MFC 별) → 자키가 출고대기로 [현장 라인, 설계 §5.4].
+   */
+  private async lineOnce(a: Agent, k: number) {
+    const site = this.floorSite(a);
+    const fl = a.floor as FloorNo;
+    const spot = site.lineSpot('DAS', k);
+    const q = this.lineQueue.get(fl)!;
+    if (!q.length) {
+      if (a.at.x !== spot.stand.x || a.at.z !== spot.stand.z) await this.go(a, spot.stand, WORK.walk, '라인으로');
+      a.pda = null;
+      await a.wait(WORK.idlePoll / 3, '상품 박스 대기');
+      return;
     }
-    a.done += 1;
-    a.pda = null;
+    const batch = q.splice(0, 8);
+    for (const d of batch) this.busy.set(d.trfId, (this.busy.get(d.trfId) ?? 0) + 1);
+    const color = this.colorOf(a);
+    if (a.at.x !== spot.stand.x || a.at.z !== spot.stand.z) await this.go(a, spot.stand, WORK.walk, '라인으로');
+    await this.distribute(a, batch, {
+      title: `라인 (DAS) — 내 불 ${color.name}`,
+      scan: WORK.lineScan,
+      perUnit: WORK.linePerUnit,
+      slot: (m) => spot.slot(m),
+      light: (m, qty) => ({ floor: fl, kind: 'LINE', ...spot.light(m), color: color.hex, qty, who: a.id }),
+      put: '불·숫자대로 칸에 넣기',
+    });
+    await a.walk(spot.stand, [spot.stand], WORK.walk, '작업대로');
+    for (const d of batch) this.busy.set(d.trfId, (this.busy.get(d.trfId) ?? 1) - 1);
+  }
+
+  /**
+   * 분배(야채) — FC 가 가져온 **지역 카트**(알티, 지역명 종이)를 PDA 로 스캔 → 지역·MFC 별 수량 → MFC 별 크레이트에 담고 **지역 바코드**로 확인 [현장 분배].
+   * 크레이트 하나 = MFC 하나(LPN = TRF) [사용자 2026-11-25].
+   */
+  private async splitOnce(a: Agent, k: number) {
+    const site = this.floorSite(a);
+    const fl = a.floor as FloorNo;
+    const spot = site.lineSpot('SPLIT', k);
+    const q = this.splitQueue.get(fl)!;
+    const cart = q.shift();
+    if (!cart) {
+      if (a.at.x !== spot.stand.x || a.at.z !== spot.stand.z) await this.go(a, spot.stand, WORK.walk, '분배대로');
+      a.pda = null;
+      await a.wait(WORK.idlePoll / 3, '지역 카트 대기');
+      return;
+    }
+    for (const d of cart.drops) this.busy.set(d.trfId, (this.busy.get(d.trfId) ?? 0) + 1);
+    if (a.at.x !== spot.stand.x || a.at.z !== spot.stand.z) await this.go(a, spot.stand, WORK.walk, '분배대로');
+    await this.distribute(a, cart.drops, {
+      title: `분배 (야채) — ${cart.region} 카트`,
+      scan: WORK.splitScan,
+      perUnit: WORK.splitPerUnit,
+      slot: (m) => spot.slot(m),
+      light: null,
+      put: 'MFC 크레이트에 담기',
+    });
+    a.pda!.step = `${cart.region} 지역 바코드 스캔`;
+    await a.wait(WORK.regionScan, '지역 바코드 스캔');
+    await a.walk(spot.stand, [spot.stand], WORK.walk, '분배대로');
+    for (const d of cart.drops) this.busy.set(d.trfId, (this.busy.get(d.trfId) ?? 1) - 1);
+  }
+
+  /** 나눠 담기(라인·분배 공통) — 상품별로 스캔 → MFC 칸마다 숫자만큼 → 다 끝나면 MFC(TRF) 별 박스 닫기 → 자키 줄 */
+  private async distribute(
+    a: Agent,
+    drops: Drop[],
+    o: { title: string; scan: number; perUnit: number; slot: (m: number) => WalkPoint; light: ((m: number, qty: number) => WorkLight) | null; put: string },
+  ) {
+    const fl = a.floor as FloorNo;
+    const mIdx = (id: string) => Math.max(0, MFCS.findIndex((m) => m.id === id));
+    const bySku = new Map<string, { sku: string; lot: string; per: Map<string, number> }>();
+    for (const d of drops)
+      for (const c of d.contents) {
+        const key = `${c.sku}|${c.lot}`;
+        const g = bySku.get(key) ?? { sku: c.sku, lot: c.lot, per: new Map() };
+        g.per.set(d.trfId, (g.per.get(d.trfId) ?? 0) + c.qty);
+        bySku.set(key, g);
+      }
+    const trfInfo = new Map(drops.map((d) => [d.trfId, d]));
+    const into = new Map<string, Contents>();
+    a.pda = { title: o.title, step: '상품 스캔', rows: [] };
+    for (const g of bySku.values()) {
+      const name = this.catalog.bySku.get(g.sku)?.name ?? g.sku;
+      const targets = [...g.per].sort((x, y) => mIdx(trfInfo.get(x[0])!.mfcId) - mIdx(trfInfo.get(y[0])!.mfcId));
+      a.pda.step = `${name} 스캔`;
+      a.pda.rows = [['상품', name], ...targets.map(([t, qty]) => [MFCS[mIdx(trfInfo.get(t)!.mfcId)].name, `${qty}개`] as [string, string])];
+      await a.wait(o.scan, '상품 스캔');
+      const lit = o.light ? targets.map(([t, qty]) => o.light!(mIdx(trfInfo.get(t)!.mfcId), qty)) : [];
+      this.lights.push(...lit);
+      this.litCount += lit.length;
+      for (let i = 0; i < targets.length; i++) {
+        const [t, qty] = targets[i];
+        const m = mIdx(trfInfo.get(t)!.mfcId);
+        a.pda.step = `${MFCS[m].name} 칸에 ${qty}개 — ${o.put}`;
+        const p = o.slot(m);
+        await a.walk(p, [p], WORK.walk, o.put);
+        await a.wait(qty * o.perUnit, o.put);
+        if (lit[i]) this.lights.splice(this.lights.indexOf(lit[i]), 1);
+        const arr = into.get(t) ?? [];
+        arr.push({ sku: g.sku, lot: g.lot, qty });
+        into.set(t, arr);
+      }
+    }
+    a.pda.step = 'MFC 박스 닫기';
+    for (const [t, contents] of into) {
+      const d = trfInfo.get(t)!;
+      const lpns = await this.seal(a, { trfId: t, waveId: d.waveId, contents, temp: d.temp });
+      this.sealedBy[o.light ? 'LINE' : 'SPLIT'] += lpns.length;
+      for (const l of lpns) this.jockeyQueue.get(fl)!.push({ trfId: t, mfcId: d.mfcId, lpn: l.lpn, units: l.contents.reduce((x, c) => x + c.qty, 0), temp: d.temp, stagingCode: d.stagingCode, contents: l.contents, from: o.slot(mIdx(d.mfcId)) });
+    }
+  }
+
+  /** 아직 손에 있거나 줄에 있는 그 TRF 물건이 있는지(카트·라인·분배·자키·나눠 담는 중) */
+  private pendingTrf(trfId: string): boolean {
+    if ((this.busy.get(trfId) ?? 0) > 0) return true;
+    for (const c of this.carts.values()) if (c.drops.some((d) => d.trfId === trfId)) return true;
+    for (const q of this.lineQueue.values()) if (q.some((d) => d.trfId === trfId)) return true;
+    for (const q of this.splitQueue.values()) if (q.some((c) => c.drops.some((d) => d.trfId === trfId))) return true;
+    for (const q of this.jockeyQueue.values()) if (q.some((j) => j.trfId === trfId)) return true;
+    return false;
   }
 
   /** 이 층에서 그 MFC 몫 일이 다 끝났는지 — 피킹·분류·출고대기 옮기기·검품 */
   private floorDoneFor(floor: FloorNo, trfId: string, code: string): boolean {
     const tasks = this.backend.allTasks().filter((t) => t.trfId === trfId && t.lines[0]?.locationCode.split('-')[2] === String(floor));
     if (!this.day.released || tasks.some((t) => !TERMINAL.includes(t.state))) return false;
-    if (this.sortQueue.get(floor)!.some((j) => j.trfId === trfId)) return false;
-    if (this.jockeyQueue.get(floor)!.some((j) => j.stagingCode === code)) return false;
+    if (this.pendingTrf(trfId)) return false;
     return !(this.staged.get(code) ?? []).some((b) => b.state !== 'PASSED');
   }
 
@@ -681,7 +932,7 @@ export class Simulation implements DutyClock {
       const dest = this.loc(code);
       const units = batch.reduce((s, b) => s + b.units, 0);
       a.pda = { title: '자키', step: '롤테이너 싣기', rows: [['박스', `${batch.length}`], ['출고대기', dest.short], ['MFC', MFCS.find((m) => m.id === batch[0].mfcId)?.name ?? '']] };
-      await this.go(a, site.station(), WORK.walk, '분류대로');
+      await this.go(a, batch[0].from, WORK.walk, '박스 가지러');
       await a.wait(WORK.jockeyHandle, '롤테이너 싣기');
       a.carrying = 'ROLL';
       a.cold = dest.temp !== 'AMBIENT';

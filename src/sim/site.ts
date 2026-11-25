@@ -2,7 +2,9 @@
 //   북쪽 통로(승강기·출고대기 앞) · 보관 방 북쪽 벽 앞 통로 · 선반 통로(남북) · 랙 앞 가로 통로 · 랙 통로(남북) · 서쪽 벽 연결 통로.
 // React·three 에 의존하지 않는다.
 
-import type { FloorLayout, Layout, Location } from '../domain/layout';
+import { MFCS } from '../config';
+import type { EquipKind } from '../domain/sites/chilgok';
+import type { FloorLayout, Layout, Location, Rect } from '../domain/layout';
 import type { FloorNo } from '../domain/sites/chilgok';
 
 export interface P {
@@ -47,6 +49,28 @@ export class FloorSite {
   station(): WalkPoint {
     const pref = this.floor === 6 ? 'DAS' : this.floor === 5 ? 'WHEEL_SORTER' : 'AUTOSTORE';
     const e = this.f.equipment.find((x) => x.kind === pref) ?? this.f.equipment[0];
+    if (!e) return this.home();
+    if (e.rect.z0 >= this.layout.bandDepth) return { x: e.rect.x0 + 2, z: this.f.walk.rackZ, lane: 'R' };
+    return { x: (e.rect.x0 + e.rect.x1) / 2, z: this.f.walk.northZ, lane: 'N' };
+  }
+
+  /** 라인(DAS)·분배 작업자 k 의 자리 — 줄 하나를 맡는다. stand = 줄 서쪽 끝 작업대 앞, slot(m) = MFC m 칸 앞, light(m) = 그 칸 위 표시등 */
+  lineSpot(kind: 'DAS' | 'SPLIT', k: number) {
+    const e = this.f.equipment.find((x) => x.kind === kind);
+    if (!e) throw new Error(`${this.floor}F ${kind} 없음`);
+    const rows = dasRows(e.rect);
+    const r = rows[k % rows.length];
+    const sx = (m: number) => r.slots[mfcSlotIndex(m, r.slots.length)];
+    return {
+      stand: { x: r.cx - r.len / 2 + 0.8, z: r.z - 0.9, lane: 'R' as const },
+      slot: (m: number): WalkPoint => ({ x: sx(m), z: r.z - 0.9, lane: 'R' }),
+      light: (m: number) => ({ x: sx(m), y: 2.45, z: r.z + 0.83 }),
+    };
+  }
+
+  /** 설비에 물건을 내려놓는 자리 — 띠 설비는 북쪽 통로 쪽, 동쪽 설비는 랙 앞 통로 쪽 */
+  dropAt(kind: EquipKind): WalkPoint {
+    const e = this.f.equipment.find((x) => x.kind === kind);
     if (!e) return this.home();
     if (e.rect.z0 >= this.layout.bandDepth) return { x: e.rect.x0 + 2, z: this.f.walk.rackZ, lane: 'R' };
     return { x: (e.rect.x0 + e.rect.x1) / 2, z: this.f.walk.northZ, lane: 'N' };
@@ -133,4 +157,29 @@ export class B1Site {
 export function liftDoor(f: FloorLayout, no: number): WalkPoint {
   const l = f.lifts[(no - 1) % f.lifts.length];
   return { x: (l.rect.x0 + l.rect.x1) / 2, z: f.walk.northZ, lane: 'N' };
+}
+
+/**
+ * 라인(DAS)·분배 줄 — 설비 자리(rect) 안에 동서로 긴 줄(롤러 작업대 z, 그 남쪽 1.35m 에 MFC 칸 롤테이너들).
+ * 화면(Equipment3D.DasLines)과 시뮬레이션이 같은 계산을 쓴다 [시뮬].
+ */
+export interface DasRow {
+  z: number;
+  cx: number;
+  len: number;
+  /** 칸(롤테이너) x 들 */
+  slots: number[];
+}
+export function dasRows(r: Rect): DasRow[] {
+  const rows = Math.max(1, Math.floor((r.z1 - r.z0) / 6.5));
+  const len = r.x1 - r.x0 - 3;
+  const cx = (r.x0 + r.x1) / 2;
+  return Array.from({ length: rows }, (_, k) => {
+    const n = Math.floor(len / 1.0);
+    return { z: r.z0 + 3 + k * ((r.z1 - r.z0 - 4) / rows), cx, len, slots: Array.from({ length: n }, (_, i) => cx - len / 2 + (i + 0.5) * (len / n)) };
+  });
+}
+/** MFC m(0~)이 쓰는 칸 번호 — 줄 앞쪽부터 띄엄띄엄 */
+export function mfcSlotIndex(m: number, n: number): number {
+  return Math.min(n - 1, 2 + m * Math.max(1, Math.floor((n - 4) / MFCS.length)));
 }

@@ -15,9 +15,24 @@ export interface SeedLot {
   qty: number;
 }
 
+/**
+ * 상품 작업 방식 [사용자 2026-11-25, 설계 §5.4] — DPS(5F 냉동, 불 켜지는 선반) · BOX(5F 무거운 상자 박스 피킹) · FC(PDA 피킹, 지역 카트) ·
+ * SPLIT(6F 야채 분배) · LINE(6F 그 밖 냉장 — 라인(DAS), 자키가 박스를 라인에 가져다줌)
+ */
+export type Handling = 'DPS' | 'BOX' | 'FC' | 'SPLIT' | 'LINE';
+/** 6F 야채(분배로 가는 것) [사용자 "야채는 분배, 나머지는 라인"] */
+const VEG = new Set(['샐러드', '콩나물', '버섯', '양배추']);
+export function handlingOf(zone: string, word: string): Handling {
+  if (zone === 'A') return 'DPS';
+  if (zone === 'C' || zone === 'D') return 'BOX';
+  if (zone === 'B') return VEG.has(word) ? 'SPLIT' : 'LINE';
+  return 'FC';
+}
+
 export interface SkuInfo {
   sku: string;
   name: string;
+  handling: Handling;
   barcode: string;
   temp: Temp;
   zone: string;
@@ -102,6 +117,7 @@ export function buildCatalog(layout: Layout, baseDate: string): Catalog {
         skus.push({
           sku,
           name,
+          handling: handlingOf(z, words[i % words.length]),
           barcode: `880${pad(serial, 10)}`,
           temp: shelf.temp,
           zone: z,

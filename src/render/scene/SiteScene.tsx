@@ -12,7 +12,7 @@ import { SCENE, ZONE_COLOR, zoneBoxColor } from '../colors';
 import { boxTexture, palletTexture, plateTexture } from '../sprites';
 import { Agents, SimDriver } from './Agents';
 import { Facility, Lights } from './Facility';
-import { EquipmentModel, FreightLift, RollContainer } from './Equipment3D';
+import { EquipmentModel, FreightLift, RollContainer, WorkLights } from './Equipment3D';
 import { CameraRig, CellLabels, Picker } from './Core';
 import { Shelves } from './Shelves';
 import { BEAM_H, beamY, LOAD_MAX } from '../rackGeom';
@@ -59,6 +59,7 @@ function FloorContent() {
       <Lifts f={f} />
       <Staging f={f} />
       <Equipment f={f} />
+      <WorkLights floor={f.floor} />
       <Selected />
     </group>
   );

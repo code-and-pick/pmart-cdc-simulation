@@ -178,9 +178,10 @@ export const SHELF = {
  * repl = 지게차 선반 보충(주간조 08~17 + 석간 1명 — 부족 재할당분 보충), fc = FC 피커, sort = 분배·라인(DAS·DPS·분류기 앞), jockey = 자키(롤테이너를 출고대기로).
  */
 export const WORKFORCE: Record<5 | 6 | 7, { fc: number; sort: number; jockey: number; replDay: number; replEve: number }> = {
-  5: { fc: 6, sort: 2, jockey: 2, replDay: 3, replEve: 1 },
+  // sort = 6F 라인(DAS)·분배 작업자(번호 홀수 라인 · 짝수 분배). 5F·7F 는 피킹 = 분류라 분류대 사람 없이 FC·DPS 로 [사용자 2026-11-25 설계 §5.4]
+  5: { fc: 8, sort: 0, jockey: 2, replDay: 3, replEve: 1 },
   6: { fc: 5, sort: 2, jockey: 2, replDay: 3, replEve: 1 },
-  7: { fc: 5, sort: 2, jockey: 2, replDay: 3, replEve: 1 },
+  7: { fc: 7, sort: 0, jockey: 2, replDay: 3, replEve: 1 },
 };
 
 /** 작업 시간·속도 [가정] — 라인 1인 하루 약 2만 걸음 [현장] 을 보정 목표로 */
@@ -199,6 +200,14 @@ export const WORK = {
   /** 분류대에 카트 내려놓기(초) */
   cartDrop: 20,
   /** 분배·라인: 박스 하나 시작(초) + 낱개 하나(초) — 상품 스캔 → 불·숫자대로 담기 [현장] */
+  /** 라인(DAS): 상품 스캔 · 칸에 하나 넣기(s) · 칸 사이 옮겨 가기 — 분배: 상품 스캔 · 하나 담기 · 지역 바코드 [가정] */
+  lineScan: 5,
+  linePerUnit: 0.9,
+  splitScan: 6,
+  splitPerUnit: 1.3,
+  regionScan: 4,
+  /** 지역 카트에 MFC 작업을 몇 개까지 모으나 [가정] */
+  cartMaxTasks: 3,
   sortStart: 10,
   sortPerUnit: 1.2,
   /** 자키: 롤테이너 싣고 내리기(초), 한 번에 옮기는 박스 수 */

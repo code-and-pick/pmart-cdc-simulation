@@ -525,16 +525,26 @@ export class MockBackend implements CdcOutboundPort {
     );
   }
 
-  /** 피킹 Task — 같은 TRF·층·구역 줄을 동선 순(통로 → 베이 → 단)으로 놓고 카트 한 대 분량(TASK.maxLines)씩 자른다 [시뮬] */
+  /**
+   * 피킹 Task — 같은 TRF·층·구역 줄을 작업 방식(DPS·박스·FC·분배·라인)으로 나누고, 동선 순(통로 → 베이 → 단)으로 놓아 카트 한 대 분량(TASK.maxLines)씩 자른다 [시뮬].
+   * 작업 방식으로 나누는 것은 시뮬레이터가 정한 값(R-18) — 6F 야채(분배)와 상자 상품(라인)이 한 작업에 섞이지 않게.
+   */
   private newPickTask(waveId: string, trfId: string, holds: { sku: string; lot: string; locationCode: string; qty: number }[]): Task[] {
-    const lines = [...holds]
-      .sort((a, b) => (a.locationCode < b.locationCode ? -1 : 1))
-      .map((h) => ({ sku: h.sku, lot: h.lot, locationCode: h.locationCode, plannedQty: h.qty, pickedQty: 0, shortQty: 0 }));
+    const groups = new Map<string, typeof holds>();
+    for (const h of holds) {
+      const k = this.opt.catalog.bySku.get(h.sku)?.handling ?? 'FC';
+      groups.set(k, [...(groups.get(k) ?? []), h]);
+    }
     const out: Task[] = [];
-    for (let i = 0; i < lines.length; i += TASK.maxLines) {
-      const t: Task = { taskId: this.id('PICK'), waveId, trfId, kind: 'PICK', state: 'CREATED', version: 0, lines: lines.slice(i, i + TASK.maxLines), createdAt: this.iso() };
-      this.tasks.set(t.taskId, t);
-      out.push(t);
+    for (const g of groups.values()) {
+      const lines = [...g]
+        .sort((a, b) => (a.locationCode < b.locationCode ? -1 : 1))
+        .map((h) => ({ sku: h.sku, lot: h.lot, locationCode: h.locationCode, plannedQty: h.qty, pickedQty: 0, shortQty: 0 }));
+      for (let i = 0; i < lines.length; i += TASK.maxLines) {
+        const t: Task = { taskId: this.id('PICK'), waveId, trfId, kind: 'PICK', state: 'CREATED', version: 0, lines: lines.slice(i, i + TASK.maxLines), createdAt: this.iso() };
+        this.tasks.set(t.taskId, t);
+        out.push(t);
+      }
     }
     return out;
   }

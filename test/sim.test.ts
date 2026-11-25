@@ -65,6 +65,13 @@ describe('하루 돌리기', () => {
     expect(backend.ledger.totals().onHand).toBe(initial.onHand);
     expect(backend.ledger.totals().transit).toBe(0);
     expect(backend.ledger.check()).toEqual([]);
+    // 설계 §5.4 1단계: DPS(냉동)·박스/FC 바로 출고대기·라인(DAS)·분배(야채)가 다 돌았고, 표시등이 켜졌다
+    expect(sim.sealedBy.DPS).toBeGreaterThan(0);
+    expect(sim.sealedBy.DIRECT).toBeGreaterThan(0);
+    expect(sim.sealedBy.LINE).toBeGreaterThan(0);
+    expect(sim.sealedBy.SPLIT).toBeGreaterThan(0);
+    expect(sim.litCount).toBeGreaterThan(0);
+    expect(sim.lights).toEqual([]);
     // 석간 FC 는 걸었다 — 걸음 수 표시용 거리
     expect(sim.agents.filter((a) => a.role === 'FC').every((a) => a.distance > 0)).toBe(true);
     expect(sim.events.filter((e) => e.kind === 'warn' && !e.text.includes('결품') && !e.text.includes('검품 불합격'))).toEqual([]);
