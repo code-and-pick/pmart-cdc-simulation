@@ -250,7 +250,17 @@ export class MockBackend implements CdcOutboundPort {
   // ══ cdc-inbound 역할 — 선반 보충(MOV). 실서버 cdc-inventory move-postings 는 아직 501(백엔드 회신 2026-11-25) ══
 
   /** 아직 팔레트 랙에 있는 할당 예약 — 선반으로 보충해야 피킹할 수 있다 (MOCK 전용 조회, 보충 작업자가 본다) */
+  private needsCache: { ver: number; out: { sku: string; lot: string; from: string; to: string; qty: number }[] } | null = null;
   replenishmentNeeds(): { sku: string; lot: string; from: string; to: string; qty: number }[] {
+    // 원장이 그대로면 지난 계산을 돌려준다(보충 작업자·패널이 자주 부름 — 성능). 예약·취소·출발은 모두 원장 거래라 version 이 바뀐다
+    const ver = this.ledger.version;
+    if (this.needsCache?.ver === ver) return this.needsCache.out.map((x) => ({ ...x }));
+    const out = this.computeNeeds();
+    this.needsCache = { ver, out };
+    return out.map((x) => ({ ...x }));
+  }
+
+  private computeNeeds(): { sku: string; lot: string; from: string; to: string; qty: number }[] {
     const agg = new Map<string, { sku: string; lot: string; from: string; to: string; qty: number }>();
     for (const r of this.trfs.values()) {
       if (r.cancelled || r.departed || !r.intake.allocationId) continue;

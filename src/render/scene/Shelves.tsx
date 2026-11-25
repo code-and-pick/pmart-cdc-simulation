@@ -121,15 +121,18 @@ function Frames({ f }: { f: FloorLayout }) {
 
 /** 칸마다 진열한 낱개 상품(작은 상자 묶음) — 높이 = 칸 용량 대비 현물. 누르기는 Core.Picker(빈 칸 포함) */
 function ShelfStock({ f }: { f: FloorLayout }) {
-  const { backend } = useApp();
+  const { backend, sim } = useApp();
   const ref = useRef<THREE.InstancedMesh>(null);
   const seen = useRef(-1);
+  const at = useRef(0);
   const slotW = SHELF.unitLen / SHELF.slots;
   const maxH = (SHELF.height - 0.25) / SHELF.levels - 0.08;
-  useFrame(() => {
-    if (seen.current === backend.ledger.version) return;
+  useFrame(({ clock }) => {
+    // 원장이 바뀌어도 0.5초에 한 번만 다시 그린다 — 120배속에선 거의 매 프레임 바뀌어 칸 수천 개를 매번 다시 계산했다(성능)
+    if (seen.current === backend.ledger.version || (seen.current >= 0 && clock.elapsedTime - at.current < 0.5)) return;
     seen.current = backend.ledger.version;
-    const stock = backend.ledger.onHandByLocation();
+    at.current = clock.elapsedTime;
+    const stock = sim.live('stock', 500, () => backend.ledger.onHandByLocation());
     const color = new THREE.Color();
     f.shelves.forEach((l, i) => {
       if (l.bin || l.lane) {

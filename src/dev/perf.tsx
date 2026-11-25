@@ -91,6 +91,8 @@ export function PerfProbe() {
   const gl = useThree((s) => s.gl);
   const scene = useThree((s) => s.scene);
   const camera = useThree((s) => s.camera);
+  // 개발용: 헤드리스 측정 스크립트가 장면·시뮬을 들여다보게(npm run dev 에서만 불러오는 파일)
+  (window as unknown as { __cdc?: unknown }).__cdc = { scene, gl, sim, controller };
   const acc = useRef({
     frameStart: 0,
     lastStart: 0,

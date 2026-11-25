@@ -2,14 +2,15 @@
 // 사람은 MFC Humanoid 모형, 조끼 색 = 역할: FC 파랑 · 분배/라인 초록 · 자키 주황 · 검품 보라 · 지하 상차 청록. 지게차 보충은 입식 리치 지게차(사용자 사진). 누르면 PDA 카드.
 
 import { useFrame } from '@react-three/fiber';
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useRef } from 'react';
 import * as THREE from 'three';
 import { useApp, useView } from '../../app/context';
 import type { Agent, Role } from '../../sim/agent';
 import { SCENE } from '../colors';
 import { boxTexture, palletTexture } from '../sprites';
 import { RollContainer } from './Equipment3D';
-import { Humanoid, type HumanoidHandle, type HumanoidLook } from './Humanoid';
+import { Crowd } from './Crowd';
+import type { HumanoidLook } from './Humanoid';
 import { StaticMerge } from './StaticMerge';
 
 const ROLE_COLOR: Record<Role, number> = { FC: 0x2f80ed, SORT: 0x27ae60, JOCKEY: 0xf2994a, REPL: 0xf2c94c, INSPECT: 0x9b51e0, LOADER: 0x00a3a3, DPS: 0x56ccf2 };
@@ -19,8 +20,8 @@ export function SimDriver() {
   const { sim, ticker } = useApp();
   const acc = useRef(0);
   useFrame((_, dt) => {
-    // 화면이 느려도 시뮬 시각이 배속만큼 가게 — 한 프레임 최대 0.25초(전엔 0.1초라 7fps 에서 120배속이 84배속이 됨, 사용자 §6-11)
-    sim.advance(Math.min(dt, 0.25));
+    // 화면이 느려도 시뮬 시각이 배속만큼 가게 — 한 프레임 최대 1초(시뮬은 안에서 1초씩 나눠 돈다). 0.25초면 4fps 아래에서 120배속이 늦어졌다(사용자 2026-11-25 "느리다")
+    sim.advance(Math.min(dt, 1));
     acc.current += dt;
     if (acc.current > 0.25) {
       acc.current = 0;
@@ -35,6 +36,8 @@ export function Agents() {
   const view = useView();
   return (
     <>
+      {/* 사람 모형은 부위별로 한 번에 그린다(Crowd — 성능). Person 은 누르기 판정·카트·지게차·고름 표시 */}
+      <Crowd lookOf={lookOf} />
       {sim.agents
         .filter((a) => a.floor === view.floor)
         .map((a) => (
@@ -55,16 +58,12 @@ function lookOf(a: Agent): HumanoidLook {
 function Person({ a, selected }: { a: Agent; selected: boolean }) {
   const view = useView();
   const g = useRef<THREE.Group>(null);
-  const fig = useRef<HumanoidHandle>(null);
   const cart = useRef<THREE.Group>(null);
   const roll = useRef<THREE.Group>(null);
   const coldRoll = useRef<THREE.Group>(null);
   const jack = useRef<THREE.Group>(null);
   const load = useRef<THREE.Group>(null);
-  const last = useRef<{ x: number; z: number } | null>(null);
   const truckG = useRef<THREE.Group>(null);
-  const figG = useRef<THREE.Group>(null);
-  const look = useMemo(() => lookOf(a), [a]);
   const truck = a.role === 'REPL';
   // 클릭 판정(Core.Picker)이 사람을 먼저 잡도록 등록
   useEffect(() => {
@@ -74,25 +73,17 @@ function Person({ a, selected }: { a: Agent; selected: boolean }) {
       view.people.delete(a.id);
     };
   }, [a.id, view]);
-  useFrame((_, dt) => {
+  useFrame(() => {
     const o = g.current;
     if (!o) return;
     o.position.set(a.pos.x, 0, a.pos.z);
     o.rotation.y = a.heading;
-    const p = last.current;
-    const moved = p ? Math.hypot(a.pos.x - p.x, a.pos.z - p.z) : 0;
-    last.current = { x: a.pos.x, z: a.pos.z };
     // 지게차: 타고 있으면 운전석에 서고, 세워 두면(선반 입구) 지게차는 그 자리에 두고 사람만 걷는다
-    const riding = truck && !a.parked;
     if (truckG.current) {
       const pk = a.parked;
       truckG.current.position.set(pk ? pk.x : a.pos.x, 0, pk ? pk.z : a.pos.z);
       truckG.current.rotation.y = pk ? pk.heading : a.heading;
     }
-    figG.current?.position.set(0, riding ? 0.22 : 0, riding ? -0.55 : 0);
-    const pushing = !truck && a.carrying !== null;
-    fig.current?.animate(riding || moved > 0.5 ? 0 : moved, dt, pushing ? 'push' : 'walk');
-    fig.current?.highlight(selected);
     cart.current!.visible = a.carrying === 'CART';
     roll.current!.visible = a.carrying === 'ROLL' && !a.cold;
     coldRoll.current!.visible = a.carrying === 'ROLL' && a.cold;
@@ -112,10 +103,6 @@ function Person({ a, selected }: { a: Agent; selected: boolean }) {
         <boxGeometry args={[0.6, 1.8, 0.5]} />
         <meshBasicMaterial visible={false} />
       </mesh>
-      {/* 사람(지게차를 타면 운전석 자리로 올림 — useFrame) */}
-      <group ref={figG}>
-        <Humanoid ref={fig} look={look} />
-      </group>
       {/* FC 피킹 카트(MFC 카트 모양) — 안에 MFC 상자 무늬 상자 */}
       <group ref={cart} position={[0, 0, 0.66]} visible={false}>
         <PickCart />

@@ -160,9 +160,12 @@ function Loads({ f }: { f: FloorLayout }) {
   const decks = useRef<THREE.InstancedMesh>(null);
   const loads = useRef<THREE.InstancedMesh>(null);
   const seen = useRef(-1);
-  useFrame(() => {
-    if (seen.current === backend.ledger.version) return;
+  const at = useRef(0);
+  useFrame(({ clock }) => {
+    // 0.5초에 한 번만 다시 그림(성능 — ShelfStock 과 같음)
+    if (seen.current === backend.ledger.version || (seen.current >= 0 && clock.elapsedTime - at.current < 0.5)) return;
     seen.current = backend.ledger.version;
+    at.current = clock.elapsedTime;
     const stock = sim.live('stock', 500, () => backend.ledger.onHandByLocation());
     const color = new THREE.Color();
     const { w, d, deckH } = RACK.pallet;

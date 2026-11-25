@@ -336,6 +336,8 @@ function WheelSorter({ e, floor }: { e: Equip; floor: FloorNo }) {
   const len = r.x1 - r.x0;
   return (
     <group>
+      {/* 본선·슈트 틀은 움직이지 않음 → 같은 재질끼리 합쳐 그림(성능, StaticMerge — 롤러·흐르는 박스·경광등은 그대로) */}
+      <StaticMerge>
       <Conveyor x={(r.x0 + r.x1) / 2} z={cz} len={len} dir="x" w={0.9} h={0.8} />
       {slots.map((s) => {
         const cl = r.z0 - (s.pos.z + 0.6);
@@ -350,6 +352,7 @@ function WheelSorter({ e, floor }: { e: Equip; floor: FloorNo }) {
           </group>
         );
       })}
+      </StaticMerge>
       <TowerLight x={r.x1 - 0.4} z={r.z1 + 0.3} busy={busy} />
       <FlowBoxes path={[new THREE.Vector3(r.x1 - 0.5, 0.86, cz), new THREE.Vector3(r.x0 + 0.5, 0.86, cz)]} n={Math.max(4, Math.floor(len / 4))} busy={busy} />
       <sprite position={[r.x1 - 3, 2.2, cz]} scale={[3.2, 0.8, 1]}>
@@ -476,6 +479,8 @@ function DasLines({ e, floor, split }: { e: Equip; floor: FloorNo; split: boolea
         const mfcAt = new Map(MFCS.map((m, i) => [mfcSlotIndex(i, slots.length), m]));
         return (
           <group key={k}>
+            {/* 컨베이어 틀·크레이트·R/T 선반 틀은 움직이지 않음 → 합쳐 그림(성능) */}
+            <StaticMerge>
             <Conveyor x={cx} z={z} len={len} dir="x" w={0.8} h={0.78} />
             {slots.map((x, i) =>
               split ? (
@@ -491,6 +496,7 @@ function DasLines({ e, floor, split }: { e: Equip; floor: FloorNo; split: boolea
               ),
             )}
             {!split && <BlueFrame x={cx} z={z + 1.35} len={len} depth={1.0} h={2.4} dir="x" levels={1} />}
+            </StaticMerge>
             {/* 표시등 줄(꺼진 상태) — 켜지는 불은 WorkLights 가 실제 작업대로 그린다 */}
             {!split && <LightStrip x={cx} y={2.4} z={z + 0.83} len={len} dir="x" busy={off} />}
             {/* MFC 칸 이름(PPC 번호·MFC) */}
@@ -564,7 +570,9 @@ function DpsConveyor({ e, floor }: { e: Equip; floor: FloorNo }) {
   const path = alongX ? [new THREE.Vector3(r.x1 - 0.4, 0.86, cz), new THREE.Vector3(r.x0 + 0.4, 0.86, cz)] : [new THREE.Vector3(cx, 0.86, r.z1 - 0.4), new THREE.Vector3(cx, 0.86, r.z0 + 0.4)];
   return (
     <group>
-      <Conveyor x={cx} z={cz} len={len} dir={alongX ? 'x' : 'z'} w={0.8} h={0.8} />
+      <StaticMerge>
+        <Conveyor x={cx} z={cz} len={len} dir={alongX ? 'x' : 'z'} w={0.8} h={0.8} />
+      </StaticMerge>
       <FlowBoxes path={path} n={Math.max(4, Math.floor(len / 3))} busy={busy} color={0xd2a679} size={[0.42, 0.3, 0.32]} />
     </group>
   );
