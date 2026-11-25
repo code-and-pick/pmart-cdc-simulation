@@ -8,7 +8,7 @@ import { useLayoutEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { plateTexture } from '../sprites';
 import { useApp } from '../../app/context';
-import { AUTOSTORE, RACK, SHELF } from '../../config';
+import { RACK } from '../../config';
 import type { FloorLayout, Layout, Rect, ZoneArea, Door } from '../../domain/layout';
 import { SCENE, ZONE_FLOOR, ZONE_PILL } from '../colors';
 
@@ -252,7 +252,7 @@ function Walls({ f, L }: { f: FloorLayout; L: Layout }) {
  * 둥근 판 캔버스 → 텍스처(+ 가로세로 비) — MFC ZoneNames.makePill 그대로.
  * 아이콘은 흰 원 안, 이름 굵게 흰 글자, 둘째 말은 반투명 흰 작은 알약 안, 위쪽 반 광택.
  */
-export function makePill(title: string, sub: string | null, icon: string | null, bg: string, top: string): { tex: THREE.CanvasTexture; aspect: number } {
+export function makePill(title: string, sub: string | null, icon: string | null, bg: string, top: string, fixedW = 0): { tex: THREE.CanvasTexture; aspect: number; naturalW: number } {
   const S = 64;
   const c = document.createElement('canvas');
   const ctx = c.getContext('2d')!;
@@ -270,7 +270,10 @@ export function makePill(title: string, sub: string | null, icon: string | null,
   const badgeW = sub ? wS + S * 0.6 : 0;
   const gap = S * 0.3;
   const M = S * 0.4;
-  const pw = Math.ceil(padL + (icon ? iconD + gap : 0) + wT + (sub ? gap + badgeW : 0) + padR);
+  const naturalW = Math.ceil(padL + (icon ? iconD + gap : 0) + wT + (sub ? gap + badgeW : 0) + padR);
+  // 모든 카드 같은 크기(사용자 2026-11-25) — 넓이를 맞추고 내용은 가운데로
+  const pw = Math.max(naturalW, Math.ceil(fixedW));
+  const extra = (pw - naturalW) / 2;
   c.width = Math.ceil(pw + M * 2);
   c.height = Math.ceil(ph + M * 2);
   const x0 = M;
@@ -306,7 +309,7 @@ export function makePill(title: string, sub: string | null, icon: string | null,
   ctx.stroke();
   ctx.textBaseline = 'middle';
   const cy = y0 + ph / 2;
-  let x = x0 + padL;
+  let x = x0 + padL + extra;
   if (icon) {
     ctx.fillStyle = '#ffffff';
     ctx.beginPath();
@@ -335,7 +338,7 @@ export function makePill(title: string, sub: string | null, icon: string | null,
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.anisotropy = 8;
-  return { tex, aspect: c.width / c.height };
+  return { tex, aspect: c.width / c.height, naturalW };
 }
 
 interface Card {
@@ -346,58 +349,71 @@ interface Card {
   h: number;
 }
 
-/** 판 하나 만들기 — 높이 h 로, 넓이가 room 을 넘으면 줄인다 */
-function card(id: string, title: string, sub: string | null, style: FloorKey, x: number, y: number, z: number, h: number, room: number): Card {
-  const [bg, top] = ZONE_PILL[style];
-  const { tex, aspect } = makePill(title, sub, ICON[style], bg, top);
-  let w = h * aspect;
-  if (w > room) {
-    w = room;
-    h = w / aspect;
-  }
-  return { id, tex, pos: [x, y + h / 2, z], w, h };
+/** 카드 높이(m)·세우는 높이 — 모든 구역 카드가 같은 크기·같은 높이(사용자 2026-11-25 "크기·높낮이 다 다름, 일직선으로") */
+const CARD_H = 2.6;
+const CARD_Y = RACK_TOP + 0.4 + CARD_H / 2;
+/** 설비 줄은 랙 줄 바로 위 한 줄 — 두 줄 모두 곧은 줄(같은 높이끼리) */
+const CARD_Y_BAND = CARD_Y + CARD_H + 0.5;
+const CARD_GAP = 0.5;
+
+/** 괄호 설명 중 첫 구절만 짧게 — "생활용품 — 박스째 → …" → "생활용품" */
+function shortSub(s: string | null): string | null {
+  if (!s) return null;
+  const t = s.split(/\s[—–-]\s|·|,/)[0].trim();
+  return t.length > 14 ? t.slice(0, 13) + '…' : t;
 }
 
 /**
- * 구역 카드 내용·자리 — 이름은 짧게(괄호 설명은 둘째 말로), 전체 보기에서 읽히게 크게(MFC 냉동·냉장·상온 큰 카드 2.35 m 처럼, DC 는 랙이 8 m 라 더 크게).
- * 랙 구역: 그 구역 북쪽 끝 랙 위. 피킹 선반: 선반 구역 전체에 카드 하나(통로마다 C61 같은 번호판이 따로 있다). 띠·설비: 북쪽에 세움.
+ * 구역 카드 — 두 줄: 랙 구역은 랙 북쪽 끝 한 줄, 그 밖(설비·피킹 선반·승강기·출고대기)은 그 위(작업장 남쪽 끝) 한 줄. 높이·크기는 모두 같고, 겹치면 옆으로 민다.
+ * 이름은 짧게(괄호 설명은 둘째 말로 한 구절만).
  */
 export function zoneCards(f: FloorLayout): Card[] {
-  const out: Card[] = [];
+  type Spec = { id: string; title: string; sub: string | null; style: FloorKey; x: number; row: 'rack' | 'band' };
+  const specs: Spec[] = [];
   for (const z of f.zones) {
     const r = z.rect;
     const cx = (r.x0 + r.x1) / 2;
     const style = zoneStyle(z);
+    const m = /^(.*?)\s*\((.*)\)$/.exec(z.label);
     if (z.kind === 'RACK') {
       const letter = z.id.split('-')[1];
-      const aisles = f.aisles.filter((a) => a.zone === letter).length;
-      const m = /^(.*?)\s*\((.*)\)$/.exec(z.label);
-      const title = m ? m[1] : z.label;
-      const note = m ? `${m[2]} · ` : '';
-      out.push(card(z.id, title, `${note}통로 ${aisles} · ${f.locations.filter((l) => l.zone === letter).length.toLocaleString()}칸`, style, cx, RACK_TOP + 0.4, Math.min(...f.rows.map((w) => w.z0)) - 0.6, 3.4, (r.x1 - r.x0) * 0.96));
+      specs.push({ id: z.id, title: m ? m[1] : z.label, sub: `${f.locations.filter((l) => l.zone === letter).length.toLocaleString()}칸`, style, x: cx, row: 'rack' });
     } else if (z.kind === 'EQUIP') {
-      const m = /^(.*?)\s*\((.*)\)$/.exec(z.label);
       if (z.id.endsWith('AUTOSTORE')) {
-        // 오토스토어 — 다른 구역과 같은 이름표(제목 + 핵심 숫자 하나), 격자(높이 4.4 m) 위에. 자세한 숫자는 누르면 왼쪽 구역 패널(사용자 2026-11-25 "PPT 로 우겨 넣은 듯한 카드")
         const bins = Math.max(0, ...f.shelves.filter((l) => l.bin).map((l) => l.binNo ?? 0));
-        out.push(card(z.id, '오토스토어', `통 ${bins.toLocaleString()} · 포트 ${AUTOSTORE.ports}`, style, cx, 4.9, (r.z0 + r.z1) / 2, 2.6, (r.x1 - r.x0) * 0.96));
-      } else out.push(card(z.id, m ? m[1] : z.label, m ? m[2] : null, style, cx, 2.6, r.z0 + 0.3, 2.6, (r.x1 - r.x0) * 0.96));
+        specs.push({ id: z.id, title: '오토스토어', sub: `통 ${bins.toLocaleString()}`, style, x: cx, row: 'band' });
+      } else specs.push({ id: z.id, title: m ? m[1] : z.label, sub: shortSub(m ? m[2] : null), style, x: cx, row: 'band' });
     }
   }
-  // 피킹 선반 — 선반 구역 전체에 하나
   const shelves = f.zones.filter((z) => z.kind === 'SHELF');
   if (shelves.length) {
     const x0 = Math.min(...shelves.map((z) => z.rect.x0));
     const x1 = Math.max(...shelves.map((z) => z.rect.x1));
-    const letters = [...new Set(f.shelfAisles.map((a) => a.zone))].join('·');
     const cold = shelves.every((z) => z.temp === shelves[0].temp) ? zoneStyle(shelves[0]) : 'AMBIENT';
-    out.push(card(`${f.floor}-SHELVES`, '피킹 선반', `${letters} · ${f.shelves.filter((l) => !l.bin).length.toLocaleString()}칸`, cold, (x0 + x1) / 2, SHELF.height + 0.3, shelves[0].rect.z0 + 0.2, 2.2, Math.max(x1 - x0, 14)));
+    specs.push({ id: `${f.floor}-SHELVES`, title: '피킹 선반', sub: `${f.shelves.filter((l) => !l.bin).length.toLocaleString()}칸`, style: cold, x: (x0 + x1) / 2, row: 'band' });
   }
-  // 승강기·출고대기 — 북쪽 벽 위, 승강기·출고대기 줄 가운데
   const band = f.zones.find((z) => z.kind === 'BAND');
   if (band) {
     const xEnd = Math.max(...f.staging.map((s) => s.pos.x)) + 1;
-    out.push(card(band.id, '승강기 · 출고대기', `승강기 ${f.lifts.length} · R/T ${f.staging.length}자리`, 'BAND', xEnd / 2, 4.6, 0.15, 2.6, xEnd));
+    specs.push({ id: band.id, title: '승강기 · 출고대기', sub: `R/T ${f.staging.length}자리`, style: 'BAND', x: xEnd / 2, row: 'band' });
+  }
+  // 같은 넓이: 가장 넓은 카드에 맞춘다
+  const natural = specs.map((sp) => makePill(sp.title, sp.sub, ICON[sp.style], ZONE_PILL[sp.style][0], ZONE_PILL[sp.style][1]));
+  const maxW = Math.max(...natural.map((n) => n.naturalW));
+  for (const n of natural) n.tex.dispose();
+  const out: Card[] = [];
+  const rackZ = Math.min(...f.rows.map((w) => w.z0)) - 0.6;
+  const width = Math.max(...f.zones.map((z) => z.rect.x1));
+  for (const row of ['rack', 'band'] as const) {
+    const list = specs.filter((sp) => sp.row === row).sort((p, q) => p.x - q.x);
+    const made = list.map((sp) => ({ sp, ...makePill(sp.title, sp.sub, ICON[sp.style], ZONE_PILL[sp.style][0], ZONE_PILL[sp.style][1], maxW) }));
+    const w = CARD_H * (made[0]?.aspect ?? 1);
+    // 겹치지 않게 왼쪽부터 밀고, 오른쪽 벽을 넘으면 줄 전체를 왼쪽으로
+    const xs: number[] = [];
+    for (const m of made) xs.push(Math.max(m.sp.x, xs.length ? xs[xs.length - 1] + w + CARD_GAP : -Infinity));
+    const over = xs.length ? xs[xs.length - 1] + w / 2 - width : 0;
+    if (over > 0) for (let i = xs.length - 1; i >= 0; i--) xs[i] = Math.min(xs[i] - over, i < xs.length - 1 ? xs[i + 1] - w - CARD_GAP : Infinity);
+    made.forEach((m, i) => out.push({ id: m.sp.id, tex: m.tex, pos: [xs[i], row === 'rack' ? CARD_Y : CARD_Y_BAND, row === 'rack' ? rackZ : f.walk.roomZ], w, h: CARD_H }));
   }
   return out;
 }
