@@ -393,6 +393,24 @@ function FloorDocks({ f }: { f: FloorLayout }) {
             </group>
           );
         })}
+      {/* 아침 입고 차 — 팔레트를 다 내릴 때까지 도크에(화면 흐름만, config INBOUND) */}
+      {sim.inboundTrucks
+        .filter((t) => t.floor === f.floor && t.left > 0 && sim.time / 60 >= t.arriveMin)
+        .map((t) => (
+          <group key={`${t.dock.code}-${t.arriveMin}`} position={[t.dock.pos.x, 0, 0]}>
+            <mesh position={[0, 1.7, (T0 + T1 + 2) / 2]}>
+              <boxGeometry args={[2.4, 2.6, T1 - T0 - 2]} />
+              <meshStandardMaterial color={0xf4f6fa} />
+            </mesh>
+            <mesh position={[0, 1.4, T0 + 0.8]}>
+              <boxGeometry args={[2.3, 2.2, 1.6]} />
+              <meshStandardMaterial color={0xd9822b} />
+            </mesh>
+            <sprite position={[0, 4.4, (T0 + T1) / 2]} scale={[4.2, 1.7, 1]}>
+              <spriteMaterial map={plateTexture(`입고 차\n팔레트 ${t.left}`, { w: 384, h: 156 })} depthWrite={false} />
+            </sprite>
+          </group>
+        ))}
     </group>
   );
 }

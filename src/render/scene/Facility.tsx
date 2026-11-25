@@ -8,6 +8,7 @@ import { useLayoutEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { plateTexture } from '../sprites';
 import { useApp } from '../../app/context';
+import { RACK } from '../../config';
 import type { FloorLayout, Layout, Rect, ZoneArea, Door } from '../../domain/layout';
 import { SCENE, ZONE_FLOOR, ZONE_PILL } from '../colors';
 
@@ -170,7 +171,16 @@ function Walls({ f, L }: { f: FloorLayout; L: Layout }) {
           walls.push({ r: along === 'x' ? { x0: c0, z0: s.z0 - t / 2, x1: c1, z1: s.z0 + t / 2 } : { x0: s.x0 - t / 2, z0: c0, x1: s.x0 + t / 2, z1: c1 }, cold: true, h: H, y0: doorTop(d.kind) });
         }
         // 벽 위 온도 표시 — 긴 벽마다 하나(문이 가운데면 조금 비켜서)
-        if (a1 - a0 > 8) labels.push({ text: room.label, x: along === 'x' ? (a0 + a1) / 2 : s.x0, z: along === 'x' ? s.z0 : (a0 + a1) / 2, temp: room.temp });
+        if (a1 - a0 > 8) {
+          // 도크 문 앞(북쪽 벽 쪽 벽의 도크 x 범위)은 피한다(사용자 2026-11-26 "냉장 3도는 왜 도크 앞에 있냐")
+          let mid = (a0 + a1) / 2;
+          if (along === 'x' && f.docks.length) {
+            const d0 = Math.min(...f.docks.map((d) => d.pos.x)) - 4;
+            const d1 = Math.max(...f.docks.map((d) => d.pos.x)) + 4;
+            if (mid > d0 && mid < d1) mid = a1 - d1 > 6 ? (d1 + a1) / 2 : d0 - a0 > 6 ? (a0 + d0) / 2 : mid;
+          }
+          labels.push({ text: room.label, x: along === 'x' ? mid : s.x0, z: along === 'x' ? s.z0 : mid, temp: room.temp });
+        }
       }
       // 긴 벽이 없는 방도 표시 하나는 — 가장 긴 벽 위
       if (!labels.some((l) => l.text === room.label) && room.walls.length) {
@@ -358,10 +368,20 @@ interface Card {
 
 /** 카드 높이(m)·세우는 높이 — 모든 구역 카드가 같은 크기·같은 높이(사용자 2026-11-25 "크기·높낮이 다 다름, 일직선으로") */
 const CARD_H = 2.6;
-/** 모든 구역 카드 높이(m) — 하나로(사용자 2026-11-26) */
-/** 화면 기준 카드 크기 배율(카드 높이 2.6 × 이것 = 화면 높이 비율) */
-const CARD_SCREEN = 0.0085;
-const CARD_ALL_Y = 1.6; // 바닥 가까이 — 구역 한가운데에 그대로 보이게
+/** 모든 구역 카드 높이(m) — 랙 위(예전 높이). 바닥 가까이 두면 구역을 가렸음(사용자 2026-11-26) */
+const CARD_ALL_Y = (RACK.levels - 1) * RACK.levelH + RACK.levelH * 0.9 + 0.4 + CARD_H / 2;
+/** 북쪽 벽에 붙이는 카드 z(벽 바로 앞) */
+const WALL_Z = 0.35;
+/** 벽 카드 높이 — 도크 문(5.2m) 바로 위. 랙 위 높이로 두면 전체 보기에서 화면 위 조작 줄에 가렸음 */
+const WALL_Y = 5.4 + CARD_H / 2;
+const CARD_GAP = 0.5;
+/**
+ * 띄운 높이만큼 남쪽으로 — 전체 보기 카메라(약 69° 내려다봄)에서 높이 y 인 카드는 y × cot(69°) ≈ 0.39y 만큼 북쪽에 보인다.
+ * 그만큼 남쪽에 세워야 화면에서 구역 북쪽 끝에 맞는다(전엔 랙 카드가 DAS 존 아래에, DAS 카드가 휠소터 위에 보였음 — 사용자 2026-11-26).
+ */
+const LIFT_K = 0.39;
+/** 띠 구역 북쪽 끝 카드 높이 — 설비(DAS 틀 2.4m·선반) 바로 위 */
+const EDGE_Y = 2.7 + CARD_H / 2;
 const TEMP_SHORT: Record<string, string> = { AMBIENT: '상온', CHILLED: '냉장', FROZEN: '냉동' };
 
 /** 괄호 설명 중 첫 구절만 짧게 — "생활용품 — 박스째 → …" → "생활용품" */
@@ -372,7 +392,9 @@ function shortSub(s: string | null): string | null {
 }
 
 /**
- * 구역 카드 — 구역마다 하나, 그 구역 한가운데 위. 높이·크기는 모두 같다.
+ * 구역 카드 — 구역마다 하나, 높이·크기는 모두 같다(사용자 2026-11-26):
+ *  · 아래쪽 넓은 구역(랙·냉장 선반·야채 레인·사무실 — 띠 남쪽) = 구역 북쪽 끝의 가운데
+ *  · 북쪽 띠의 복잡한 구역(휠소터·DAS·피킹 선반·입고 검수·분배·DPS·오토스토어) = 북쪽 벽에 붙임, x 는 구역 가운데. 도크 문 위·다른 카드와 겹치면 옆으로 비킴
  * 이름은 짧게(괄호 설명은 둘째 말로 한 구절만).
  */
 export function zoneCards(f: FloorLayout): Card[] {
@@ -419,10 +441,35 @@ export function zoneCards(f: FloorLayout): Card[] {
   const natural = specs.map((sp) => makePill(sp.title, sp.sub, ICON[sp.style], ZONE_PILL[sp.style][0], ZONE_PILL[sp.style][1]));
   const maxW = Math.max(...natural.map((n) => n.naturalW));
   for (const n of natural) n.tex.dispose();
-  return specs.map((sp) => {
-    const p = makePill(sp.title, sp.sub, ICON[sp.style], ZONE_PILL[sp.style][0], ZONE_PILL[sp.style][1], maxW);
-    return { id: sp.id, tex: p.tex, pos: [(sp.r.x0 + sp.r.x1) / 2, CARD_ALL_Y, (sp.r.z0 + sp.r.z1) / 2] as [number, number, number], w: CARD_H * p.aspect, h: CARD_H };
-  });
+  const made = specs.map((sp) => ({ sp, ...makePill(sp.title, sp.sub, ICON[sp.style], ZONE_PILL[sp.style][0], ZONE_PILL[sp.style][1], maxW) }));
+  const w = CARD_H * (made[0]?.aspect ?? 1);
+  const width = Math.max(...f.zones.map((z) => z.rect.x1));
+  const out: Card[] = [];
+  // 세 갈래(사용자 2026-11-26, 화면으로 확인하며 정함):
+  //  ① 북쪽 벽 — 휠소터·DPS 컨베이어(출고대기 바로 앞 긴 줄), 북쪽 벽에 붙은 구역(7F 입고 검수). 도크 문 위는 비움
+  //  ② 띠 구역 북쪽 끝 바로 위(낮게) — DAS·피킹 선반·입고 검수·분배. 벽으로 올리면 출고대기·도크 너머라 어느 구역 카드인지 안 보였음
+  //  ③ 아래쪽 넓은 구역(랙·냉장 선반·야채 레인·사무실)·오토스토어 — 북쪽 끝 가운데, 랙 위 높이
+  const kind = (sp: Spec): 'wall' | 'edge' | 'low' => {
+    if (/WHEEL_SORTER|-DPS$/.test(sp.id) || sp.r.z0 < f.walk.northZ) return 'wall';
+    if (sp.r.z0 < f.walk.roomZ - 1 && !sp.id.endsWith('AUTOSTORE')) return 'edge';
+    return 'low';
+  };
+  const cx = (sp: Spec) => (sp.r.x0 + sp.r.x1) / 2;
+  // 줄 안에서 가장 가까운 빈 자리(오른쪽·왼쪽 번갈아 0.5m 씩)
+  const place = (taken: [number, number][], want0: number) => {
+    const want = Math.min(width - w / 2, Math.max(w / 2, want0));
+    const hit = (x: number) => taken.some(([a, b]) => x + w / 2 + CARD_GAP > a && x - w / 2 - CARD_GAP < b);
+    let x = want;
+    for (let step = 1; step < 400 && hit(x); step++) x = Math.min(width - w / 2, Math.max(w / 2, want + Math.ceil(step / 2) * 0.5 * (step % 2 ? 1 : -1)));
+    taken.push([x - w / 2, x + w / 2]);
+    return x;
+  };
+  for (const m of made.filter((x) => kind(x.sp) === 'low')) out.push({ id: m.sp.id, tex: m.tex, pos: [cx(m.sp), CARD_ALL_Y, m.sp.r.z0 + CARD_ALL_Y * LIFT_K], w, h: CARD_H });
+  const wallTaken: [number, number][] = f.docks.map((d) => [d.pos.x - 1.7, d.pos.x + 1.7]);
+  for (const m of made.filter((x) => kind(x.sp) === 'wall').sort((p, q) => cx(p.sp) - cx(q.sp))) out.push({ id: m.sp.id, tex: m.tex, pos: [place(wallTaken, cx(m.sp)), WALL_Y, WALL_Z], w, h: CARD_H });
+  const edgeTaken: [number, number][] = [];
+  for (const m of made.filter((x) => kind(x.sp) === 'edge').sort((p, q) => p.sp.r.x1 - p.sp.r.x0 - (q.sp.r.x1 - q.sp.r.x0))) out.push({ id: m.sp.id, tex: m.tex, pos: [place(edgeTaken, cx(m.sp)), EDGE_Y, m.sp.r.z0 + EDGE_Y * LIFT_K], w, h: CARD_H });
+  return out;
 }
 
 function ZoneCards({ f }: { f: FloorLayout }) {
@@ -430,11 +477,10 @@ function ZoneCards({ f }: { f: FloorLayout }) {
   return (
     <>
       {cards.map((t) => (
-        // 늘 화면을 보는 표지(sprite) · 랙 등에 가리지 않게 맨 위에 그림 — 세운 판은 위에서 보면 납작하고, 높이 띄우면 원근 때문에 구역보다 북쪽에 보였음(사용자 2026-11-26)
-        // 화면 기준 크기(sizeAttenuation 끔) — 확대해도 카드가 커져 구역 안을 가리지 않게
-        <sprite key={t.id} position={t.pos} scale={[t.w * CARD_SCREEN, t.h * CARD_SCREEN, 1]} renderOrder={20} raycast={() => null}>
-          <spriteMaterial map={t.tex} transparent depthWrite={false} depthTest={false} toneMapped={false} sizeAttenuation={false} />
-        </sprite>
+        <mesh key={t.id} position={t.pos} renderOrder={5} raycast={() => null}>
+          <planeGeometry args={[t.w, t.h]} />
+          <meshBasicMaterial map={t.tex} transparent depthWrite={false} toneMapped={false} side={THREE.DoubleSide} />
+        </mesh>
       ))}
     </>
   );

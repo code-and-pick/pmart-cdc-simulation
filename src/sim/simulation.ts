@@ -6,7 +6,7 @@
 // 운송(§12 ⑦): 22:00 배차(고정 노선 × 온도대, MockTms) → 출차 30분 전 상차(방문 역순) → 노선별 출차 → 주행 → MFC 도착·하차(동시 3대)·인계 → 복귀.
 // React·three 에 의존하지 않는다(시험이 화면 없이 하루를 돌린다).
 
-import { AUTOSTORE, DOCK_FLOOR, DOCKS, FLOW, CENTER_ID, MFCS, SHELF, OUTBOUND, SHIFT, SIM_START, SUPPLY, TMS, WORK, WORKFORCE } from '../config';
+import { AUTOSTORE, DOCK_FLOOR, DOCKS, FLOW, CENTER_ID, INBOUND, MFCS, SHELF, OUTBOUND, SHIFT, SIM_START, SUPPLY, TMS, WORK, WORKFORCE } from '../config';
 // 시간표 근거: 정본 CDC-8(PR #447) — 21:30 WMS 완료 · 22:00 R/T 카운팅 · 22:30 상차 · 23:00~ 출차
 import type { MockBackend } from '../backend/mock/MockBackend';
 import type { ApiCallRecord, DomainEventRecord } from '../backend/port';
@@ -18,7 +18,7 @@ import { stagingCodeFor, type FloorLayout, type Layout, type Location } from '..
 import type { FloorKey, FloorNo } from '../domain/sites/chilgok';
 import { newId, Rng } from '../util/rng';
 import { Agent, ROLE_KO, type DutyClock, type Role, type Shift } from './agent';
-import { dasRows, dpsZoneOf, FloorSite, liftDoor, type P, type WalkPoint } from './site';
+import { dasRows, dpsZoneOf, FloorSite, inboundSpots, liftDoor, type P, type WalkPoint } from './site';
 
 /** 설비 줄 수(라인·분배) */
 const dasRowsOf = (f: FloorLayout, kind: 'DAS' | 'SPLIT') => {
@@ -131,6 +131,22 @@ export interface StagedBox {
 }
 
 /** 도크 앞에 내려놓은 롤테이너 */
+/** 입고 차(화면 흐름만) — 아침에 그 층 도크에 대고 팔레트를 내린다 */
+export interface InboundTruck {
+  floor: FloorNo;
+  dock: Location;
+  arriveMin: number;
+  left: number;
+}
+/** 입고 검수 구역 팔레트 — 칸 번호(inboundSpots 의 k) · 상태 · 상자 단 수 */
+export interface InboundPallet {
+  id: number;
+  floor: FloorNo;
+  k: number;
+  state: 'WAIT' | 'CHECK' | 'DONE';
+  tiers: number;
+}
+
 /** 도크 앞에 내려놓은 R/T — 도크 층(냉동 5F·냉장 6F·상온 7F) [사용자 2026-11-26 층마다 도크] */
 interface RollAtDock {
   boxes: StagedBox[];
@@ -231,6 +247,10 @@ export class Simulation implements DutyClock {
   readonly staged = new Map<string, StagedBox[]>();
   /** 도크 앞에서 실을 차례를 기다리는 롤테이너(도크 층) */
   readonly atDock: RollAtDock[] = [];
+  /** 입고(화면 흐름만, 원장 변동 없음 — config INBOUND) */
+  readonly inboundTrucks: InboundTruck[] = [];
+  readonly inboundYard: InboundPallet[] = [];
+  private inboundSeq = 0;
   /** TMS — MOCK 운송(fleet·planning·execution) */
   readonly tms: MockTms;
   /** 운행 진행 (tripId →) */
@@ -352,6 +372,8 @@ export class Simulation implements DutyClock {
     // 야간 자키 — 22:00 뒤 남은 R/T 하강(도크 상차와 같은 시간대) [가정]
     add('JOCKEY', 'NIGHT', OUTBOUND.nightJockeys, w.jockey + 1);
     add('INSPECT', 'EVENING', OUTBOUND.inspectorsPerFloor);
+    // 입고 검수원(주간) — 입고 검수 구역이 있는 층 [시뮬, 화면 흐름만]
+    if (this.sites.get(fl)!.f.equipment.some((e) => e.kind === 'INBOUND')) add('INBOUND', 'DAY', INBOUND.workers);
     if (this.sites.get(fl)!.f.equipment.some((e) => e.kind === 'DPS')) add('DPS', 'EVENING', FLOW.dps.zones * FLOW.dps.workersPerZone);
   }
 
@@ -671,6 +693,7 @@ export class Simulation implements DutyClock {
         else if (a.role === 'JOCKEY') await this.jockeyOnce(a);
         else if (a.role === 'INSPECT') await this.inspectOnce(a);
         else if (a.role === 'DPS') await this.dpsZoneOnce(a);
+        else if (a.role === 'INBOUND') await this.inboundOnce(a);
         else await this.loadOnce(a);
       } catch (e) {
         const msg = e instanceof ApiProblem ? `${e.problem.status} ${e.problem.code} ${e.problem.detail ?? ''}` : e instanceof Error ? e.message : String(e);
@@ -1631,6 +1654,77 @@ export class Simulation implements DutyClock {
   }
 
   /** 검품 — 출고대기 박스를 MFC 별로: 수량·봉인·온도 확인 → 합격/불합격(재포장 뒤 재검품) [WMS CDC-F-019] */
+  /**
+   * 입고 검수원 한 번 — ① 대 있는 입고 차에서 팔레트를 핸드자키로 검수 대기 칸에 ② 대기 팔레트 검수 → 검수 완료 칸으로 ③ 완료 팔레트를 랙 앞으로(지게차에 넘김).
+   * 화면 흐름만(입고는 범위 밖, scope S-3) — 서버 호출·원장 변동 없음 [시뮬, 사용자 2026-11-26 "MFC 처럼 진짜 박스가 들어와야"].
+   */
+  private async inboundOnce(a: Agent) {
+    const fl = a.floor as FloorNo;
+    const site = this.floorSite(a);
+    const f = this.floorOf(a);
+    const e = f.equipment.find((x) => x.kind === 'INBOUND');
+    if (!e) {
+      await a.wait(WORK.idlePoll, '입고 대기');
+      return;
+    }
+    const lay = inboundSpots(e.rect);
+    const lane: WalkPoint['lane'] = e.rect.z1 < f.walk.northZ ? 'N' : 'S';
+    const at = (k: number): WalkPoint => {
+      const sp = lay.spots[k];
+      return lay.alongX
+        ? { x: sp.x, z: sp.z + (sp.z < (e.rect.z0 + e.rect.z1) / 2 ? 1.1 : -1.1), lane }
+        : { x: sp.x + (sp.x < (e.rect.x0 + e.rect.x1) / 2 ? 1.1 : -1.1), z: sp.z, lane };
+    };
+    const mine = this.inboundYard.filter((x) => x.floor === fl);
+    const free = (done: boolean) => lay.spots.find((sp) => sp.done === done && !mine.some((x) => x.k === sp.k));
+    const now = this.time / 60;
+    if (!this.inboundTrucks.some((t) => t.floor === fl) && f.docks.length) {
+      for (let i = 0; i < INBOUND.trucksPerFloor; i++) this.inboundTrucks.push({ floor: fl, dock: f.docks[i % f.docks.length], arriveMin: INBOUND.firstMin + i * INBOUND.everyMin, left: INBOUND.palletsPerTruck });
+    }
+    const truck = this.inboundTrucks.find((t) => t.floor === fl && t.left > 0 && t.arriveMin <= now);
+    const waitSpot = free(false);
+    const doneSpot = free(true);
+    const waiting = mine.find((x) => x.state === 'WAIT');
+    const done = mine.find((x) => x.state === 'DONE');
+    if (truck && waitSpot) {
+      a.pda = { title: '입고 — 하차', step: `${truck.dock.short} 입고 차 → 검수 대기 칸`, rows: [['남은 팔레트', `${truck.left}`]] };
+      await this.go(a, site.front(truck.dock), WORK.walk, `입고 차로 (${truck.dock.short})`);
+      await a.wait(INBOUND.unloadSec, '핸드자키로 팔레트 내리기');
+      a.carrying = 'PALLET';
+      await this.go(a, at(waitSpot.k), WORK.cart, '검수 대기 칸으로');
+      a.carrying = null;
+      truck.left -= 1;
+      this.inboundSeq += 1;
+      this.inboundYard.push({ id: this.inboundSeq, floor: fl, k: waitSpot.k, state: 'WAIT', tiers: 2 + (this.inboundSeq % 3) });
+      return;
+    }
+    if (waiting && doneSpot) {
+      a.pda = { title: '입고 — 검수', step: '수량·기한·온도 확인', rows: [['칸', `${waiting.k + 1}`]] };
+      await this.go(a, at(waiting.k), WORK.walk, '검수할 팔레트로');
+      waiting.state = 'CHECK';
+      await a.wait(INBOUND.inspectSec, '검수 — 수량·기한·온도 확인');
+      a.carrying = 'PALLET';
+      this.inboundYard.splice(this.inboundYard.indexOf(waiting), 1);
+      await this.go(a, at(doneSpot.k), WORK.cart, '검수 완료 칸으로');
+      a.carrying = null;
+      this.inboundYard.push({ ...waiting, k: doneSpot.k, state: 'DONE' });
+      return;
+    }
+    if (done) {
+      a.pda = { title: '입고 — 넘기기', step: '검수 끝난 팔레트 → 랙 앞(지게차 적치)', rows: [] };
+      await this.go(a, at(done.k), WORK.walk, '검수 끝난 팔레트로');
+      a.carrying = 'PALLET';
+      this.inboundYard.splice(this.inboundYard.indexOf(done), 1);
+      const rack = f.locations.find((l) => l.type === 'RESERVE' && l.temp === e.temp) ?? f.locations[0];
+      await this.go(a, { x: rack.pos.x, z: f.walk.roomZ, lane: 'S' }, WORK.cart, '랙 앞으로(지게차에 넘김)');
+      await a.wait(INBOUND.putawaySec, '팔레트 내려놓기');
+      a.carrying = null;
+      return;
+    }
+    a.pda = null;
+    await a.wait(WORK.idlePoll, '입고 대기');
+  }
+
   private async inspectOnce(a: Agent) {
     const site = this.floorSite(a);
     const f = this.floorOf(a);

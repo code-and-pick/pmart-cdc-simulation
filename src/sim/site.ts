@@ -265,3 +265,25 @@ export function dpsZoneOf(f: FloorLayout): (l: Location) => number {
   aisles.forEach((a, i) => zoneByAisle.set(a.no, Math.min(n - 1, Math.floor((i * n) / Math.max(1, aisles.length)))));
   return (l: Location) => zoneByAisle.get(l.aisle) ?? 0;
 }
+
+/**
+ * 입고 검수 구역의 팔레트 칸 — 긴 쪽을 따라 줄(가장자리 0.6 · 들어오는 쪽 저울·카트 자리 2.4 · 칸 1.5), 폭이 되면 두 줄.
+ * 앞 절반 = 검수 대기, 뒤 절반 = 검수 완료. 화면(Inbound)과 입고 흐름이 같은 자리를 쓴다.
+ */
+export function inboundSpots(r: { x0: number; z0: number; x1: number; z1: number }): { alongX: boolean; n: number; lanes: number; span: number; spots: { x: number; z: number; k: number; done: boolean }[] } {
+  const w = r.x1 - r.x0;
+  const d = r.z1 - r.z0;
+  const alongX = w >= d;
+  const len = (alongX ? w : d) - 1.2;
+  const span = (alongX ? d : w) - 1.2;
+  const n = Math.max(2, Math.floor((len - 2.4) / 1.5));
+  const lanes = span >= 1.5 * 2 + 1.8 ? 2 : 1;
+  const spots: { x: number; z: number; k: number; done: boolean }[] = [];
+  for (let l = 0; l < lanes; l++)
+    for (let i = 0; i < n; i++) {
+      const u = 0.6 + 2.4 + (i + 0.5) * 1.5;
+      const v = l === 0 ? 0.6 + 0.75 : span + 0.6 - 0.75;
+      spots.push({ ...(alongX ? { x: r.x0 + u, z: r.z0 + v } : { x: r.x0 + v, z: r.z0 + u }), k: l * n + i, done: i >= n / 2 });
+    }
+  return { alongX, n, lanes, span, spots };
+}

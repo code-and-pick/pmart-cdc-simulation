@@ -469,3 +469,22 @@ export const REGIONS: { regionCode: string; regionName: string; mfcIds: string[]
   { regionCode: 'GANGWON', regionName: '강원권', mfcIds: ['MFC-CHC-01'] },
   { regionCode: 'HONAM', regionName: '호남권', mfcIds: ['MFC-MOKPO-01'] },
 ];
+
+/**
+ * 입고(화면 흐름만) [시뮬, 사용자 2026-11-26 "검수 구역에 진짜 박스가 들어와야 해. MFC 처럼"].
+ * 입고 업무는 범위 밖(scope S-3) — 서버 호출·재고 원장 변동 없이, 아침에 입고 차가 층 도크에 대고 입고 검수원이
+ * 팔레트를 핸드자키로 검수 대기 칸 → 검수 → 검수 완료 칸 → 랙 앞(지게차에 넘김)으로 옮기는 모습만 돌린다.
+ */
+export const INBOUND = {
+  /** 층마다 입고 차 대수 · 첫 도착(분) · 간격(분) · 차 한 대 팔레트 수 [가정] */
+  trucksPerFloor: 7,
+  firstMin: 8 * 60,
+  everyMin: 40,
+  palletsPerTruck: 6,
+  /** 층마다 입고 검수원 수(주간) [가정] */
+  workers: 1,
+  /** 팔레트 하나 내리기 · 검수 · 랙 앞에 내려놓기(초) [가정] */
+  unloadSec: 50,
+  inspectSec: 300,
+  putawaySec: 40,
+} as const;

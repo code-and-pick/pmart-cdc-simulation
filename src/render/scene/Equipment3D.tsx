@@ -8,11 +8,11 @@
 import { useFrame } from '@react-three/fiber';
 import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
-import { useApp } from '../../app/context';
+import { useApp, useTick } from '../../app/context';
 import { FLOW, MFCS } from '../../config';
 import type { Equip } from '../../domain/layout';
 import type { FloorNo } from '../../domain/sites/chilgok';
-import { autostorePorts, dasRows, mfcSlotIndex } from '../../sim/site';
+import { autostorePorts, dasRows, inboundSpots, mfcSlotIndex } from '../../sim/site';
 import { boxTexture, crateTexture, palletTexture, plateTexture } from '../sprites';
 import { StaticMerge } from './StaticMerge';
 
@@ -687,31 +687,17 @@ function PortBoxes({ e }: { e: Equip }) {
 /**
  * 입고 검수 — 온도대마다(사용자 2026-11-25 "입고 검수 구역 … 온도별로 각각"). 들어온 팔레트를 내려놓고 수량·기한·온도를 확인하는 바닥 자리.
  * 책상·모니터 없이 현장 모양으로(사용자 2026-11-26 "사무실 같이 생겼어"): 노란 테두리 · 팔레트 칸(랩 감은 입고 팔레트, 검수 끝난 것은 초록 표) ·
- * 바닥 팔레트 저울 · 이동식 라벨 프린터 카트 · 핸드자키. 입고 업무 자체는 범위 밖(scope S-3) — 자리·모형만. 저온은 은색 보냉 덮개.
+ * 바닥 팔레트 저울 · 이동식 라벨 프린터 카트. 팔레트는 입고 흐름(시뮬레이션 inboundYard)대로 들어오고 나간다(사용자 2026-11-26 "MFC 처럼 진짜 박스가").
+ * 입고 업무 자체는 범위 밖(scope S-3) — 서버·원장 변동 없는 화면 흐름. 저온은 은색 보냉 덮개.
  */
-export function Inbound({ e }: { e: Equip }) {
+export function Inbound({ e, floor }: { e: Equip; floor: FloorNo }) {
   const r = e.rect;
-  const cold = e.temp && e.temp !== 'AMBIENT';
-  const w = r.x1 - r.x0;
-  const d = r.z1 - r.z0;
-  // 긴 쪽을 따라 팔레트 칸 줄 — 가장자리 0.6 · 앞쪽 저울·카트 자리 2.4 · 칸 1.5 · 두 줄이면 가운데 작업 통로
-  const alongX = w >= d;
-  const len = (alongX ? w : d) - 1.2;
-  const span = (alongX ? d : w) - 1.2;
-  const n = Math.max(2, Math.floor((len - 2.4) / 1.5));
-  const lanes = span >= 1.5 * 2 + 1.8 ? 2 : 1;
-  const spots: { x: number; z: number; k: number }[] = [];
-  for (let l = 0; l < lanes; l++)
-    for (let i = 0; i < n; i++) {
-      const u = 0.6 + 2.4 + (i + 0.5) * 1.5;
-      const v = l === 0 ? 0.6 + 0.75 : span + 0.6 - 0.75;
-      spots.push(alongX ? { x: r.x0 + u, z: r.z0 + v, k: l * n + i } : { x: r.x0 + v, z: r.z0 + u, k: l * n + i });
-    }
+  // 칸 자리는 입고 흐름(simulation.inboundOnce)과 같은 계산
+  const { alongX, n, lanes, span, spots } = useMemo(() => inboundSpots(r), [r]);
   const cx = (r.x0 + r.x1) / 2;
   const cz = (r.z0 + r.z1) / 2;
   // 들어오는 쪽(앞) — 저울·카트
   const head = alongX ? { x: r.x0 + 1.6, z: cz } : { x: cx, z: r.z0 + 1.6 };
-  const film = cold ? 0xc9d3de : 0xe9eef3;
   const line = (x0: number, z0: number, x1: number, z1: number) => (
     <mesh rotation-x={-Math.PI / 2} position={[(x0 + x1) / 2, 0.011, (z0 + z1) / 2]}>
       <planeGeometry args={[Math.max(0.06, x1 - x0), Math.max(0.06, z1 - z0)]} />
@@ -727,8 +713,6 @@ export function Inbound({ e }: { e: Equip }) {
         {line(r.x0 + 0.2, r.z0 + 0.2, r.x0 + 0.32, r.z1 - 0.2)}
         {line(r.x1 - 0.32, r.z0 + 0.2, r.x1 - 0.2, r.z1 - 0.2)}
         {spots.map((p) => {
-          const full = p.k % 4 !== 3;
-          const hgt = 0.38 * Math.max(1, Math.round((0.9 + ((p.k * 37) % 5) * 0.12) / 0.38));
           return (
             <group key={p.k} position={[p.x, 0, p.z]}>
               {/* 팔레트 칸 네 귀(ㄱ자) */}
@@ -739,25 +723,6 @@ export function Inbound({ e }: { e: Equip }) {
                     {line(-0.03, Math.min(0, -sz * 0.3), 0.03, Math.max(0, -sz * 0.3))}
                   </group>
                 )),
-              )}
-              {full && (
-                <>
-                  <mesh position={[0, 0.07, 0]}>
-                    <boxGeometry args={[1.1, 0.14, 1.1]} />
-                    <meshStandardMaterial color={0xd9b98a} roughness={0.85} map={palletTexture()} />
-                  </mesh>
-                  {/* 상자 더미 — 층마다 2×2 상자(한 덩어리면 무엇인지 알아보기 어려웠음, 사용자 2026-11-26) */}
-                  {Array.from({ length: Math.max(1, Math.round(hgt / 0.38)) }, (_, ly) =>
-                    [-0.25, 0.25].flatMap((bx) =>
-                      [-0.25, 0.25].map((bz) => (
-                        <mesh key={`${ly}${bx}${bz}`} position={[bx, 0.14 + 0.19 + ly * 0.38, bz]}>
-                          <boxGeometry args={[0.48, 0.36, 0.48]} />
-                          <meshStandardMaterial color={(ly + (bx > 0 ? 1 : 0) + (bz > 0 ? 1 : 0)) % 2 ? 0xc99a6b : 0xd2a679} roughness={0.85} map={boxTexture()} />
-                        </mesh>
-                      )),
-                    ),
-                  )}
-                </>
               )}
             </group>
           );
@@ -806,23 +771,6 @@ export function Inbound({ e }: { e: Equip }) {
             <meshStandardMaterial color={0xf2c94c} />
           </mesh>
         </group>
-        {/* 핸드자키(빈 포크 + 손잡이) */}
-        <group position={alongX ? [r.x1 - 1.4, 0, cz] : [cx, 0, r.z1 - 1.4]} rotation-y={alongX ? 0 : Math.PI / 2}>
-          {[-0.18, 0.18].map((z) => (
-            <mesh key={z} position={[0, 0.05, z]}>
-              <boxGeometry args={[1.1, 0.06, 0.16]} />
-              <meshStandardMaterial color={0xd23c2c} />
-            </mesh>
-          ))}
-          <mesh position={[0.6, 0.25, 0]}>
-            <boxGeometry args={[0.16, 0.4, 0.5]} />
-            <meshStandardMaterial color={0xd23c2c} />
-          </mesh>
-          <mesh position={[0.78, 0.75, 0]} rotation-z={-0.35}>
-            <cylinderGeometry args={[0.025, 0.025, 1.1, 8]} />
-            <meshStandardMaterial color={0x2a2f38} />
-          </mesh>
-        </group>
       </StaticMerge>
       {/* 바닥 글씨 — 들어오는 쪽 "입고 →", 앞 절반 "검수 대기", 뒤 절반 "검수 완료" */}
       {(
@@ -841,29 +789,57 @@ export function Inbound({ e }: { e: Equip }) {
           </mesh>
         );
       })}
-      {/* 투명·표(합치지 않음) — 랩·보냉 덮개, 입고 표(검수 끝 = 초록, 대기 = 흰색) */}
-      {spots
-        .filter((p) => p.k % 4 !== 3)
-        .map((p) => {
-          const hgt = 0.38 * Math.max(1, Math.round((0.9 + ((p.k * 37) % 5) * 0.12) / 0.38));
-          return (
-            <group key={p.k} position={[p.x, 0, p.z]}>
-              <mesh position={[0, 0.14 + (hgt + 0.06) / 2, 0]} raycast={() => null}>
-                <boxGeometry args={[1.06, hgt + 0.06, 1.06]} />
-                <meshStandardMaterial color={film} roughness={cold ? 0.3 : 0.15} metalness={cold ? 0.5 : 0} transparent opacity={cold ? 0.45 : 0.25} depthWrite={false} />
-              </mesh>
-              <mesh position={[0, 0.14 + hgt * 0.6, 0.545]}>
-                <boxGeometry args={[0.32, 0.22, 0.01]} />
-                <meshBasicMaterial color={p.k % n >= n / 2 ? 0x2fbf71 : 0xffffff} />
-              </mesh>
-            </group>
-          );
-        })}
+      <InboundPallets e={e} floor={floor} />
     </group>
   );
 }
 
-/** 사무실 책상 하나 — 상판·다리·모니터·의자. rot = 앉은 사람이 보는 방향(0 = +x). big = 센터 관리자 책상(넓은 상판·옆 서랍장·명패) */
+/** 입고 검수 구역의 팔레트 — 시뮬레이션 inboundYard 그대로(대기 = 흰 표 · 검수 중 = 노랑 · 완료 = 초록) */
+function InboundPallets({ e, floor }: { e: Equip; floor: FloorNo }) {
+  const { sim } = useApp();
+  useTick();
+  const { spots } = useMemo(() => inboundSpots(e.rect), [e.rect]);
+  const cold = e.temp && e.temp !== 'AMBIENT';
+  return (
+    <>
+      {sim.inboundYard
+        .filter((p) => p.floor === floor)
+        .map((p) => {
+          const sp = spots[p.k];
+          if (!sp) return null;
+          const hgt = 0.38 * p.tiers;
+          return (
+            <group key={p.id} position={[sp.x, 0, sp.z]}>
+              <mesh position={[0, 0.07, 0]}>
+                <boxGeometry args={[1.1, 0.14, 1.1]} />
+                <meshStandardMaterial color={0xd9b98a} roughness={0.85} map={palletTexture()} />
+              </mesh>
+              {Array.from({ length: p.tiers }, (_, ly) =>
+                [-0.25, 0.25].flatMap((bx) =>
+                  [-0.25, 0.25].map((bz) => (
+                    <mesh key={`${ly}${bx}${bz}`} position={[bx, 0.14 + 0.19 + ly * 0.38, bz]}>
+                      <boxGeometry args={[0.48, 0.36, 0.48]} />
+                      <meshStandardMaterial color={(ly + (bx > 0 ? 1 : 0) + (bz > 0 ? 1 : 0)) % 2 ? 0xc99a6b : 0xd2a679} roughness={0.85} map={boxTexture()} />
+                    </mesh>
+                  )),
+                ),
+              )}
+              <mesh position={[0, 0.14 + (hgt + 0.06) / 2, 0]} raycast={() => null}>
+                <boxGeometry args={[1.06, hgt + 0.06, 1.06]} />
+                <meshStandardMaterial color={cold ? 0xc9d3de : 0xe9eef3} roughness={cold ? 0.3 : 0.15} metalness={cold ? 0.5 : 0} transparent opacity={cold ? 0.45 : 0.25} depthWrite={false} />
+              </mesh>
+              <mesh position={[0, 0.14 + hgt * 0.6, 0.545]}>
+                <boxGeometry args={[0.32, 0.22, 0.01]} />
+                <meshBasicMaterial color={p.state === 'DONE' ? 0x2fbf71 : p.state === 'CHECK' ? 0xf2c94c : 0xffffff} />
+              </mesh>
+            </group>
+          );
+        })}
+    </>
+  );
+}
+
+/** 사무실 책상 하나 — 상판·다리·모니터·의자. rot = 앉은 사람이 보는 방향(0 = +x). big = 센터 관리자 책상(넓은 짙은 회청색 상판·옆 서랍장·명패 — 갈색은 사용자 2026-11-26 바꿔 달라 함) */
 function Desk({ x, z, rot = 0, big = false }: { x: number; z: number; rot?: number; big?: boolean }) {
   const W = big ? 1.9 : 1.4;
   const D = big ? 0.9 : 0.75;
@@ -871,7 +847,7 @@ function Desk({ x, z, rot = 0, big = false }: { x: number; z: number; rot?: numb
     <group position={[x, 0, z]} rotation-y={rot}>
       <mesh position={[0, 0.74, 0]}>
         <boxGeometry args={[D, 0.05, W]} />
-        <meshStandardMaterial color={big ? 0x8a6a4f : 0xe8e2d6} roughness={0.7} />
+        <meshStandardMaterial color={big ? 0x3d4a5c : 0xe8e2d6} roughness={0.7} />
       </mesh>
       {[-1, 1].map((s) => (
         <mesh key={s} position={[0, 0.37, s * (W / 2 - 0.04)]}>
@@ -884,7 +860,7 @@ function Desk({ x, z, rot = 0, big = false }: { x: number; z: number; rot?: numb
           {/* 옆 서랍장 · 명패 */}
           <mesh position={[0, 0.35, W / 2 - 0.3]}>
             <boxGeometry args={[D - 0.1, 0.68, 0.45]} />
-            <meshStandardMaterial color={0x6f5540} />
+            <meshStandardMaterial color={0x5b6778} />
           </mesh>
           <mesh position={[D / 2 - 0.12, 0.81, 0]} rotation-z={-0.3}>
             <boxGeometry args={[0.04, 0.09, 0.32]} />
@@ -913,7 +889,7 @@ function Desk({ x, z, rot = 0, big = false }: { x: number; z: number; rot?: numb
 }
 
 /**
- * DC 관리자 사무실 — 유리 칸막이(서쪽 가운데 문)·직원 4인용 책상 묶음 2(간격 두고)·안쪽(남쪽 끝) DC 센터 관리자 책상(문을 보고 앉음)·화이트보드.
+ * DC 관리자 사무실 — 유리 칸막이(서쪽 가운데 문)·직원 4인용 책상 묶음 4(간격 두고)·안쪽(남쪽 끝) DC 센터 관리자 책상(문을 보고 앉음)·화이트보드.
  * 사용자 2026-11-25 "7층에 dc 관리자 사무실", 2026-11-26 "직원 책상 4개 붙어있는 거 간격 두고 2개, 안쪽에 센터 관리자 책상 하나".
  */
 function Office({ e }: { e: Equip }) {
@@ -935,8 +911,8 @@ function Office({ e }: { e: Equip }) {
           <meshStandardMaterial color={0xcfe3f7} transparent opacity={0.35} depthWrite={false} />
         </mesh>
       ))}
-      {/* 직원 4인용 책상 묶음 둘 — 책상 넷을 정사각형으로 붙여(둘씩 마주 봄) 묶음 사이 띄움(사용자 2026-11-26 "4인용 정사각형으로 붙어있는 거 간격 두고 2개") */}
-      {[r.z0 + 3.0, r.z0 + 3.0 + 4.4].map((pz) => (
+      {/* 직원 4인용 책상 묶음 넷 — 책상 넷을 정사각형으로 붙여(둘씩 마주 봄) 묶음 사이 2.4m(사용자 2026-11-26 "사무실 늘려서 4인용 책상 4개, 간격 잘") */}
+      {[0, 1, 2, 3].map((i) => r.z0 + 3.0 + i * 5.2).map((pz) => (
         <group key={pz}>
           {[-0.7, 0.7].map((dz) => (
             <group key={dz}>
@@ -1066,7 +1042,7 @@ export function EquipmentModel({ e, floor }: { e: Equip; floor: FloorNo }) {
         <DpsZones floor={floor} />
       </>
     );
-  if (e.kind === 'INBOUND') return <Inbound e={e} />;
+  if (e.kind === 'INBOUND') return <Inbound e={e} floor={floor} />;
   if (e.kind === 'VEG_LANES') return <VegLanes e={e} floor={floor} />;
   if (e.kind === 'OFFICE') return <Office e={e} />;
   return (

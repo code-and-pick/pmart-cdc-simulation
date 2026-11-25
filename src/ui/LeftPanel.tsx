@@ -599,7 +599,7 @@ function RealCheck() {
   );
 }
 
-const ROLE_ORDER: Role[] = ['FC', 'SORT', 'JOCKEY', 'INSPECT', 'REPL', 'LOADER'];
+const ROLE_ORDER: Role[] = ['FC', 'SORT', 'JOCKEY', 'INSPECT', 'REPL', 'INBOUND', 'LOADER'];
 
 /** 작업자 목록 — 누르면 그 층으로 가서 PDA 카드를 연다 */
 function Workers() {

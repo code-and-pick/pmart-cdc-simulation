@@ -115,8 +115,8 @@ export class ViewController extends Emitter {
     const cz = (r.z0 + r.z1) / 2;
     const dist = this.zoneDist(v);
     // 전체(층): 남북으로 긴 층(약 81 × 117 m)이 다 들어오게 더 내려다본다 [시뮬]. 북쪽 벽 카드 줄이 위 이상 알림 줄에 가리지 않게 조금 북쪽으로(2026-11-26)
-    const target = new THREE.Vector3(cx, 0, key === 'ALL' ? cz : cz - dist * 0.12);
-    const pos = key === 'ALL' ? new THREE.Vector3(cx, dist * 0.9, cz + dist * 0.35) : new THREE.Vector3(cx, dist * 0.92, cz + dist * 0.42);
+    const target = new THREE.Vector3(cx, 0, key === 'ALL' ? cz - dist * 0.09 : cz - dist * 0.12);
+    const pos = key === 'ALL' ? new THREE.Vector3(cx, dist * 0.9, cz + dist * 0.26) : new THREE.Vector3(cx, dist * 0.92, cz + dist * 0.42);
     this.cameraRequest = { pos, target, animate };
     this.emit();
   }

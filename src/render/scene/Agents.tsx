@@ -13,7 +13,7 @@ import { Crowd } from './Crowd';
 import type { HumanoidLook } from './Humanoid';
 import { StaticMerge } from './StaticMerge';
 
-const ROLE_COLOR: Record<Role, number> = { FC: 0x2f80ed, SORT: 0x27ae60, JOCKEY: 0xf2994a, REPL: 0xf2c94c, INSPECT: 0x9b51e0, LOADER: 0x00a3a3, DPS: 0x56ccf2 };
+const ROLE_COLOR: Record<Role, number> = { FC: 0x2f80ed, SORT: 0x27ae60, JOCKEY: 0xf2994a, REPL: 0xf2c94c, INSPECT: 0x9b51e0, LOADER: 0x00a3a3, DPS: 0x56ccf2, INBOUND: 0xeb5757 };
 
 /** 시뮬레이션 시계를 화면 프레임에 맞춰 돌리고, 패널은 약 4Hz 로 갱신 */
 export function SimDriver() {

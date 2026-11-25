@@ -762,7 +762,7 @@ export function buildLayout(): Layout {
   const autoX0 = g1 + 1 + gW + 1.0;
   const autoInfo = f7.autostore('F', autoX0, DAS_Z0, sz1, width - autoX0 - 0.5);
   f7.equip('WHEEL_SORTER', '휠소터 (생활용품 — MFC 박스 → PPC 슈트 / G 선반 → DAS)', { x0: g0, z0: SORT_Z0, x1: autoInfo.rect.x1, z1: SORT_Z1 }, 'AMBIENT');
-  f7.equip('OFFICE', 'DC 관리자 사무실', { x0: amb7 + 1, z0: bandDepth + 1, x1: width - 1, z1: bandDepth + 18 });
+  f7.equip('OFFICE', 'DC 관리자 사무실', { x0: amb7 + 1, z0: bandDepth + 1, x1: width - 1, z1: bandDepth + 30 }); // 4인용 책상 묶음 4 + 센터 관리자 책상(사용자 2026-11-26 "사무실 늘려서 4인용 책상 4개") — 예전 입고 검수 자리까지
   // 상온 입고 검수 — 7F 북쪽 도크 바로 동쪽(아침 입고 차가 같은 도크에 대고, 내리자마자 입구에서 검수 → 랙으로). 전엔 사무실 남쪽 층 안쪽 깊숙이 있었음(사용자 2026-11-26 "입구 쪽에서 하든가")
   {
     const dx1 = Math.max(...f7.docks.map((d) => d.pos.x)) + DOCK_PITCH / 2 + 2;

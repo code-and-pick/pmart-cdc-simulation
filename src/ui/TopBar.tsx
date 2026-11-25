@@ -34,7 +34,7 @@ export function TopBar() {
           {CDC_FACTS.name}
         </span>
         <span className="mode-sw" title={mock ? '가상(MOCK) — 시뮬레이터가 흉내 낸 값' : '실서버(LAN 백엔드)'}>
-          <button className={mock ? 'on mock' : ''} onClick={() => !mock || restart({ ...settings, mode: 'mock' })}>
+          <button className={mock ? 'on mock' : ''} onClick={() => mock || restart({ ...settings, mode: 'mock' })}>
             MOCK
           </button>
           <button className={!mock ? 'on http' : ''} onClick={() => mock && restart({ ...settings, mode: 'http' })}>
