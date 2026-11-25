@@ -69,7 +69,7 @@ export function TrfBoard() {
     .filter((r) => {
       if (!q.trim()) return true;
       const k = q.trim().toUpperCase();
-      return r.t.trfId.toUpperCase().includes(k) || lpnsOf(sim, r.t.trfId).some((l) => l.toUpperCase().includes(k));
+      return r.t.trfId.toUpperCase().includes(k) || sim.no('TRF', r.t.trfId).toUpperCase().includes(k) || lpnsOf(sim, r.t.trfId).some((l) => l.toUpperCase().includes(k));
     });
   return (
     <div className="sfl">
@@ -87,7 +87,7 @@ export function TrfBoard() {
               <b>
                 {mfcName(t.mfcId)} {TEMP_KO[trfTemp(t)]}
               </b>
-              <span className="st">{t.trfId}</span>
+              <span className="st" title={`시스템 번호 ${t.trfId}`}>{sim.no('TRF', t.trfId)}</span>
             </div>
             <ol className="sfl-steps">
               {STEPS.map((s, i) => (
@@ -157,10 +157,10 @@ export function AdminBoard() {
           <tbody>
             {rows
               .filter((r) => r.t.state === 'DEPARTED' || r.t.state === 'CANCELLED')
-              .filter((r) => byMfc(r.t.mfcId) && match(r.t.trfId) && (!day || (r.t.dueAt ?? '').startsWith(day)))
+              .filter((r) => byMfc(r.t.mfcId) && (match(r.t.trfId) || match(sim.no('TRF', r.t.trfId))) && (!day || (r.t.dueAt ?? '').startsWith(day)))
               .map((r) => (
                 <tr key={r.t.trfId}>
-                  <td>{r.t.trfId}</td>
+                  <td title={`시스템 번호 ${r.t.trfId}`}>{sim.no('TRF', r.t.trfId)}</td>
                   <td>{mfcName(r.t.mfcId).replace(/^\d호점 /, '')}</td>
                   <td>{r.t.state}</td>
                   <td>{r.p.dp.toLocaleString()}</td>
@@ -185,12 +185,12 @@ export function AdminBoard() {
             {backend
               .allTasks()
               .filter((t) => t.state !== 'DONE' && t.state !== 'PARTIAL' && t.state !== 'CANCELLED')
-              .filter((t) => match(t.taskId) || t.trfIds.some(match))
+              .filter((t) => match(t.taskId) || match(sim.no('TASK', t.taskId)) || t.trfIds.some((id) => match(id) || match(sim.no('TRF', id))))
               .slice(0, 200)
               .map((t) => (
                 <tr key={t.taskId}>
-                  <td>{t.taskId}</td>
-                  <td>{t.trfId}</td>
+                  <td title={`시스템 번호 ${t.taskId}`}>{sim.no('TASK', t.taskId)}</td>
+                  <td title={`시스템 번호 ${t.trfIds.join(', ')}`}>{t.trfIds.map((id) => sim.no('TRF', id)).join(' · ')}</td>
                   <td>{t.state}</td>
                   <td>{sim.agents.find((a) => a.id === t.assigneeId)?.name ?? '—'}</td>
                   <td>

@@ -10,6 +10,7 @@ import { AUTOSTORE, DOCK_FLOOR, DOCKS, FLOW, CENTER_ID, MFCS, SHELF, OUTBOUND, S
 // 시간표 근거: 정본 CDC-8(PR #447) — 21:30 WMS 완료 · 22:00 R/T 카운팅 · 22:30 상차 · 23:00~ 출차
 import type { MockBackend } from '../backend/mock/MockBackend';
 import type { ApiCallRecord, DomainEventRecord } from '../backend/port';
+import { NO_NUMBER, type NoKind } from '../domain/displayNo';
 import { fmt, MockTms, type TripPlan } from '../backend/mock/MockTms';
 import type { Catalog, Handling } from '../domain/catalog';
 import { ApiProblem, type Task, type TaskLineShare, type TemperatureZone } from '../domain/contract';
@@ -373,6 +374,11 @@ export class Simulation implements DutyClock {
     for (const a of this.agents) a.tick(dt);
   }
 
+  /** 화면 번호(T······ · W···· · K·····) — 서버(MOCK)가 정한 것만, 모르면 "번호 없음"(화면에서 만들지 않음, ADR-0070 꼴) */
+  no(kind: NoKind, id: string | null | undefined): string {
+    return (id && this.backend.numbers.get(kind, id)) || NO_NUMBER;
+  }
+
   clockText(): string {
     return hm(this.time);
   }
@@ -393,7 +399,7 @@ export class Simulation implements DutyClock {
         try {
           this.backend.intakeTransfer(t, newId('intake'));
         } catch (e) {
-          this.log('warn', `TRF 인수 실패 ${t.trfId}: ${e instanceof Error ? e.message : e}`);
+          this.log('warn', `TRF 인수 실패 ${this.no('TRF', t.trfId)}: ${e instanceof Error ? e.message : e}`);
         }
       }
       this.planRoutes();
@@ -420,7 +426,7 @@ export class Simulation implements DutyClock {
           .then((w) => {
             this.day.waves.push({ waveId: w.waveId, temp, released: false, warned: false });
             if (!this.day.waveId) this.day.waveId = w.waveId;
-            this.log('flow', `13:00 석간 — Wave ${w.waveId} 편성 (${TEMP_KO[temp]} TRF ${tids.length}건)`);
+            this.log('flow', `13:00 석간 — Wave ${this.no('WAVE', w.waveId)} 편성 (${TEMP_KO[temp]} TRF ${tids.length}건)`);
           })
           .catch((e) => this.log('warn', `Wave 편성 실패: ${e instanceof Error ? e.message : e}`));
     }
@@ -854,7 +860,7 @@ export class Simulation implements DutyClock {
       title: HANDLING_TITLE[handling],
       step: handling === 'DPS' ? `빈 박스 받기 — 내 불 ${color.name}` : handling === 'SPLIT' ? '야채 바닥 레인으로' : handling === 'PORT' ? '포트에서 통 받기' : '지역 바코드 스캔',
       rows: [
-        ['작업', task.taskId],
+        ['작업', this.no('TASK', task.taskId)],
         ['지역', `${region} → ${mfcNames}`],
         ['묶음', `${task.pickMode === 'SKU_BATCH' ? 'SKU 묶음(라인)' : task.pickMode === 'REGION_BATCH' ? '지역 묶음' : 'TRF 하나'} · MFC ${mfcIds.length}곳`],
         ['진행', `0/${task.lines.length}`],
@@ -1225,7 +1231,7 @@ export class Simulation implements DutyClock {
         await a.wait(WORK.idlePoll / 6, 'DPS 작업 대기');
         return;
       }
-      if (this.dpsZoneOfTask(task) !== zi) this.log('warn', `${a.name} 다른 DPS 구역 작업을 받음 ${task.taskId}`);
+      if (this.dpsZoneOfTask(task) !== zi) this.log('warn', `${a.name} 다른 DPS 구역 작업을 받음 ${this.no('TASK', task.taskId)}`);
       D.held.set(a.id, task);
       // 받은 작업마다 빈 MFC 박스 하나가 컨베이어로 내 구역에 온다(기사 "빈 박스가 컨베이어로 상품 위치에") — 박스가 계속 흘러 구역마다 따로 일한다
       const trfId = task.trfId!;
@@ -1238,11 +1244,11 @@ export class Simulation implements DutyClock {
     const mfc = MFCS.find((m) => m.id === task!.lines[0].shares[0].mfcId);
     const box = (D.queues[zi] ?? []).find((b) => (b.taskId ? b.taskId === task!.taskId : b.trfId === task!.trfId) && b.arrived);
     if (!box) {
-      a.pda = { title: `DPS ${zi + 1}구역 — 내 불 ${color.name}`, step: `${mfc?.name ?? ''} 박스 오기를 기다림`, rows: [['작업', task.taskId]] };
+      a.pda = { title: `DPS ${zi + 1}구역 — 내 불 ${color.name}`, step: `${mfc?.name ?? ''} 박스 오기를 기다림`, rows: [['작업', this.no('TASK', task.taskId)]] };
       await a.wait(WORK.idlePoll / 10, 'DPS 박스 기다림');
       return;
     }
-    a.pda = { title: `DPS ${zi + 1}구역 — 내 불 ${color.name}`, step: `${mfc?.name ?? ''} 박스 도착`, rows: [['작업', task.taskId], ['박스', box.label], ['MFC', mfc?.name ?? '']] };
+    a.pda = { title: `DPS ${zi + 1}구역 — 내 불 ${color.name}`, step: `${mfc?.name ?? ''} 박스 도착`, rows: [['작업', this.no('TASK', task.taskId)], ['박스', box.label], ['MFC', mfc?.name ?? '']] };
     box.busy += 1;
     for (const l of task.lines) {
       const remaining = l.plannedQty - l.pickedQty - l.shortQty;
@@ -1639,7 +1645,7 @@ export class Simulation implements DutyClock {
     const trfId = boxes[0].trfId;
     const group = boxes.filter((b) => b.trfId === trfId);
     for (const b of boxes) if (!group.includes(b)) b.state = 'WAIT';
-    a.pda = { title: '검품', step: '박스 수량·봉인·온도 확인', rows: [['출고대기', slot.short], ['TRF', trfId], ['박스', `${group.length}`]] };
+    a.pda = { title: '검품', step: '박스 수량·봉인·온도 확인', rows: [['출고대기', slot.short], ['TRF', this.no('TRF', trfId)], ['박스', `${group.length}`]] };
     await this.go(a, site.front(slot), WORK.walk, `출고대기로 (${slot.short})`);
     await a.wait(OUTBOUND.inspectPerBox * group.length, '검품 — 수량·봉인·온도 확인');
     const failed = group.filter(() => this.rng.next() < OUTBOUND.inspectFailRate);

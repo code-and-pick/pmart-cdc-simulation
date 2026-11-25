@@ -40,6 +40,7 @@ import type { Catalog } from '../../domain/catalog';
 import { stagingCodeFor } from '../../domain/layout';
 import type { ApiCallRecord, ApiListener, CdcOutboundPort, DomainEventRecord, EventListener } from '../port';
 import { CdcLedger, isPalletLocation, isRackLocation, isShelfLocation, LedgerError } from './ledger';
+import { DisplayNumbers } from '../../domain/displayNo';
 
 interface TrfRec {
   intake: TransferIntake;
@@ -76,6 +77,8 @@ export interface MockOptions {
 
 export class MockBackend implements CdcOutboundPort {
   readonly mode = 'mock' as const;
+  /** 화면 번호(TRF T······ · Wave W···· · 작업 K·····) — 서버가 정하는 값을 흉내 [시뮬, 사용자 2026-11-26 "글자 + 숫자"]. 계약 필드가 생기면 응답에 싣는다 */
+  readonly numbers = new DisplayNumbers();
   readonly ledger: CdcLedger;
   private readonly trfs = new Map<string, TrfRec>();
   private readonly waves = new Map<string, Wave>();
@@ -228,6 +231,7 @@ export class MockBackend implements CdcOutboundPort {
         const intake: TransferIntake = { ...structuredClone(body), state: 'ALLOCATING', version: (prev?.intake.version ?? -1) + 1, progress: [] };
         const rec: TrfRec = { intake, body: b, cancelled: false, departed: false, seq: prev?.seq ?? this.trfs.size + 1 };
         this.trfs.set(body.trfId, rec);
+        this.numbers.assign('TRF', body.trfId);
         const alloc = this.ledger.allocate(
           { trfId: body.trfId, trfVersion: body.trfVersion, lines: body.lines.map((l) => ({ sku: l.sku, requestedQty: l.approvedQty, minRemainingDays: this.minDays(l.sku) })) },
           ALLOCATION.safetyQty,
@@ -493,6 +497,7 @@ export class MockBackend implements CdcOutboundPort {
           createdAt: this.iso(),
         };
         this.waves.set(w.waveId, w);
+        this.numbers.assign('WAVE', w.waveId);
         for (const id of body.trfIds) {
           const r = this.trfs.get(id)!;
           r.intake.waveId = w.waveId;
@@ -619,6 +624,7 @@ export class MockBackend implements CdcOutboundPort {
           createdAt: this.iso(),
         };
         this.tasks.set(t.taskId, t);
+        this.numbers.assign('TASK', t.taskId);
         this.taskDue.set(t.taskId, ls.flatMap((l) => l.shares.map((x) => x.dueAt)).sort()[0]);
         out.push(t);
       }

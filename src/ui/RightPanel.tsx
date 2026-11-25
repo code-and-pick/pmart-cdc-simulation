@@ -187,7 +187,7 @@ function SiteFlow() {
                 if (!r) return <span key={tp} className="mg-c empty">—</span>;
                 const { t, p, dots, cur } = r;
                 const dim = only != null && only !== cur;
-                const tip = `${t.trfId}\n승인 ${p.ap.toLocaleString()} · 피킹 ${p.pk.toLocaleString()} · 분류 ${p.so.toLocaleString()} · 검품 ${p.ins.toLocaleString()} · 상차 ${p.ld.toLocaleString()} · 출발 ${p.dp.toLocaleString()}${handed.has(t.trfId) ? ` · 인계 ${clock(handed.get(t.trfId)!)}` : ''}`;
+                const tip = `${sim.no('TRF', t.trfId)} (시스템 번호 ${t.trfId})\n승인 ${p.ap.toLocaleString()} · 피킹 ${p.pk.toLocaleString()} · 분류 ${p.so.toLocaleString()} · 검품 ${p.ins.toLocaleString()} · 상차 ${p.ld.toLocaleString()} · 출발 ${p.dp.toLocaleString()}${handed.has(t.trfId) ? ` · 인계 ${clock(handed.get(t.trfId)!)}` : ''}`;
                 return (
                   <button
                     key={tp}
