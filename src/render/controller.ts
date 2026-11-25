@@ -45,7 +45,7 @@ export type LabelMode = 'all' | 'rack' | 'off';
 export type RightView = 'logs' | 'trf' | 'transport' | 'admin' | 'api' | 'events' | 'inventory' | 'moves' | 'barcode';
 export type LeftView = 'settings' | 'zone' | 'workers' | 'help' | 'perf';
 export type Theme = 'dark' | 'light';
-export type FloorKey = FloorNo | 'B1';
+export type FloorKey = FloorNo;
 
 const THEME_KEY = 'pmart-cdc-sim-theme';
 function loadTheme(): Theme {
@@ -88,9 +88,7 @@ export class ViewController extends Emitter {
   /** 층 안 구역 버튼 — 전체 · 랙 구역 · 승강기·출고대기 띠 · 설비 */
   zoneViews(): ZoneView[] {
     const L = this.layout;
-    // B1 은 승강기 착지(z −9)~차 끝(z 15), 접안 14자리 폭만 — 층 바닥 전체를 잡으면 너무 멀었다
-    const b1Right = Math.max(6 + L.docks.length * 4.5 + 4, ...L.floors[0].lifts.map((x) => x.rect.x1 + 4));
-    const all: ZoneView = { key: 'ALL', label: '전체', rect: this.floor === 'B1' ? { x0: 0, z0: -9, x1: b1Right, z1: 15 } : { x0: 0, z0: 0, x1: L.width, z1: L.depth } };
+    const all: ZoneView = { key: 'ALL', label: '전체', rect: { x0: 0, z0: 0, x1: L.width, z1: L.depth } };
     const f = this.floorLayout();
     if (!f) return [all];
     return [all, ...f.zones.map((z) => ({ key: z.id, label: z.kind === 'BAND' && z.id.endsWith('-BAND') ? '출고대기·승강기' : z.label, rect: z.rect }))];
@@ -116,10 +114,9 @@ export class ViewController extends Emitter {
     const cx = (r.x0 + r.x1) / 2;
     const cz = (r.z0 + r.z1) / 2;
     const dist = this.zoneDist(v);
-    // 전체(층): 남북으로 긴 층(약 81 × 117 m)이 다 들어오게 더 내려다본다 [시뮬]. B1 은 예전 각도
-    const b1 = this.floor === 'B1';
-    const target = new THREE.Vector3(cx, 0, key === 'ALL' ? (b1 ? cz + 1 : cz + dist * 0.03) : cz - dist * 0.12);
-    const pos = key === 'ALL' ? (b1 ? new THREE.Vector3(cx, dist * 0.78, cz + dist * 0.72) : new THREE.Vector3(cx, dist * 0.9, cz + dist * 0.38)) : new THREE.Vector3(cx, dist * 0.92, cz + dist * 0.42);
+    // 전체(층): 남북으로 긴 층(약 81 × 117 m)이 다 들어오게 더 내려다본다 [시뮬]
+    const target = new THREE.Vector3(cx, 0, key === 'ALL' ? cz + dist * 0.03 : cz - dist * 0.12);
+    const pos = key === 'ALL' ? new THREE.Vector3(cx, dist * 0.9, cz + dist * 0.38) : new THREE.Vector3(cx, dist * 0.92, cz + dist * 0.42);
     this.cameraRequest = { pos, target, animate };
     this.emit();
   }
@@ -128,8 +125,8 @@ export class ViewController extends Emitter {
   zoneDist(v: ZoneView): number {
     const w = v.rect.x1 - v.rect.x0;
     const d = v.rect.z1 - v.rect.z0;
-    // 전체: 층 전체가 들어오게 [시뮬]. B1 은 좁아 더 가깝게
-    if (v.key === 'ALL') return this.floor === 'B1' ? Math.max(w, d) * 0.75 : Math.max(w * 1.2, d * 1.3);
+    // 전체: 층 전체가 들어오게 [시뮬]
+    if (v.key === 'ALL') return Math.max(w * 1.2, d * 1.3);
     return Math.max(w, d * 1.3) * 0.7 + 2.5;
   }
 

@@ -1,4 +1,4 @@
-// 머리줄·3D 위 보기 칩 — MFC 시뮬레이터 ui/TopBar.tsx 와 같은 모양. 구역 버튼 대신 층 버튼(5F·6F·7F·B1)을 먼저 둔다(설계 §9).
+// 머리줄·3D 위 보기 칩 — MFC 시뮬레이터 ui/TopBar.tsx 와 같은 모양. 구역 버튼 대신 층 버튼(5F·6F·7F)을 먼저 둔다(설계 §9).
 import { useApp, useTick, useView } from '../app/context';
 import { CDC_FACTS, SPEEDS } from '../config';
 import type { FloorKey, LabelMode, RightView } from '../render/controller';
@@ -97,7 +97,7 @@ export function ViewBar() {
             </button>
           ))}
         </div>
-        {view.floor !== 'B1' && (
+        {(
           // 구역 고르기 — 칩 줄이 길어 오른쪽 패널에 가려서 고르기 상자로(사용자 2026-11-25). 보관·피킹 선반·설비로 묶음
           <label className="seg float zone-pick" id="zones">
             <span>구역</span>

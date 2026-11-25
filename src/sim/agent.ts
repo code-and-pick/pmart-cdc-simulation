@@ -6,7 +6,7 @@ import type { FloorKey } from '../domain/sites/chilgok';
 import type { P, WalkPoint } from './site';
 
 export type Role = 'FC' | 'SORT' | 'JOCKEY' | 'REPL' | 'INSPECT' | 'LOADER' | 'DPS';
-/** DAY 주간조 08~17 · EVENING 석간 13~22 · NIGHT 지하 상차 19~23 [가정] */
+/** DAY 주간조 08~17 · EVENING 석간 13~22 · NIGHT 도크 상차·야간 자키 [가정] */
 export type Shift = 'DAY' | 'EVENING' | 'NIGHT';
 
 export const ROLE_KO: Record<Role, string> = { FC: 'FC 피커', SORT: 'DAS·분배', JOCKEY: '자키', REPL: '지게차 보충', INSPECT: '검품', LOADER: '상차', DPS: 'DPS 구역' };

@@ -1,5 +1,5 @@
 // 현장 사람 — 보는 층의 작업자만. 위치·방향·짐은 useFrame 에서 three 객체를 직접 바꾼다(React 상태로 올리지 않음).
-// 사람은 MFC Humanoid 모형, 조끼 색 = 역할: FC 파랑 · 분배/라인 초록 · 자키 주황 · 검품 보라 · 지하 상차 청록. 지게차 보충은 입식 리치 지게차(사용자 사진). 누르면 PDA 카드.
+// 사람은 MFC Humanoid 모형, 조끼 색 = 역할: FC 파랑 · 분배/라인 초록 · 자키 주황 · 검품 보라 · 도크 상차 청록. 지게차 보충은 입식 리치 지게차(사용자 사진). 누르면 PDA 카드.
 
 import { useFrame } from '@react-three/fiber';
 import { useEffect, useRef } from 'react';

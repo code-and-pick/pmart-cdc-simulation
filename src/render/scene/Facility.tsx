@@ -365,6 +365,7 @@ const CARD_Y = RACK_TOP + 0.4 + CARD_H / 2;
 /** 설비 줄은 랙 줄 바로 위 한 줄 — 두 줄 모두 곧은 줄(같은 높이끼리) */
 const CARD_Y_BAND = CARD_Y + CARD_H + 0.5;
 const CARD_GAP = 0.5;
+const TEMP_SHORT: Record<string, string> = { AMBIENT: '상온', CHILLED: '냉장', FROZEN: '냉동' };
 
 /** 괄호 설명 중 첫 구절만 짧게 — "생활용품 — 박스째 → …" → "생활용품" */
 function shortSub(s: string | null): string | null {
@@ -378,10 +379,19 @@ function shortSub(s: string | null): string | null {
  * 이름은 짧게(괄호 설명은 둘째 말로 한 구절만).
  */
 export function zoneCards(f: FloorLayout): Card[] {
-  type Spec = { id: string; title: string; sub: string | null; style: FloorKey; x: number; row: 'rack' | 'band' };
+  type Spec = { id: string; title: string; sub: string | null; style: FloorKey; x: number; row: 'rack' | 'band'; z?: number };
   const specs: Spec[] = [];
+  // 휠소터는 층마다 카드 하나(사용자 2026-11-26 "휠소터 카드를 하나만" — 5F 상온·냉동 두 줄이 붙어 있어 카드 둘이 겹쳐 쌓였음)
+  const sorters = f.zones.filter((z) => z.kind === 'EQUIP' && z.id.includes('WHEEL_SORTER'));
+  if (sorters.length) {
+    const x0 = Math.min(...sorters.map((z) => z.rect.x0));
+    const x1 = Math.max(...sorters.map((z) => z.rect.x1));
+    const temps = [...new Set(sorters.map((z) => TEMP_SHORT[z.temp ?? 'AMBIENT']))];
+    specs.push({ id: `${f.floor}-WHEEL_SORTER`, title: '휠소터', sub: temps.join('·'), style: 'EQUIP', x: (x0 + x1) / 2, row: 'band' });
+  }
   for (const z of f.zones) {
     const r = z.rect;
+    if (sorters.includes(z)) continue;
     const cx = (r.x0 + r.x1) / 2;
     const style = zoneStyle(z);
     const m = /^(.*?)\s*\((.*)\)$/.exec(z.label);
@@ -392,15 +402,21 @@ export function zoneCards(f: FloorLayout): Card[] {
       if (z.id.endsWith('AUTOSTORE')) {
         const bins = Math.max(0, ...f.shelves.filter((l) => l.bin).map((l) => l.binNo ?? 0));
         specs.push({ id: z.id, title: '오토스토어', sub: `통 ${bins.toLocaleString()}`, style, x: cx, row: 'band' });
-      } else specs.push({ id: z.id, title: m ? m[1] : z.label, sub: shortSub(m ? m[2] : null), style, x: cx, row: 'band' });
+      } else specs.push({ id: z.id, title: m ? m[1] : z.label, sub: shortSub(m ? m[2] : null), style, x: cx, row: 'band', ...(r.z1 > f.walk.roomZ + 1 ? { z: r.z1 + 0.3 } : {}) });
     }
   }
-  const shelves = f.zones.filter((z) => z.kind === 'SHELF');
-  if (shelves.length) {
-    const x0 = Math.min(...shelves.map((z) => z.rect.x0));
-    const x1 = Math.max(...shelves.map((z) => z.rect.x1));
-    const cold = shelves.every((z) => z.temp === shelves[0].temp) ? zoneStyle(shelves[0]) : 'AMBIENT';
-    specs.push({ id: `${f.floor}-SHELVES`, title: '피킹 선반', sub: `${f.shelves.filter((l) => !l.bin).length.toLocaleString()}칸`, style: cold, x: (x0 + x1) / 2, row: 'band' });
+  // 피킹 선반 — 구역 글자마다 그 선반 위에(사용자 2026-11-26 "피킹선반 쪽에 피킹선반 구역 카드를"). 전엔 층 선반 전체 가운데 하나라 엉뚱한 곳(5F 는 냉동)에 섰다
+  const byLetter = new Map<string, ZoneArea[]>();
+  for (const z of f.zones.filter((x) => x.kind === 'SHELF')) {
+    const letter = z.id.split('-')[1];
+    byLetter.set(letter, [...(byLetter.get(letter) ?? []), z]);
+  }
+  for (const [letter, zs] of byLetter) {
+    // 여러 블록이면 남쪽(카드 줄 쪽) 블록 위에
+    const front = zs.reduce((p, q) => (q.rect.z1 > p.rect.z1 ? q : p));
+    const n = f.shelves.filter((l) => l.zone === letter && !l.bin).length;
+    if (!n) continue;
+    specs.push({ id: `${f.floor}-${letter}-SHELVES`, title: `피킹 선반 ${letter}`, sub: `${n.toLocaleString()}칸`, style: zoneStyle(front), x: (front.rect.x0 + front.rect.x1) / 2, row: 'band' });
   }
   const band = f.zones.find((z) => z.kind === 'BAND');
   if (band) {
@@ -415,15 +431,26 @@ export function zoneCards(f: FloorLayout): Card[] {
   const rackZ = Math.min(...f.rows.map((w) => w.z0)) - 0.6;
   const width = Math.max(...f.zones.map((z) => z.rect.x1));
   for (const row of ['rack', 'band'] as const) {
-    const list = specs.filter((sp) => sp.row === row).sort((p, q) => p.x - q.x);
+    // 겹치면 아래 줄을 누가 먼저 갖나 — 좁은 구역(입고 검수·피킹 선반·DAS)이 먼저, 긴 설비(휠소터·DPS 컨베이어)는 위로
+    const rank = (id: string) => [/INBOUND/, /SHELVES/, /DAS|SPLIT|VEG/, /AUTOSTORE|OFFICE/, /BAND|STAGING/, /DPS/, /WHEEL_SORTER/].findIndex((re) => re.test(id));
+    const list = specs.filter((sp) => sp.row === row).sort((p, q) => (row === 'band' ? (rank(p.id) + 8) % 8 - ((rank(q.id) + 8) % 8) : 0) || p.x - q.x);
     const made = list.map((sp) => ({ sp, ...makePill(sp.title, sp.sub, ICON[sp.style], ZONE_PILL[sp.style][0], ZONE_PILL[sp.style][1], maxW) }));
     const w = CARD_H * (made[0]?.aspect ?? 1);
-    // 겹치지 않게 왼쪽부터 밀고, 오른쪽 벽을 넘으면 줄 전체를 왼쪽으로
-    const xs: number[] = [];
-    for (const m of made) xs.push(Math.max(m.sp.x, xs.length ? xs[xs.length - 1] + w + CARD_GAP : -Infinity));
-    const over = xs.length ? xs[xs.length - 1] + w / 2 - width : 0;
-    if (over > 0) for (let i = xs.length - 1; i >= 0; i--) xs[i] = Math.min(xs[i] - over, i < xs.length - 1 ? xs[i + 1] - w - CARD_GAP : Infinity);
-    made.forEach((m, i) => out.push({ id: m.sp.id, tex: m.tex, pos: [xs[i], row === 'rack' ? CARD_Y : CARD_Y_BAND, row === 'rack' ? rackZ : f.walk.roomZ], w, h: CARD_H }));
+    // 카드는 늘 자기 구역 바로 위(옆으로 밀지 않음 — 사용자 2026-11-26 "입고검수 카드를 입고검수 구역 앞으로", 밀다 보니 휠소터 카드가 냉동 쪽으로 갔음).
+    // 겹치면 한 칸 위 줄로 올린다(줄마다 높이는 같아 곧은 줄 그대로). 랙 줄은 한 줄.
+    const levelsAt = new Map<number, [number, number][][]>();
+    for (const m of made) {
+      const z = m.sp.z ?? (row === 'rack' ? rackZ : f.walk.roomZ);
+      const levels = levelsAt.get(z) ?? [];
+      levelsAt.set(z, levels);
+      const own = m.sp.z !== undefined;
+      const x = Math.min(width - w / 2, Math.max(w / 2, m.sp.x));
+      let k = 0;
+      if (row === 'band') while ((levels[k] ?? []).some(([a, b]) => x + w / 2 + CARD_GAP > a && x - w / 2 - CARD_GAP < b)) k++;
+      (levels[k] ??= []).push([x - w / 2, x + w / 2]);
+      const y = row === 'rack' || own ? CARD_Y + (own ? k * (CARD_H + 0.4) : 0) : CARD_Y_BAND + k * (CARD_H + 0.4);
+      out.push({ id: m.sp.id, tex: m.tex, pos: [x, y, z], w, h: CARD_H });
+    }
   }
   return out;
 }

@@ -230,7 +230,7 @@ function Plates({ f }: { f: FloorLayout }) {
   );
 }
 
-/** 화물 승강기 — 문(92)으로 롤테이너를 지하 B1 로 내린다. 모양은 MFC 화물 승강기와 같음, 문 앞에 사람이 오면 열린다 */
+/** 화물 승강기 — 문(92)으로 5F 상온 롤테이너를 7F 도크 층으로 올린다. 모양은 MFC 화물 승강기와 같음, 문 앞에 사람이 오면 열린다 */
 function Lifts({ f }: { f: FloorLayout }) {
   const { sim } = useApp();
   return (

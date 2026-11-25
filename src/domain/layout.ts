@@ -24,7 +24,7 @@ export interface Location {
   code: string;
   /** 화면 번호판 축약(개념도 CDC-04) — 예 C-02-24-3-1 */
   short: string;
-  floor: FloorNo | 'B1';
+  floor: FloorNo;
   zone: string;
   temp: Temp;
   type: LocationType;
@@ -220,7 +220,7 @@ export interface Layout {
 const pad2 = (n: number) => String(n).padStart(2, '0');
 
 /** 계약 LocationCode — {센터}-{구역}-{층}-{통로}-{베이}-{단}-{슬롯} [정본 CDC-3] */
-export function locationCode(zone: string, floor: FloorNo | 'B1', aisle: number, bay: number, level: number, slot: number): string {
+export function locationCode(zone: string, floor: FloorNo, aisle: number, bay: number, level: number, slot: number): string {
   return `${CENTER_ID}-${zone}-${floor}-${pad2(aisle)}-${pad2(bay)}-${level}-${slot}`;
 }
 
@@ -247,7 +247,7 @@ export function building() {
 }
 
 /** 설비 구역 id — 입고 검수는 온도대마다 하나라 온도를 붙인다 */
-export function equipZoneId(floor: FloorNo | 'B1', e: { kind: EquipKind; temp?: Temp }): string {
+export function equipZoneId(floor: FloorNo, e: { kind: EquipKind; temp?: Temp }): string {
   return `${floor}-${e.kind}${e.temp ? `-${e.temp}` : ''}`;
 }
 

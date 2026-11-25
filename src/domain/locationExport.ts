@@ -1,6 +1,6 @@
 // 칠곡 DC 배치 → cdc-location 0.2.0 LocationInput 목록 (백엔드 칠곡 시드 스크립트용, 백엔드 부탁 2026-11-25).
 // 계약: cdc-location-service.yaml 0.2.0(PR #445, 병합 전) LocationInput·POST /internal/location-batches(2,000행씩).
-// 팔레트 랙 01~60 RESERVE(5F C·D·7F G·H 1단은 박스 피킹면 PICK_FACE) · 피킹 선반·오토스토어 칸 61~89 PICK_FACE · 야채 바닥 레인 93 PICK_FACE · 출고대기 91·승강기 문 92 STAGING · 지하 접안 90 DOCK (CDC-5·7, 사용자 2026-11-25 지시문).
+// 팔레트 랙 01~60 RESERVE(5F A·B·7F E 1단은 박스 피킹면 PICK_FACE) · 피킹 선반·오토스토어 칸 61~89 PICK_FACE · 야채 바닥 레인 93 PICK_FACE · 출고대기 91·승강기 문 92 STAGING · 층마다 북쪽 벽 도크 90 DOCK (CDC-5·7, 사용자 2026-11-25 지시문).
 // 피킹면 최소·목표량은 설정값이라 비운다(null — 0 으로 대신하지 않음). 오토스토어 빈은 코드가 정해지지 않아 넣지 않는다(R-05).
 
 import { CENTER_ID, RACK } from '../config';

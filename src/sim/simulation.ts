@@ -1544,7 +1544,7 @@ export class Simulation implements DutyClock {
 
   /**
    * 자키 — ① 분류된 박스를 출고대기(91 MFC 자리)로, 저온은 보냉 커버 [현장]
-   * ② 21:00 부터(그 MFC 층 일이 끝났으면 더 일찍) 검품 합격 박스를 롤테이너째 승강기로 지하에 내린다 [현장 21시~ 하강]
+   * ② 21:00 부터(그 MFC 층 일이 끝났으면 더 일찍) 검품 합격 박스를 롤테이너째 그 온도 도크 앞으로(5F 상온은 승강기로 7F) [현장 21시~ 하강]
    */
   private async jockeyOnce(a: Agent) {
     const site = this.floorSite(a);
