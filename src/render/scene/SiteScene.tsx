@@ -8,7 +8,7 @@ import { OUTBOUND, RACK, SHELF, TMS } from '../../config';
 import { TEMP_KO } from '../../sim/simulation';
 import { B1 } from '../../sim/site';
 import type { FloorLayout, Location } from '../../domain/layout';
-import { SCENE, ZONE_COLOR } from '../colors';
+import { SCENE, ZONE_COLOR, zoneBoxColor } from '../colors';
 import { plateTexture } from '../sprites';
 import { Agents, SimDriver } from './Agents';
 import { Facility, Lights } from './Facility';
@@ -169,7 +169,9 @@ function Loads({ f }: { f: FloorLayout }) {
       tmp.scale.set(q ? d * 0.96 : 0, q ? h : 0, q ? w * 0.96 : 0);
       tmp.updateMatrix();
       loads.current!.setMatrixAt(i, tmp.matrix);
-      color.setHex(SCENE.box).offsetHSL(((i * 37) % 11) / 400 - 0.012, 0, ((i * 13) % 7) / 120 - 0.02);
+      // MFC 상자 색(zoneBoxColor): 상온 흰 상자, 저온은 구역 바닥색을 진하게 — 갈색 덩어리 대신 MFC 처럼 밝게
+      zoneBoxColor(l.temp, color);
+      color.offsetHSL(0, 0, (((i * 13) % 7) - 3) / 140);
       loads.current!.setColorAt(i, color);
     });
     decks.current!.instanceMatrix.needsUpdate = true;

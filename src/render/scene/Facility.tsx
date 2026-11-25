@@ -4,7 +4,7 @@
 //  - 구역 카드: MFC 알약 판(아이콘 + 이름 + 둘째 말). 랙 구역은 북쪽 끝 랙 위에 세우고, 선반·띠·설비는 그 구역 북쪽에 세운다
 //  - 빛: MFC Lights(반구광 + 해) — 그림자는 DC 가 넓어 끈다
 import { useFrame } from '@react-three/fiber';
-import { useMemo, useRef } from 'react';
+import { useLayoutEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { useApp } from '../../app/context';
 import { RACK, SHELF } from '../../config';
@@ -46,6 +46,7 @@ export function Facility({ f, L }: { f: FloorLayout; L: Layout }) {
       <Zones f={f} />
       <Walls f={f} L={L} />
       <ZoneCards f={f} />
+      <Walkways f={f} L={L} />
     </>
   );
 }
@@ -138,7 +139,15 @@ function Walls({ f, L }: { f: FloorLayout; L: Layout }) {
       const r = z.rect;
       out.push({ r: { x0: r.x0 - t / 2, z0: r.z0, x1: r.x0 + t / 2, z1: r.z1 }, glass: true });
       out.push({ r: { x0: r.x1 - t / 2, z0: r.z0, x1: r.x1 + t / 2, z1: r.z1 }, glass: true });
-      out.push({ r: { x0: r.x0, z0: r.z0 - t / 2, x1: r.x1, z1: r.z0 + t / 2 }, glass: true });
+      // 북쪽 벽은 문 두 곳(통로 쪽, 폭 4 m — 지게차·카트)을 비워 세 조각 [시뮬, MFC 냉동 방 문처럼]
+      const w = r.x1 - r.x0;
+      const doors = [r.x0 + w * 0.25, r.x0 + w * 0.75];
+      let x = r.x0;
+      for (const d of doors) {
+        out.push({ r: { x0: x, z0: r.z0 - t / 2, x1: d - 2, z1: r.z0 + t / 2 }, glass: true });
+        x = d + 2;
+      }
+      out.push({ r: { x0: x, z0: r.z0 - t / 2, x1: r.x1, z1: r.z0 + t / 2 }, glass: true });
     }
     return out;
   }, [f, L]);
@@ -323,6 +332,70 @@ function ZoneCards({ f }: { f: FloorLayout }) {
           <meshBasicMaterial map={t.tex} transparent depthWrite={false} toneMapped={false} side={THREE.DoubleSide} />
         </mesh>
       ))}
+    </>
+  );
+}
+
+/**
+ * 걷는 길 표시 — MFC Decor.Walkways 와 같은 모양(흰 점선 + 화살표). 사람·카트·지게차가 실제로 다니는 통로망(WalkNet)을 그린다:
+ * 북쪽 통로(승강기·출고대기 ↔ 선반·설비) · 랙 앞 가로 통로 · 서쪽 벽 연결 통로.
+ */
+export function Walkways({ f, L }: { f: FloorLayout; L: Layout }) {
+  const dashes = useRef<THREE.InstancedMesh>(null!);
+  const arrows = useRef<THREE.InstancedMesh>(null!);
+  const { segs, heads } = useMemo(() => {
+    const { northZ, rackZ, westX } = f.walk;
+    const lines: [number, number, number, number][] = [
+      [westX, northZ, L.width - 1, northZ],
+      [westX, rackZ, L.width - 1, rackZ],
+      [westX, northZ, westX, rackZ],
+    ];
+    const segs: { x: number; z: number; len: number; alongX: boolean }[] = [];
+    const heads: { x: number; z: number; rot: number }[] = [];
+    for (const [x0, z0, x1, z1] of lines) {
+      const alongX = Math.abs(x1 - x0) >= Math.abs(z1 - z0);
+      const a0 = alongX ? x0 : z0;
+      const a1 = alongX ? x1 : z1;
+      for (let a = a0; a < a1; a += 0.9) {
+        const len = Math.min(0.5, a1 - a);
+        segs.push(alongX ? { x: a + len / 2, z: z0, len, alongX } : { x: x0, z: a + len / 2, len, alongX });
+      }
+      for (let a = a0 + 2.2; a < a1 - 1; a += 5.4) heads.push(alongX ? { x: a, z: z0 + 0.45, rot: 0 } : { x: x0 + 0.45, z: a, rot: Math.PI / 2 });
+    }
+    return { segs, heads };
+  }, [f, L]);
+  const tri = useMemo(() => {
+    const s = new THREE.Shape();
+    s.moveTo(0.28, 0);
+    s.lineTo(-0.18, 0.2);
+    s.lineTo(-0.08, 0);
+    s.lineTo(-0.18, -0.2);
+    s.closePath();
+    return new THREE.ShapeGeometry(s).rotateX(-Math.PI / 2);
+  }, []);
+  useLayoutEffect(() => {
+    const m = new THREE.Matrix4();
+    const q = new THREE.Quaternion();
+    segs.forEach((s, i) => {
+      m.compose(new THREE.Vector3(s.x, 0.02, s.z), q, s.alongX ? new THREE.Vector3(s.len, 0.004, 0.1) : new THREE.Vector3(0.1, 0.004, s.len));
+      dashes.current.setMatrixAt(i, m);
+    });
+    heads.forEach((h, i) => {
+      m.compose(new THREE.Vector3(h.x, 0.022, h.z), new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), -h.rot), new THREE.Vector3(1.4, 1, 1.4));
+      arrows.current.setMatrixAt(i, m);
+    });
+    dashes.current.instanceMatrix.needsUpdate = true;
+    arrows.current.instanceMatrix.needsUpdate = true;
+  }, [segs, heads]);
+  return (
+    <>
+      <instancedMesh ref={dashes} args={[undefined, undefined, segs.length]} raycast={() => null} frustumCulled={false}>
+        <boxGeometry args={[1, 1, 1]} />
+        <meshBasicMaterial color={0xffffff} />
+      </instancedMesh>
+      <instancedMesh ref={arrows} args={[tri, undefined, heads.length]} raycast={() => null} frustumCulled={false}>
+        <meshBasicMaterial color={0xffffff} side={THREE.DoubleSide} />
+      </instancedMesh>
     </>
   );
 }
