@@ -2,7 +2,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { checkReadiness, READINESS_KO, type ProbeResult } from '../backend/http/readiness';
 import { useApp, useTick, useView } from '../app/context';
-import { CDC_FACTS, MFCS, OUTBOUND, SHIFT, WORK, WORKFORCE } from '../config';
+import { CDC_FACTS, MFCS, OUTBOUND, SHIFT, WORK, WORKFORCE, RACK } from '../config';
 import { ROLE_KO, type Role } from '../sim/agent';
 import type { ZoneArea } from '../domain/layout';
 
@@ -107,7 +107,7 @@ function ZoneInfo() {
       )}
       <Sec title={f.label} aside={`문서 ${(Object.values(f.spec.docPyeong.storage).reduce((a, b) => a + b, 0) + f.spec.docPyeong.dt).toLocaleString()}평`}>
         {f.spec.zones.map((z) => (
-          <Row key={z.letter} k={z.label} v={`통로 ${z.aisles} · ${z.levels}단`} />
+          <Row key={z.letter} k={z.label} v={`통로 ${f.aisles.filter((a) => a.zone === z.letter).length} · ${z.levels}단`} />
         ))}
         <Row k="팔레트 칸" v={f.locations.length.toLocaleString()} />
         <Row k="선반 칸" v={`${f.shelves.length.toLocaleString()} (통로 ${f.shelfAisles.map((a) => a.plate).join('·')})`} />
@@ -116,7 +116,8 @@ function ZoneInfo() {
         {f.equipment.map((e) => (
           <Row key={e.label} k="설비" v={e.label} />
         ))}
-        <Row k="배치 면적" v={`보관 ${Math.round(f.layoutPyeong.storage).toLocaleString()} · 그 밖 ${Math.round(f.layoutPyeong.band).toLocaleString()}평`} />
+        <Row k="배치 면적" v={`보관 ${Math.round(f.layoutPyeong.storage).toLocaleString()} · DT ${Math.round(f.layoutPyeong.band).toLocaleString()}평 (문서 그대로)`} />
+        <Row k="랙 묶음" v={`${f.rows.length / 2}개 (12개 × 양면 = 24개, 통로 ${RACK.aisleW}m)`} />
       </Sec>
     </>
   );

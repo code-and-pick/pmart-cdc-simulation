@@ -135,10 +135,15 @@ function Walls({ f, L }: { f: FloorLayout; L: Layout }) {
       { r: { x0: L.width, z0: 0, x1: L.width + t, z1: L.depth }, glass: false },
     ];
     // 냉동 방 — 5F 냉동 랙 구역 둘레(남쪽은 바깥벽). 유리처럼 옅게
-    for (const z of f.zones.filter((x) => x.kind === 'RACK' && x.temp === 'FROZEN')) {
-      const r = z.rect;
-      out.push({ r: { x0: r.x0 - t / 2, z0: r.z0, x1: r.x0 + t / 2, z1: r.z1 }, glass: true });
-      out.push({ r: { x0: r.x1 - t / 2, z0: r.z0, x1: r.x1 + t / 2, z1: r.z1 }, glass: true });
+    for (const room of f.rooms.filter((x) => x.temp === 'FROZEN')) {
+      const r = room.rect;
+      const rz = f.walk.rackZ;
+      for (const x of [r.x0, r.x1]) {
+        if (x <= 0.01 || x >= L.width - 0.01) continue; // 바깥벽과 겹침
+        // 옆벽은 랙 앞 가로 통로 자리(폭 4 m)를 비운다 — 지게차가 이웃 방에서 드나듦
+        out.push({ r: { x0: x - t / 2, z0: r.z0, x1: x + t / 2, z1: rz - 2 }, glass: true });
+        out.push({ r: { x0: x - t / 2, z0: rz + 2, x1: x + t / 2, z1: r.z1 }, glass: true });
+      }
       // 북쪽 벽은 문 두 곳(통로 쪽, 폭 4 m — 지게차·카트)을 비워 세 조각 [시뮬, MFC 냉동 방 문처럼]
       const w = r.x1 - r.x0;
       const doors = [r.x0 + w * 0.25, r.x0 + w * 0.75];
@@ -298,7 +303,7 @@ export function zoneCards(f: FloorLayout): Card[] {
       const m = /^(.*?)\s*\((.*)\)$/.exec(z.label);
       const title = m ? m[1] : z.label;
       const note = m ? `${m[2]} · ` : '';
-      out.push(card(z.id, title, `${note}통로 ${aisles} · ${(aisles * RACK.baysPerSide * 2 * RACK.levels * RACK.slots).toLocaleString()}칸`, style, cx, RACK_TOP + 0.4, r.z0 + 0.3, 3.4, (r.x1 - r.x0) * 0.96));
+      out.push(card(z.id, title, `${note}통로 ${aisles} · ${f.locations.filter((l) => l.zone === letter).length.toLocaleString()}칸`, style, cx, RACK_TOP + 0.4, Math.min(...f.rows.map((w) => w.z0)) - 0.6, 3.4, (r.x1 - r.x0) * 0.96));
     } else if (z.kind === 'EQUIP') {
       const m = /^(.*?)\s*\((.*)\)$/.exec(z.label);
       out.push(card(z.id, m ? m[1] : z.label, m ? m[2] : null, style, cx, 2.6, r.z0 + 0.3, 2.6, (r.x1 - r.x0) * 0.96));
@@ -344,9 +349,10 @@ export function Walkways({ f, L }: { f: FloorLayout; L: Layout }) {
   const dashes = useRef<THREE.InstancedMesh>(null!);
   const arrows = useRef<THREE.InstancedMesh>(null!);
   const { segs, heads } = useMemo(() => {
-    const { northZ, rackZ, westX } = f.walk;
+    const { northZ, roomZ, rackZ, westX } = f.walk;
     const lines: [number, number, number, number][] = [
       [westX, northZ, L.width - 1, northZ],
+      [westX, roomZ, L.width - 1, roomZ],
       [westX, rackZ, L.width - 1, rackZ],
       [westX, northZ, westX, rackZ],
     ];

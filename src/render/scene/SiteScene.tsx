@@ -77,7 +77,7 @@ function Racks({ f }: { f: FloorLayout }) {
   const posts = useRef<THREE.InstancedMesh>(null);
   const beams = useRef<THREE.InstancedMesh>(null);
   const braces = useRef<THREE.InstancedMesh>(null);
-  const uprights = RACK.baysPerSide + 1;
+  const uprights = RACK.bundleBays + 1; // 줄(RackRow) 하나 = 묶음 한쪽 12개
   const panels = Math.round(RACK.height / BRACE_STEP);
   const counts = useMemo(() => {
     let b = 0;
@@ -198,13 +198,14 @@ function Plates({ f }: { f: FloorLayout }) {
   const y = (lv: number) => lv * RACK.levelH + 0.9;
   return (
     <>
-      {f.aisles.map((a) => {
+      {f.aisles.flatMap((a) => {
         const levels = f.spec.zones.find((z) => z.letter === a.zone)!.levels;
-        return (
-          <sprite key={a.plate} position={[a.cx, y(levels), f.rows[0].z0 - 0.4]} scale={[2.4, 1.2, 1]}>
+        // 묶음 줄마다 북쪽 끝 위(가로 통로에서 보이게)
+        return [...new Set(f.rows.map((r) => r.z0))].map((z0) => (
+          <sprite key={`${a.plate}@${z0}`} position={[a.cx, y(levels), z0 - 0.4]} scale={[2.4, 1.2, 1]}>
             <spriteMaterial map={plateTexture(a.plate)} depthWrite={false} />
           </sprite>
-        );
+        ));
       })}
     </>
   );

@@ -1,5 +1,5 @@
 // 층마다 걷는 자리와 길 [시뮬]. 사람·카트·지게차는 통로망(WalkNet)만 따라 움직인다:
-//   북쪽 통로(승강기·출고대기와 선반 사이) · 선반 통로(남북) · 랙 앞 가로 통로 · 랙 통로(남북) · 서쪽 벽 연결 통로.
+//   북쪽 통로(승강기·출고대기 앞) · 보관 방 북쪽 벽 앞 통로 · 선반 통로(남북) · 랙 앞 가로 통로 · 랙 통로(남북) · 서쪽 벽 연결 통로.
 // React·three 에 의존하지 않는다.
 
 import type { FloorLayout, Layout, Location } from '../domain/layout';
@@ -60,8 +60,8 @@ export class FloorSite {
 
   /** 길: from → to 를 지나는 점들(from 제외) */
   route(from: WalkPoint, to: WalkPoint): P[] {
-    const { northZ, rackZ, westX } = this.f.walk;
-    const corr = (p: WalkPoint) => (p.lane === 'N' ? [northZ] : p.lane === 'R' ? [rackZ] : [northZ, rackZ]);
+    const { northZ, roomZ, rackZ, westX } = this.f.walk;
+    const corr = (p: WalkPoint) => (p.lane === 'N' ? [northZ] : p.lane === 'R' ? [rackZ] : [roomZ, rackZ]);
     const cf = corr(from);
     const ct = corr(to);
     const common = cf.filter((c) => ct.includes(c));

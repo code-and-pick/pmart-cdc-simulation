@@ -12,7 +12,8 @@ export interface RackZoneSpec {
   letter: 'A' | 'B' | 'C' | 'D' | 'E' | 'F' | 'G' | 'H';
   temp: Temp;
   label: string;
-  aisles: number;
+  /** 그 온도대 방 안에서 팔레트 통로를 나눌 몫 — 통로 수는 방 면적에서 나온다(layout.sitePlan) [가정] */
+  share: number;
   /** 단 수 — 모든 구역 4(1 피킹·2 보충 대기·3~4 리저브) [사용자 2026-11-25 랙 규격] */
   levels: number;
 }
@@ -25,27 +26,27 @@ export interface FloorSpec {
   label: string;
   /** 왼쪽(서쪽)부터 놓을 랙 구역 순서 */
   zones: RackZoneSpec[];
-  /** 문서 면적(평) — 배치 면적과 조금 다를 수 있다 [정본 CDC-2] */
+  /** 문서 면적(평) — 보관 방은 이 평수 그대로, 나머지가 DT [정본 CDC-2, 사용자 2026-11-25 문서 면적 고정] */
   docPyeong: { storage: Record<string, number>; dt: number };
   /** 출고대기(91)·승강기 문(92)에 쓰는 구역 글자 — 그 층 구역 [정본 CDC-5] */
   stagingLetters: ('A' | 'B' | 'C' | 'G')[];
   liftLetter: 'B' | 'C' | 'G';
-  /** 남는 폭(랙 동쪽)·도크 띠에 놓을 설비 */
-  equipment: { kind: EquipKind; label: string; where: 'band' | 'east' }[];
+  /** 설비 자리 — band 북쪽 띠, east 보관 방 동쪽 DT, storage 그 방(room) 북쪽 블록(보관 면적 안, 사용자 2026-11-25) */
+  equipment: { kind: EquipKind; label: string; where: 'band' | 'east' | 'storage'; room?: string }[];
 }
 
-const amb = (letter: RackZoneSpec['letter'], label: string, aisles: number): RackZoneSpec => ({ letter, temp: 'AMBIENT', label, aisles, levels: RACK.levels });
+const amb = (letter: RackZoneSpec['letter'], label: string, share = 1): RackZoneSpec => ({ letter, temp: 'AMBIENT', label, share, levels: RACK.levels });
 
 export const CHILGOK_FLOORS: FloorSpec[] = [
   {
     floor: 5,
     label: '5F 상온·냉동',
     zones: [
-      amb('C', '상온 C (무거운 상자)', 3),
-      amb('D', '상온 D (무거운 상자)', 3),
-      amb('E', '상온 E', 3),
-      amb('F', '상온 F (인기상품)', 3),
-      { letter: 'A', temp: 'FROZEN', label: '냉동 A', aisles: 12, levels: RACK.levels },
+      amb('C', '상온 C (무거운 상자)'),
+      amb('D', '상온 D (무거운 상자)'),
+      amb('E', '상온 E'),
+      amb('F', '상온 F (인기상품)'),
+      { letter: 'A', temp: 'FROZEN', label: '냉동 A', share: 1, levels: RACK.levels },
     ],
     docPyeong: { storage: { 상온: 1233, 냉동: 1000 }, dt: 633 },
     stagingLetters: ['C', 'A'],
@@ -54,13 +55,13 @@ export const CHILGOK_FLOORS: FloorSpec[] = [
       { kind: 'WHEEL_SORTER', label: '1차 고속분류기(휠소터)', where: 'band' },
       { kind: 'DPS', label: 'DPS (냉동)', where: 'band' },
       // 백엔드 R-10 회신: E·F 각 01~03 은 오토스토어(R-09 그대로)
-      { kind: 'AUTOSTORE', label: '오토스토어 (E·F)', where: 'band' },
+      { kind: 'AUTOSTORE', label: '오토스토어 (E·F)', where: 'storage', room: '상온' },
     ],
   },
   {
     floor: 6,
     label: '6F 냉장',
-    zones: [{ letter: 'B', temp: 'CHILLED', label: '냉장 B', aisles: 18, levels: RACK.levels }],
+    zones: [{ letter: 'B', temp: 'CHILLED', label: '냉장 B', share: 1, levels: RACK.levels }],
     docPyeong: { storage: { 냉장: 1700 }, dt: 1167 },
     stagingLetters: ['B'],
     liftLetter: 'B',
@@ -72,10 +73,10 @@ export const CHILGOK_FLOORS: FloorSpec[] = [
   {
     floor: 7,
     label: '7F 생활용품',
-    zones: [amb('G', '생활용품 G', 10), amb('H', '생활용품 H', 10)],
+    zones: [amb('G', '생활용품 G'), amb('H', '생활용품 H')],
     docPyeong: { storage: { 상온: 2067 }, dt: 800 },
     stagingLetters: ['G'],
     liftLetter: 'G',
-    equipment: [{ kind: 'AUTOSTORE', label: '오토스토어 (비식재)', where: 'east' }],
+    equipment: [{ kind: 'AUTOSTORE', label: '오토스토어 (비식재)', where: 'storage', room: '상온' }],
   },
 ];

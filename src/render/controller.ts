@@ -93,7 +93,7 @@ export class ViewController extends Emitter {
     const all: ZoneView = { key: 'ALL', label: '전체', rect: this.floor === 'B1' ? { x0: 0, z0: -9, x1: b1Right, z1: 15 } : { x0: 0, z0: 0, x1: L.width, z1: L.depth } };
     const f = this.floorLayout();
     if (!f) return [all];
-    return [all, ...f.zones.map((z) => ({ key: z.id, label: z.kind === 'BAND' ? '출고대기·승강기' : z.label, rect: z.rect }))];
+    return [all, ...f.zones.map((z) => ({ key: z.id, label: z.kind === 'BAND' && z.id.endsWith('-BAND') ? '출고대기·승강기' : z.label, rect: z.rect }))];
   }
 
   setFloor(fl: FloorKey) {
@@ -116,9 +116,10 @@ export class ViewController extends Emitter {
     const cx = (r.x0 + r.x1) / 2;
     const cz = (r.z0 + r.z1) / 2;
     const dist = this.zoneDist(v);
-    // 전체(층): 일이 몰리는 북쪽 띠(승강기·출고대기·선반·분류)가 화면 위에 들어오게 보는 점을 북쪽으로 [시뮬]
-    const target = new THREE.Vector3(cx, 0, key === 'ALL' ? (this.floor === 'B1' ? cz + 1 : cz - dist * 0.22) : cz - dist * 0.12);
-    const pos = key === 'ALL' ? new THREE.Vector3(cx, dist * 0.78, cz + dist * 0.72) : new THREE.Vector3(cx, dist * 0.92, cz + dist * 0.42);
+    // 전체(층): 남북으로 긴 층(약 81 × 117 m)이 다 들어오게 더 내려다본다 [시뮬]. B1 은 예전 각도
+    const b1 = this.floor === 'B1';
+    const target = new THREE.Vector3(cx, 0, key === 'ALL' ? (b1 ? cz + 1 : cz + dist * 0.03) : cz - dist * 0.12);
+    const pos = key === 'ALL' ? (b1 ? new THREE.Vector3(cx, dist * 0.78, cz + dist * 0.72) : new THREE.Vector3(cx, dist * 0.9, cz + dist * 0.38)) : new THREE.Vector3(cx, dist * 0.92, cz + dist * 0.42);
     this.cameraRequest = { pos, target, animate };
     this.emit();
   }
@@ -127,8 +128,8 @@ export class ViewController extends Emitter {
   zoneDist(v: ZoneView): number {
     const w = v.rect.x1 - v.rect.x0;
     const d = v.rect.z1 - v.rect.z0;
-    // 전체: 층 전체(120 × 79 m)가 들어오되 랙 번호판이 읽힐 만큼 [시뮬]. B1 은 좁아 더 가깝게
-    if (v.key === 'ALL') return Math.max(w, d) * (this.floor === 'B1' ? 0.75 : 0.62);
+    // 전체: 층 전체가 들어오게 [시뮬]. B1 은 좁아 더 가깝게
+    if (v.key === 'ALL') return this.floor === 'B1' ? Math.max(w, d) * 0.75 : Math.max(w * 1.2, d * 1.3);
     return Math.max(w, d * 1.3) * 0.7 + 2.5;
   }
 
