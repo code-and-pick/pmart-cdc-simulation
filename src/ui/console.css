@@ -1338,3 +1338,13 @@ details.sec > summary h4 { justify-content: flex-start; gap: 6px; }
 .mfc-chips span { display: grid; grid-template-columns: 54px 1fr auto; align-items: center; gap: 8px; font-size: 12px; font-weight: 600; }
 .mfc-chips i { font-style: normal; font-size: 10px; font-weight: 800; text-align: center; padding: 2px 0; border-radius: 5px; background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); }
 .mfc-chips small { font-size: 10.5px; color: var(--muted); font-weight: 500; }
+/* 도움말 — 작업자별 작업 흐름(사용자 2026-11-26) */
+.help .role-flows { list-style: none; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.role-flows > li { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
+.role-flows > li + li { margin-top: 0; }
+.rf-h { display: flex; flex-direction: column; gap: 1px; margin-bottom: 6px; }
+.rf-h b { font-size: 13px; color: var(--text); }
+.rf-h span { font-size: 11px; color: var(--muted); }
+.rf-steps { margin: 0; padding-left: 18px; font-size: 12px; line-height: 1.5; }
+.rf-steps li + li { margin-top: 2px; }
+.rf-steps li::marker { color: var(--accent); font-weight: 700; }
