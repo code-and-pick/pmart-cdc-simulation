@@ -461,7 +461,7 @@ export class Simulation implements DutyClock {
   }
 
   private planTrips() {
-    // 22:00 R/T 카운팅 — TRF 마다 R/T 수(출고대기·지하 마당·아직 오는 박스) → 한 대 R/T 를 넘으면 용차
+    // 22:00 R/T 카운팅 — TRF 마다 R/T 수(출고대기·지하 마당·아직 오는 박스) → 한 대 R/T 를 넘으면 알림(용차 없음 — 모두 정규차, 사용자 2026-11-25)
     const rtByTrf = new Map<string, number>();
     const boxes = [...[...this.staged.values()].flat(), ...this.atB1.flatMap((r) => r.boxes)];
     for (const t of this.backend.listTransfers()) rtByTrf.set(t.trfId, Math.ceil(boxes.filter((b) => b.trfId === t.trfId).length / OUTBOUND.boxesPerRt));

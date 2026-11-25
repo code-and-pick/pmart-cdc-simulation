@@ -154,19 +154,8 @@ export class MockTms {
    * 22:00~22:30 배차 — 고정 노선 × 온도대마다 운행 하나. 이관요청서(TRF) 1건 = 차 1대(나누지 않음, D-10).
    * 물량 0 인 노선·온도대는 결행. 실서버는 plan-candidates → assignments(CONFIRMED) 경로(설계 §12 ⑧).
    */
-  /** 용차(외부 임차 차량) — 정규차 R/T 가 넘칠 때 22:00 배차에서 더한다 [CDC-8 "잔량·용차", 시뮬] */
-  private hire(temp: 'AMBIENT' | 'CHILLED' | 'FROZEN'): { vehicle: Vehicle; driver: Driver } {
-    const n = this.vehicles.filter((v) => v.vehicleId.startsWith('VH-X')).length + 1;
-    const no = String(n).padStart(2, '0');
-    const vehicle: Vehicle = { vehicleId: `VH-X${no}`, plateNo: `칠곡-용차-${no}${TEMP_CODE[temp]}`, vehicleClass: TMS.vehicle.vehicleClass, status: 'AVAILABLE', version: 0, depot: CENTER_ID, maxWeightKg: TMS.vehicle.maxWeightKg, compartments: [{ compartmentId: `VH-X${no}-1`, tempClass: temp }], maxRt: TMS.vehicle.maxRt };
-    const driver: Driver = { driverId: `DR-X${no}`, displayName: `용차 기사 ${no}`, status: 'AVAILABLE', homeDepot: CENTER_ID };
-    this.vehicles.push(vehicle);
-    this.drivers.push(driver);
-    return { vehicle, driver };
-  }
-
   /**
-   * 하루 배차 — 고정 노선 × 온도대 한 대. rtByTrf(22:00 R/T 카운팅)가 있으면 한 대 R/T 를 넘는 노선은 정차(MFC)를 나눠 용차로(TRF 는 나누지 않는다 — 1요청·1이관·1출발).
+   * 하루 배차 — 고정 노선 × 온도대 정규차 한 대. 용차는 쓰지 않는다(사용자 2026-11-25 "용차는 안 해, 모두 정규차로 본다") — rtByTrf(22:00 R/T 카운팅)로 한 대 R/T 를 넘으면 알림만 남긴다.
    */
   planDay(trfs: TransferIntake[], dayStartMin = 0, rtByTrf?: Map<string, number>): TripPlan[] {
     return this.run('POST', '/assignments', 202, () => {
@@ -179,22 +168,10 @@ export class MockTms {
           vi += 1;
           const allStops = r.stops.map((mfcId) => ({ mfcId, trfIds: trfs.filter((t) => t.mfcId === mfcId && trfTemp(t) === temp && t.state !== 'CANCELLED').map((t) => t.trfId) })).filter((s) => s.trfIds.length);
           if (!allStops.length) continue; // 결행
-          // 정차마다 R/T — 한 대에 넘치면 뒤 정차부터 용차로
-          const rtOf = (st: { trfIds: string[] }) => st.trfIds.reduce((a, id) => a + (rtByTrf?.get(id) ?? 0), 0);
-          const groups: { trfIds: string[]; mfcId: string }[][] = [[]];
-          let load = 0;
-          for (const st of allStops) {
-            const n = rtOf(st);
-            if (groups[groups.length - 1].length && load + n > TMS.vehicle.maxRt) {
-              groups.push([]);
-              load = 0;
-            }
-            groups[groups.length - 1].push(st);
-            load += n;
-          }
-          for (const [gi, stops] of groups.entries()) {
-          const vehicle = gi === 0 ? vehicle0 : this.hire(temp).vehicle;
-          const driver = gi === 0 ? driver0 : this.drivers[this.drivers.length - 1];
+          const stops = allStops;
+          const vehicle = vehicle0;
+          const driver = driver0;
+          const rt = stops.reduce((a, st) => a + st.trfIds.reduce((b, id) => b + (rtByTrf?.get(id) ?? 0), 0), 0);
           const legs = [`${CENTER_ID}>${stops[0].mfcId}`, ...stops.slice(1).map((s, i) => `${stops[i].mfcId}>${s.mfcId}`)];
           const travel = legs.map((k) => TMS.travelMin[k] ?? 120);
           const depart = Math.max(dayStartMin + 23 * 60, dayStartMin + TMS.firstArrivalTarget - travel[0]);
@@ -236,8 +213,7 @@ export class MockTms {
           vehicle.status = 'RESERVED';
           driver.status = 'RESERVED';
           out.push(structuredClone(plan));
-          this.emit('TripAssigned', `${tripId} ${r.region} ${temp} ${vehicle.plateNo} · ${driver.displayName} · 출차 ${fmt(depart)}${gi ? ' (용차 — R/T 넘침)' : ''}`);
-          }
+          this.emit('TripAssigned', `${tripId} ${r.region} ${temp} ${vehicle.plateNo} · ${driver.displayName} · 출차 ${fmt(depart)}${rt > TMS.vehicle.maxRt ? ` · R/T ${rt}/${TMS.vehicle.maxRt} 넘침(정규차로 봄)` : ''}`);
         }
       }
       return out;
