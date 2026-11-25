@@ -2,7 +2,7 @@
 // 사람은 MFC Humanoid 모형, 조끼 색 = 역할: FC 파랑 · 분배/라인 초록 · 자키 주황 · 검품 보라 · 도크 상차 청록. 지게차 보충은 입식 리치 지게차(사용자 사진). 누르면 PDA 카드.
 
 import { useFrame } from '@react-three/fiber';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
 import * as THREE from 'three';
 import { useApp, useView } from '../../app/context';
 import type { Agent, Role } from '../../sim/agent';
@@ -62,6 +62,10 @@ function Person({ a, selected }: { a: Agent; selected: boolean }) {
   const roll = useRef<THREE.Group>(null);
   const coldRoll = useRef<THREE.Group>(null);
   const jack = useRef<THREE.Group>(null);
+  const jackRoll = useRef<THREE.Group>(null);
+  const jackColdRoll = useRef<THREE.Group>(null);
+  // 자키는 R/T 를 핸드자키에 얹어 끈다(사용자 2026-11-26 "자키 작업 중엔 자키를 끌고 다니게") — 상차 작업자는 R/T 를 그대로 민다
+  const jockey = a.role === 'JOCKEY';
   const load = useRef<THREE.Group>(null);
   const truckG = useRef<THREE.Group>(null);
   const truck = a.role === 'REPL';
@@ -85,8 +89,10 @@ function Person({ a, selected }: { a: Agent; selected: boolean }) {
       truckG.current.rotation.y = pk ? pk.heading : a.heading;
     }
     cart.current!.visible = a.carrying === 'CART';
-    roll.current!.visible = a.carrying === 'ROLL' && !a.cold;
-    coldRoll.current!.visible = a.carrying === 'ROLL' && a.cold;
+    roll.current!.visible = !jockey && a.carrying === 'ROLL' && !a.cold;
+    coldRoll.current!.visible = !jockey && a.carrying === 'ROLL' && a.cold;
+    jackRoll.current!.visible = jockey && a.carrying === 'ROLL' && !a.cold;
+    jackColdRoll.current!.visible = jockey && a.carrying === 'ROLL' && a.cold;
     jack.current!.visible = !truck && a.carrying === 'PALLET';
     if (load.current) load.current.visible = a.carrying === 'PALLET';
   });
@@ -113,7 +119,18 @@ function Person({ a, selected }: { a: Agent; selected: boolean }) {
       <group ref={coldRoll} position={[0, 0, 0.78]} visible={false}>
         <RollContainer x={0} z={0} cold fill={0.6} />
       </group>
-      {/* 라인 자키: 핸드자키(손 팔레트 트럭) + 상품 박스 팔레트 */}
+      {/* 자키: 핸드자키 포크 위 R/T */}
+      <group ref={jackRoll} position={[0, 0, 0.95]} visible={false}>
+        <HandJack>
+          <RollContainer x={0} z={0} fill={0.6} />
+        </HandJack>
+      </group>
+      <group ref={jackColdRoll} position={[0, 0, 0.95]} visible={false}>
+        <HandJack>
+          <RollContainer x={0} z={0} cold fill={0.6} />
+        </HandJack>
+      </group>
+      {/* 핸드자키(손 팔레트 트럭) + 상품 박스 팔레트 */}
       <group ref={jack} position={[0, 0, 0.95]} visible={false}>
         <HandJack />
       </group>
@@ -197,8 +214,8 @@ function PalletLoad({ h = 0.9 }: { h?: number }) {
   );
 }
 
-/** 핸드자키 — 빨간 손잡이·포크 + 팔레트 */
-function HandJack() {
+/** 핸드자키 — 빨간 손잡이·포크 + 짐(기본 = 상품 박스 팔레트, 자키는 R/T) */
+function HandJack({ children }: { children?: ReactNode }) {
   return (
     <group>
       <mesh position={[0, 0.55, -0.62]} rotation-x={-0.25}>
@@ -215,9 +232,7 @@ function HandJack() {
           <meshStandardMaterial color={0xd83a2e} />
         </mesh>
       ))}
-      <group position={[0, 0.05, 0]}>
-        <PalletLoad h={0.6} />
-      </group>
+      <group position={[0, children ? 0.09 : 0.05, 0]}>{children ?? <PalletLoad h={0.6} />}</group>
     </group>
   );
 }

@@ -157,6 +157,34 @@ export class MockTms {
   /**
    * 하루 배차 — 고정 노선 × 온도대 정규차 한 대. 용차는 쓰지 않는다(사용자 2026-11-25 "용차는 안 해, 모두 정규차로 본다") — rtByTrf(22:00 R/T 카운팅)로 한 대 R/T 를 넘으면 알림만 남긴다.
    */
+  /**
+   * 오늘 운행 미리 보기(MOCK 내부, 부작용 없음) — 22:00 배차 전에도 운송 탭에 노선 × 온도대 정규차·기사·출차·정차 도착 예정을 보인다(사용자 2026-11-26 "운송 탭 오른쪽에 나오는 걸 보고 싶다").
+   * 계획 시각은 planDay 와 같은 공식. 결행(그 날 물량 0)은 배차 때 정해진다.
+   */
+  previewDay(dayStartMin = 0): { routeId: string; region: string; temp: 'AMBIENT' | 'CHILLED' | 'FROZEN'; plateNo: string; driverName: string; departMin: number; stops: { mfcId: string; arriveMin: number }[]; returnMin: number }[] {
+    const out = [];
+    let vi = 0;
+    for (const r of TMS.routes)
+      for (const temp of ['AMBIENT', 'CHILLED', 'FROZEN'] as const) {
+        const v = this.vehicles[vi];
+        const d = this.drivers[vi];
+        vi += 1;
+        const legs = [`${CENTER_ID}>${r.stops[0]}`, ...r.stops.slice(1).map((s, i) => `${r.stops[i]}>${s}`)];
+        const travel = legs.map((k) => TMS.travelMin[k] ?? 120);
+        const depart = Math.max(dayStartMin + 23 * 60, dayStartMin + TMS.firstArrivalTarget - travel[0]);
+        let t = depart;
+        const stops = r.stops.map((mfcId, i) => {
+          t += travel[i];
+          const arriveMin = t;
+          t += TMS.unloadMin;
+          return { mfcId, arriveMin };
+        });
+        const back = TMS.travelMin[`${r.stops[r.stops.length - 1]}>${CENTER_ID}`] ?? travel[0];
+        out.push({ routeId: r.routeId, region: r.region, temp, plateNo: v?.plateNo ?? '', driverName: d?.displayName ?? '', departMin: depart, stops, returnMin: t + back });
+      }
+    return out;
+  }
+
   planDay(trfs: TransferIntake[], dayStartMin = 0, rtByTrf?: Map<string, number>): TripPlan[] {
     return this.run('POST', '/assignments', 202, () => {
       const out: TripPlan[] = [];

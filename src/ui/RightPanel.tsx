@@ -425,7 +425,55 @@ function Transport() {
       <div className="note">고른 MFC 로 가는 운행이 없습니다.</div>
     </>
   );
-  if (!runs.length) return <div className="note">22:00 배차 전입니다. 배차는 고정 노선 × 온도대(차 한 대 = 온도대 하나, 5톤 {TMS.vehicle.maxRt} R/T)로 정하고, 출차는 max(23:00, 첫 MFC 도착 목표 − 주행)입니다.</div>;
+  if (!runs.length) {
+    // 22:00 배차 전 — 정규차 노선표 미리 보기(사용자 2026-11-26 "운송 탭 오른쪽에 나오는 걸 보고 싶다")
+    const pre = sim.tms.previewDay().filter((p) => !view.mfcFilter || p.stops.some((s) => s.mfcId === view.mfcFilter));
+    return (
+      <>
+        <div className="pick-row">
+          <MfcPick />
+        </div>
+        <div className="note">
+          22:00 배차 전 — 오늘 운행 예정(정규차, 노선 × 온도대 차 한 대, 5톤 {TMS.vehicle.maxRt} R/T). 물량 없는 운행은 배차 때 결행.
+        </div>
+        <table className="inv">
+          <thead>
+            <tr>
+              <th>노선</th>
+              <th>차·기사</th>
+              <th>출차</th>
+              <th>정차 (도착 예정)</th>
+              <th>상태</th>
+            </tr>
+          </thead>
+          <tbody>
+            {pre.map((p) => (
+              <tr key={`${p.routeId}-${p.temp}`}>
+                <td>
+                  {p.region} {TEMP_KO[p.temp]}
+                </td>
+                <td>
+                  {p.plateNo}
+                  <br />
+                  {p.driverName}
+                </td>
+                <td>{fmt(p.departMin)}</td>
+                <td>
+                  {p.stops.map((s) => (
+                    <div key={s.mfcId}>
+                      {MFCS.find((m) => m.id === s.mfcId)?.name.replace(/^\d호점 /, '')} {fmt(s.arriveMin)}
+                    </div>
+                  ))}
+                  <div className="muted">복귀 {fmt(p.returnMin)}</div>
+                </td>
+                <td>배차 전</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </>
+    );
+  }
   return (
     <>
     <div className="pick-row">

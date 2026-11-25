@@ -362,14 +362,12 @@ interface Card {
 /** 카드 높이(m)·세우는 높이 — 모든 구역 카드가 같은 크기·같은 높이(사용자 2026-11-25 "크기·높낮이 다 다름, 일직선으로") */
 const CARD_H = 2.6;
 const CARD_Y = RACK_TOP + 0.4 + CARD_H / 2;
-/** 설비 줄은 랙 줄 바로 위 한 줄 — 두 줄 모두 곧은 줄(같은 높이끼리) */
-const CARD_Y_BAND = CARD_Y + CARD_H + 0.5;
 const CARD_GAP = 0.5;
+/** 모든 구역 카드 높이(m) — 하나로(사용자 2026-11-26) */
+const CARD_ALL_Y = CARD_Y;
 /** 북쪽 벽 쪽 카드 줄 — 출고 설비(휠소터·DAS·분배·DPS)는 모든 층 북쪽 벽에(사용자 2026-11-26 "6층 DAS·휠소터·분배 카드를 북쪽 벽으로" → "휠소터는 벽에 붙이라니까" 5F 도). 띠 줄에는 선반·입고 검수 등만 */
 const NORTH_CARDS: Partial<Record<number, RegExp>> = { 5: /DAS|WHEEL_SORTER|DPS/, 6: /DAS|WHEEL_SORTER|SPLIT/, 7: /DAS|WHEEL_SORTER/ };
-const NORTH_Z = 0.8;
-/** 북쪽 벽 줄 높이 — 벽에 붙인 간판처럼 낮게(높이 세우면 전체 보기에서 화면 위로 빠짐) */
-const NORTH_Y = 2.2 + CARD_H / 2;
+// 북쪽 줄 z = 층 북쪽 통로선(출고대기와 휠소터 사이) — 벽(도크 위)에 두면 도크와 겹치고 전체 보기에서 화면 위로 빠졌음(사용자 2026-11-26)
 /** 띠 줄(출고대기 남쪽 끝)에 두는 것 — 띠에서 남쪽으로 길게 뻗은 설비(6F 야채 레인: 분배 카드가 비운 자리) */
 const BAND_ROW = /VEG_LANES/;
 const TEMP_SHORT: Record<string, string> = { AMBIENT: '상온', CHILLED: '냉장', FROZEN: '냉동' };
@@ -392,24 +390,22 @@ export function zoneCards(f: FloorLayout): Card[] {
   const sorters = f.zones.filter((z) => z.kind === 'EQUIP' && z.id.includes('WHEEL_SORTER'));
   if (sorters.length) {
     const x0 = Math.min(...sorters.map((z) => z.rect.x0));
-    const x1 = Math.max(...sorters.map((z) => z.rect.x1));
     const temps = [...new Set(sorters.map((z) => TEMP_SHORT[z.temp ?? 'AMBIENT']))];
-    specs.push({ id: `${f.floor}-WHEEL_SORTER`, title: '휠소터', sub: temps.join('·'), style: 'EQUIP', x: (x0 + x1) / 2, row: 'band', ...(NORTH_CARDS[f.floor]?.test('WHEEL_SORTER') ? { z: NORTH_Z } : {}) });
+    specs.push({ id: `${f.floor}-WHEEL_SORTER`, title: '휠소터', sub: temps.join('·'), style: 'EQUIP', x: x0, row: 'band', ...(NORTH_CARDS[f.floor]?.test('WHEEL_SORTER') ? { z: f.walk.northZ } : {}) });
   }
   for (const z of f.zones) {
     const r = z.rect;
     if (sorters.includes(z)) continue;
-    const cx = (r.x0 + r.x1) / 2;
     const style = zoneStyle(z);
     const m = /^(.*?)\s*\((.*)\)$/.exec(z.label);
     if (z.kind === 'RACK') {
       const letter = z.id.split('-')[1];
-      specs.push({ id: z.id, title: m ? m[1] : z.label, sub: `${f.locations.filter((l) => l.zone === letter).length.toLocaleString()}칸`, style, x: cx, row: 'rack' });
+      specs.push({ id: z.id, title: m ? m[1] : z.label, sub: `${f.locations.filter((l) => l.zone === letter).length.toLocaleString()}칸`, style, x: r.x0, row: 'rack' });
     } else if (z.kind === 'EQUIP') {
       if (z.id.endsWith('AUTOSTORE')) {
         const bins = Math.max(0, ...f.shelves.filter((l) => l.bin).map((l) => l.binNo ?? 0));
-        specs.push({ id: z.id, title: '오토스토어', sub: `통 ${bins.toLocaleString()}`, style, x: cx, row: 'band' });
-      } else specs.push({ id: z.id, title: m ? m[1] : z.label, sub: shortSub(m ? m[2] : null), style, x: cx, row: 'band', ...(NORTH_CARDS[f.floor]?.test(z.id) ? { z: NORTH_Z } : BAND_ROW.test(z.id) ? {} : r.z1 > f.walk.roomZ + 1 || r.z1 < f.walk.northZ ? { z: r.z1 + 0.3 } : {}) });
+        specs.push({ id: z.id, title: '오토스토어', sub: `통 ${bins.toLocaleString()}`, style, x: r.x0, row: 'band' });
+      } else specs.push({ id: z.id, title: m ? m[1] : z.label, sub: shortSub(m ? m[2] : null), style, x: r.x0, row: 'band', ...(NORTH_CARDS[f.floor]?.test(z.id) ? { z: f.walk.northZ } : BAND_ROW.test(z.id) ? {} : r.z1 < f.walk.northZ ? { z: f.walk.northZ } : r.z1 > f.walk.roomZ + 1 ? { z: r.z1 + 0.3 } : {}) });
     }
   }
   // 피킹 선반 — 구역 글자마다 그 선반 위에(사용자 2026-11-26 "피킹선반 쪽에 피킹선반 구역 카드를"). 전엔 층 선반 전체 가운데 하나라 엉뚱한 곳(5F 는 냉동)에 섰다
@@ -423,7 +419,7 @@ export function zoneCards(f: FloorLayout): Card[] {
     const front = zs.reduce((p, q) => (q.rect.z1 > p.rect.z1 ? q : p));
     const n = f.shelves.filter((l) => l.zone === letter && !l.bin).length;
     if (!n) continue;
-    specs.push({ id: `${f.floor}-${letter}-SHELVES`, title: `피킹 선반 ${letter}`, sub: `${n.toLocaleString()}칸`, style: zoneStyle(front), x: (front.rect.x0 + front.rect.x1) / 2, row: 'band' });
+    specs.push({ id: `${f.floor}-${letter}-SHELVES`, title: `피킹 선반 ${letter}`, sub: `${n.toLocaleString()}칸`, style: zoneStyle(front), x: Math.min(...zs.map((q) => q.rect.x0)), row: 'band' });
   }
   const band = f.zones.find((z) => z.kind === 'BAND');
   if (band) {
@@ -437,36 +433,23 @@ export function zoneCards(f: FloorLayout): Card[] {
   const out: Card[] = [];
   const rackZ = Math.min(...f.rows.map((w) => w.z0)) - 0.6;
   const width = Math.max(...f.zones.map((z) => z.rect.x1));
-  for (const row of ['rack', 'band'] as const) {
-    // 겹치면 아래 줄을 누가 먼저 갖나 — 좁은 구역(입고 검수·피킹 선반·DAS)이 먼저, 긴 설비(휠소터·DPS 컨베이어)는 위로
-    const rank = (id: string) => [/INBOUND/, /SHELVES/, /DAS|SPLIT|VEG/, /AUTOSTORE|OFFICE/, /BAND|STAGING/, /DPS/, /WHEEL_SORTER/].findIndex((re) => re.test(id));
-    const list = specs.filter((sp) => sp.row === row).sort((p, q) => (row === 'band' ? (rank(p.id) + 8) % 8 - ((rank(q.id) + 8) % 8) : 0) || p.x - q.x);
-    const made = list.map((sp) => ({ sp, ...makePill(sp.title, sp.sub, ICON[sp.style], ZONE_PILL[sp.style][0], ZONE_PILL[sp.style][1], maxW) }));
-    const w = CARD_H * (made[0]?.aspect ?? 1);
-    // 카드는 늘 자기 구역 바로 위(옆으로 밀지 않음 — 사용자 2026-11-26 "입고검수 카드를 입고검수 구역 앞으로", 밀다 보니 휠소터 카드가 냉동 쪽으로 갔음).
-    // 겹치면 한 칸 위 줄로 올린다(줄마다 높이는 같아 곧은 줄 그대로). 랙 줄은 한 줄.
-    const levelsAt = new Map<number, [number, number][][]>();
-    for (const m of made) {
-      const z = m.sp.z ?? (row === 'rack' ? rackZ : f.walk.roomZ);
-      const levels = levelsAt.get(z) ?? [];
-      levelsAt.set(z, levels);
-      const own = m.sp.z !== undefined; // 자기 줄(북쪽 벽·구역 앞) — 랙 카드 높이로 낮게(북쪽 벽 줄을 띠 높이로 두면 전체 보기에서 화면 위로 빠짐)
-      let x = Math.min(width - w / 2, Math.max(w / 2, m.sp.x));
-      const north = m.sp.z === NORTH_Z;
-      // 북쪽 벽 줄은 한 줄(벽 간판) — 겹치면 위로 쌓지 않고 옆으로 비켜 선다
-      if (north) {
-        const taken = levels[0] ?? [];
-        for (let guard = 0; guard < 20 && taken.some(([a, b]) => x + w / 2 + CARD_GAP > a && x - w / 2 - CARD_GAP < b); guard++) {
-          const hit = taken.find(([a, b]) => x + w / 2 + CARD_GAP > a && x - w / 2 - CARD_GAP < b)!;
-          x = x >= (hit[0] + hit[1]) / 2 ? hit[1] + CARD_GAP + w / 2 : hit[0] - CARD_GAP - w / 2;
-        }
-      }
-      let k = 0;
-      if (row === 'band' && !north) while ((levels[k] ?? []).some(([a, b]) => x + w / 2 + CARD_GAP > a && x - w / 2 - CARD_GAP < b)) k++;
-      (levels[k] ??= []).push([x - w / 2, x + w / 2]);
-      const y = own && z < f.walk.northZ ? NORTH_Y + k * (CARD_H + 0.4) : row === 'rack' || own ? CARD_Y + (own ? k * (CARD_H + 0.4) : 0) : CARD_Y_BAND + k * (CARD_H + 0.4);
-      out.push({ id: m.sp.id, tex: m.tex, pos: [x, y, z], w, h: CARD_H });
-    }
+  // 모든 카드 같은 높이·같은 크기, 줄마다 곧은 한 줄(사용자 2026-11-26 "구역 카드 전부 다 높이 위치 맞춰", "DAS 존 카드를 왼쪽 시작점에 맞춰").
+  //  줄: 북쪽 벽(출고 설비) · 앞줄(랙 + 띠 — 랙 북쪽 끝 하나로 합침, 전엔 랙 줄이 따로 아래에 있어 6F 냉장 G 만 혼자 낮았음) · 구역 앞(띠 밖 구역).
+  //  x: 카드 왼쪽 끝 = 구역 왼쪽 시작점. 앞 카드와 겹치면 오른쪽으로 비키고, 오른쪽 벽을 넘으면 줄 끝에서 왼쪽으로 되민다.
+  const made = specs.map((sp) => ({ sp, ...makePill(sp.title, sp.sub, ICON[sp.style], ZONE_PILL[sp.style][0], ZONE_PILL[sp.style][1], maxW) }));
+  const w = CARD_H * (made[0]?.aspect ?? 1);
+  const frontZ = (rackZ + f.walk.roomZ) / 2;
+  const lines = new Map<number, typeof made>();
+  for (const m of made) {
+    const z = m.sp.z ?? frontZ;
+    lines.set(z, [...(lines.get(z) ?? []), m]);
+  }
+  for (const [z, list] of lines) {
+    list.sort((p, q) => p.sp.x - q.sp.x);
+    const xs: number[] = [];
+    for (const m of list) xs.push(Math.max(m.sp.x + w / 2, xs.length ? xs[xs.length - 1] + w + CARD_GAP : -Infinity));
+    for (let i = xs.length - 1; i >= 0; i--) xs[i] = Math.min(xs[i], i === xs.length - 1 ? width - w / 2 : xs[i + 1] - w - CARD_GAP);
+    list.forEach((m, i) => out.push({ id: m.sp.id, tex: m.tex, pos: [xs[i], CARD_ALL_Y, z], w, h: CARD_H }));
   }
   return out;
 }

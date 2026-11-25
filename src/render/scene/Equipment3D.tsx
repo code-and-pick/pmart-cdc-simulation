@@ -690,7 +690,7 @@ export function Inbound({ e }: { e: Equip }) {
         {line(r.x1 - 0.32, r.z0 + 0.2, r.x1 - 0.2, r.z1 - 0.2)}
         {spots.map((p) => {
           const full = p.k % 4 !== 3;
-          const hgt = 0.9 + ((p.k * 37) % 5) * 0.12;
+          const hgt = 0.38 * Math.max(1, Math.round((0.9 + ((p.k * 37) % 5) * 0.12) / 0.38));
           return (
             <group key={p.k} position={[p.x, 0, p.z]}>
               {/* 팔레트 칸 네 귀(ㄱ자) */}
@@ -708,10 +708,17 @@ export function Inbound({ e }: { e: Equip }) {
                     <boxGeometry args={[1.1, 0.14, 1.1]} />
                     <meshStandardMaterial color={0xd9b98a} roughness={0.85} map={palletTexture()} />
                   </mesh>
-                  <mesh position={[0, 0.14 + hgt / 2, 0]}>
-                    <boxGeometry args={[1.02, hgt, 1.02]} />
-                    <meshStandardMaterial color={0xd2a679} roughness={0.85} map={boxTexture()} />
-                  </mesh>
+                  {/* 상자 더미 — 층마다 2×2 상자(한 덩어리면 무엇인지 알아보기 어려웠음, 사용자 2026-11-26) */}
+                  {Array.from({ length: Math.max(1, Math.round(hgt / 0.38)) }, (_, ly) =>
+                    [-0.25, 0.25].flatMap((bx) =>
+                      [-0.25, 0.25].map((bz) => (
+                        <mesh key={`${ly}${bx}${bz}`} position={[bx, 0.14 + 0.19 + ly * 0.38, bz]}>
+                          <boxGeometry args={[0.48, 0.36, 0.48]} />
+                          <meshStandardMaterial color={(ly + (bx > 0 ? 1 : 0) + (bz > 0 ? 1 : 0)) % 2 ? 0xc99a6b : 0xd2a679} roughness={0.85} map={boxTexture()} />
+                        </mesh>
+                      )),
+                    ),
+                  )}
                 </>
               )}
             </group>
@@ -779,20 +786,37 @@ export function Inbound({ e }: { e: Equip }) {
           </mesh>
         </group>
       </StaticMerge>
+      {/* 바닥 글씨 — 들어오는 쪽 "입고 →", 앞 절반 "검수 대기", 뒤 절반 "검수 완료" */}
+      {(
+        [
+          ['입고 →', 0.6 + 1.2, '#f2c94c', '#1f2430'],
+          ['검수 대기', 0.6 + 2.4 + (n / 4) * 1.5, '#4b5563', '#ffffff'],
+          ['검수 완료', 0.6 + 2.4 + ((3 * n) / 4) * 1.5, '#1f9d5a', '#ffffff'],
+        ] as const
+      ).map(([t, u, bg, fg]) => {
+        const v = lanes === 2 ? span / 2 + 0.6 : span + 0.6 - 1.5 - 0.6;
+        const at = alongX ? { x: r.x0 + u, z: r.z0 + Math.max(1.6, v) } : { x: r.x0 + Math.max(1.6, v), z: r.z0 + u };
+        return (
+          <mesh key={t} rotation-x={-Math.PI / 2} rotation-z={alongX ? 0 : Math.PI / 2} position={[at.x, 0.02, at.z]} raycast={() => null}>
+            <planeGeometry args={[2.4, 0.8]} />
+            <meshBasicMaterial map={plateTexture(t, { bg, fg, w: 256, h: 84 })} transparent depthWrite={false} />
+          </mesh>
+        );
+      })}
       {/* 투명·표(합치지 않음) — 랩·보냉 덮개, 입고 표(검수 끝 = 초록, 대기 = 흰색) */}
       {spots
         .filter((p) => p.k % 4 !== 3)
         .map((p) => {
-          const hgt = 0.9 + ((p.k * 37) % 5) * 0.12;
+          const hgt = 0.38 * Math.max(1, Math.round((0.9 + ((p.k * 37) % 5) * 0.12) / 0.38));
           return (
             <group key={p.k} position={[p.x, 0, p.z]}>
               <mesh position={[0, 0.14 + (hgt + 0.06) / 2, 0]} raycast={() => null}>
                 <boxGeometry args={[1.06, hgt + 0.06, 1.06]} />
-                <meshStandardMaterial color={film} roughness={cold ? 0.3 : 0.15} metalness={cold ? 0.5 : 0} transparent opacity={cold ? 0.92 : 0.38} depthWrite={false} />
+                <meshStandardMaterial color={film} roughness={cold ? 0.3 : 0.15} metalness={cold ? 0.5 : 0} transparent opacity={cold ? 0.45 : 0.25} depthWrite={false} />
               </mesh>
               <mesh position={[0, 0.14 + hgt * 0.6, 0.545]}>
                 <boxGeometry args={[0.32, 0.22, 0.01]} />
-                <meshBasicMaterial color={p.k % 3 === 0 ? 0x2fbf71 : 0xffffff} />
+                <meshBasicMaterial color={p.k % n >= n / 2 ? 0x2fbf71 : 0xffffff} />
               </mesh>
             </group>
           );
