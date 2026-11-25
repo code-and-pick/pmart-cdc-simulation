@@ -1348,3 +1348,7 @@ details.sec > summary h4 { justify-content: flex-start; gap: 6px; }
 .rf-steps { margin: 0; padding-left: 18px; font-size: 12px; line-height: 1.5; }
 .rf-steps li + li { margin-top: 2px; }
 .rf-steps li::marker { color: var(--accent); font-weight: 700; }
+.rf-kv { display: grid; grid-template-columns: max-content 1fr; gap: 3px 10px; margin: 0; font-size: 12px; line-height: 1.5; }
+.rf-kv dt { color: var(--text); font-weight: 700; }
+.rf-kv dd { margin: 0; color: var(--muted); }
+.rf-t { display: inline-block; min-width: 40px; margin-right: 6px; color: var(--text); font-variant-numeric: tabular-nums; }

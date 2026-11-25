@@ -1,5 +1,5 @@
 // 왼쪽 패널 — 설정(센터 고정값·시간표) · 구역(층·칸 정보) · 도움말. MFC 시뮬레이터 LeftPanel 의 sec/srow 모양을 쓴다.
-import { lazy, Suspense, useEffect, useState, type ReactNode } from 'react';
+import { Fragment, lazy, Suspense, useEffect, useState, type ReactNode } from 'react';
 import { checkReadiness, READINESS_KO, type ProbeResult } from '../backend/http/readiness';
 import { useApp, useTick, useView } from '../app/context';
 import { CDC_FACTS, MFCS, OUTBOUND, SHIFT, WORK, RACK, FLOW, AUTOSTORE } from '../config';
@@ -642,19 +642,103 @@ function Workers() {
 }
 
 
+/** 도움말 카드 — kv = 뜻 표, steps = [시각, 할 일] 순서 */
+const HELP_CARDS: { title: string; sub?: string; kv?: [string, string][]; steps?: [string, string][] }[] = [
+  {
+    title: '조작',
+    sub: 'MFC 시뮬레이터와 같음',
+    kv: [
+      ['왼쪽 끌기', '이동'],
+      ['오른쪽 끌기', '돌리기'],
+      ['휠', '가리킨 곳으로 확대'],
+      ['화살표·WASD', '이동'],
+      ['Esc', '나가기'],
+      ['배속', '위 오른쪽 1×~120×, ❚❚ 멈춤'],
+    ],
+  },
+  {
+    title: '누르면',
+    kv: [
+      ['칸(빈 칸도)', '멀리선 그 구역 위로, 가까이선 칸 정면으로 — 왼쪽에 위치 코드·상품·LOT·현물·예약'],
+      ['사람', 'PDA 화면(왼쪽 ☺ 작업자 목록에서도)'],
+      ['칸 번호', '가까이 확대하면 빔 앞에 보임(번호 · 랙만 · 끔)'],
+    ],
+  },
+  {
+    title: '위치 코드',
+    sub: '센터-구역-층-통로-베이-단-슬롯 (예 CDC01-A-5-02-24-3-1)',
+    kv: [
+      ['A~D', '5F 상온(A·B 무거운 상자, D 인기상품)'],
+      ['E·F', '7F 생활용품(F 오토스토어)'],
+      ['G', '6F 냉장'],
+      ['H', '5F 냉동'],
+      ['90', '도크 — 북쪽 벽, 문 번호 층-번호(냉동 5F·냉장 6F·상온 7F)'],
+      ['91', '출고대기 롤테이너 자리'],
+      ['92', '승강기 문(5F 상온 R/T → 7F 도크)'],
+    ],
+  },
+  {
+    title: '하루 흐름',
+    sub: '주간조 08:00~17:00 · 석간 13:00~22:00',
+    steps: [
+      ['08:00', '주간조 TRF 인수·할당 → 지게차로 팔레트 랙 → 피킹 선반 보충'],
+      ['13:00', '석간 Wave 배포 → FC 가 PDA 로 작업 받아 피킹'],
+      ['', '분배·라인이 MFC 칸에 담기 → 자키가 출고대기(91)로 → 검품'],
+      ['21:30', 'R/T 를 도크 앞으로(5F 상온은 승강기로 7F)'],
+      ['22:00', 'R/T 카운팅'],
+      ['22:30', '도크 상차'],
+      ['출차', '이때만 CDC −q · Transit +q'],
+    ],
+  },
+  {
+    title: '밤 운송',
+    sub: '오른쪽 ⛟ 운송에서 차마다',
+    steps: [
+      ['22:00', '배차 — 노선 × 온도대(차 한 대 = 온도대 하나)'],
+      ['', '출차 30분 전 도크 상차(방문 역순)'],
+      ['01:00', '목포·춘천 출차'],
+      ['03:00', '세종·부산 출차'],
+      ['05:30', 'MFC 도착 → 하차·인계 → MFC 수령 → 빈 R/T 싣고 복귀'],
+    ],
+  },
+];
+
 function Help() {
   return (
     <>
+      {/* 작업자별 흐름과 같은 카드 모양(사용자 2026-11-26 "위에 정리된 것도 그렇게") */}
       <Sec title="도움말">
-      <div className="help">
-        <p>조작(MFC 와 같음): 왼쪽 끌기 = 이동, 오른쪽 끌기 = 돌리기, 휠 = 마우스가 가리킨 곳으로 확대, 화살표·WASD = 이동, Esc = 나가기. 가까이 확대하면 빔 앞에 칸 번호(위치 코드)가 붙습니다(번호 · 랙만 · 끔).</p>
-        <p>칸(빈 칸도)을 누르면 멀리서는 그 구역 위로, 가까이서는 그 칸 정면으로 가고 왼쪽에 위치 코드·상품·LOT·현물·예약이 나옵니다. 사람을 누르면 PDA.</p>
-        <p>위치 코드: 센터-구역-층-통로-베이-단-슬롯 (예 CDC01-A-5-02-24-3-1). 구역 글자 A~D 5F 상온 · E·F 7F 생활용품 · G 냉장 · H 냉동(기사 사진처럼 상온부터 A).</p>
-        <p>91 = 출고대기 롤테이너 자리, 92 = 승강기 문(5F 상온 R/T → 7F), 90 = 층마다 북쪽 벽 도크(문 번호 층-번호, 냉동 5F·냉장 6F·상온 7F).</p>
-        <p>밤: 22:00 배차(노선 × 온도대, 차 한 대 = 온도대 하나) → 출차 30분 전 도크 상차(방문 역순) → 노선별 출차(목포·춘천 01:00, 세종·부산 03:00 — 05:30 도착) → MFC 도착·하차·인계 → MFC 수령 → 복귀. 오른쪽 ⛟ 운송에서 차마다 봅니다.</p>
-        <p>하루: 07:55 시작 → 08:00 주간조가 TRF 를 받아 할당하고 지게차로 팔레트 랙 → 피킹 선반 보충 → 13:00 석간 Wave 배포 → FC 가 PDA 로 다음 작업을 받아 선반에서 피킹 → 분배·라인이 MFC 칸에 박스로 담기 → 자키가 출고대기(91)로 → 검품 → 21:30 부터 R/T 를 도크 앞으로(5F 상온은 승강기로 7F) → 22:00 R/T 카운팅 → 22:30 도크 상차 → 노선별 출차(이때만 CDC −q · Transit +q).</p>
-        <p>위 오른쪽 배속(1×~120×)으로 시간을 빠르게, ❚❚ 로 멈춥니다. 왼쪽 ☺ 작업자에서 사람을 누르면 PDA 화면이 나옵니다.</p>
-      </div>
+        <div className="help">
+          <ul className="role-flows">
+            {HELP_CARDS.map((c) => (
+              <li key={c.title}>
+                <div className="rf-h">
+                  <b>{c.title}</b>
+                  {c.sub && <span>{c.sub}</span>}
+                </div>
+                {c.kv ? (
+                  <dl className="rf-kv">
+                    {c.kv.map(([k, v]) => (
+                      <Fragment key={k}>
+                        <dt>{k}</dt>
+                        <dd>{v}</dd>
+                      </Fragment>
+                    ))}
+                  </dl>
+                ) : (
+                  <ol className="rf-steps">
+                    {c.steps!.map(([t, s]) => (
+                      <li key={t + s}>
+                        <b className="rf-t">{t}</b>
+                        {s}
+                      </li>
+                    ))}
+                  </ol>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
       </Sec>
       <RoleFlows />
     </>
