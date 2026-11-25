@@ -517,7 +517,8 @@ class FloorBuilder {
     let sx = Math.max(liftEnd + 2, STAGING_X0);
     this.spec.stagingLetters.forEach((letter, li) => {
       const temp: Temp = this.spec.zones.find((z) => z.letter === letter)?.temp ?? 'AMBIENT';
-      const per = this.spec.stagingLetters.length > 1 ? STAGING_SLOTS / 2 : STAGING_SLOTS;
+      // 출고대기를 두 글자로 나누는 층(5F 상온·냉동)은 짝수로 — 앞뒤 줄 칸 수가 같게(사용자 2026-11-26 "하나만 튀어나온 칸 없애")
+      const per = this.spec.stagingLetters.length > 1 ? Math.floor(STAGING_SLOTS / 4) * 2 : STAGING_SLOTS;
       // 앞줄(휠소터 쪽, z 3.7) = 01~절반, 뒷줄(북쪽 벽 쪽) = 나머지 — MFC 자리 PPC-01~05 가 앞줄에 한 칸씩이라
       // 휠소터 슈트가 다른 롤테이너 위를 지나지 않는다(사용자 2026-11-26 "롤테이너가 컨베이어를 뚫고 있다")
       const half = Math.ceil(per / 2);
@@ -693,10 +694,6 @@ export function buildLayout(): Layout {
   f5.equip('WHEEL_SORTER', '휠소터 (상온 — MFC 박스 → PPC 슈트 / 인기 상품 → DAS)', { x0: c0, z0: SORT_Z0, x1: amb5 - 0.6, z1: SORT_Z1 }, 'AMBIENT');
   // 도크 — 5F 는 출고대기 동쪽이 냉동 방 벽까지 좁아 승강기와 출고대기 사이에. 냉동 입고 검수는 출고대기 동쪽 북쪽 벽(아침 입고 차는 같은 도크) [사용자 "입고 검수 온도별로", 2026-11-26 지하 B1 없앰]
   f5.docksNorth(frzX0 - 0.4);
-  {
-    const stEnd = Math.max(...f5.staging.map((x) => x.pos.x)) + 1.6;
-    f5.equip('INBOUND', '입고 검수 (냉동)', { x0: stEnd, z0: 0.4, x1: frzX0 - 0.4, z1: 4.6 }, 'FROZEN');
-  }
   f5.equip('DAS', 'DAS 존 (상온)', { x0: c0, z0: DAS_Z0, x1: c1, z1: sz1 }, 'AMBIENT');
   f5.shelvesIn('C', [{ x0: 2.5, z0: DAS_Z0, x1: c0 - 1, z1: sz1 }], SKU_PLACE.efShelf);
   f5.shelvesIn('D', [{ x0: c1 + 1, z0: DAS_Z0, x1: amb5 - 0.6, z1: sz1 }], SKU_PLACE.efShelf);
@@ -705,11 +702,14 @@ export function buildLayout(): Layout {
   const frzLineZ1 = 6.2;
   f5.equip('WHEEL_SORTER', '휠소터 (냉동 — DPS 박스 → PPC 슈트)', { x0: a0, z0: frzLineZ0, x1: frzX0, z1: frzLineZ1 }, 'FROZEN');
   f5.equip('DPS', 'DPS 컨베이어 (냉동 전실 — 구역마다 불·수량)', { x0: frzX0, z0: frzLineZ0, x1: width - 0.5, z1: frzLineZ1 });
+  // 냉동 입고 검수 — 냉동 전실 안, 서쪽 벽 전실 문 바로 안쪽(검수가 오래 걸려 상온에 두면 콜드체인이 깨짐, 사용자 2026-11-26).
+  // 검수 뒤 팔레트는 바로 옆 칸막이 지게차 문으로 냉동 보관에. 자리는 전실 아래 선반 블록 서쪽 끝을 줄여 만듦(냉동 SKU 자리 여유 안)
+  f5.equip('INBOUND', '입고 검수 (냉동 — 전실 안)', { x0: frzX0 + 0.6, z0: frzLineZ1 + 2.6, x1: frzX0 + 0.6 + FRZ_INBOUND_W, z1: sz1 }, 'FROZEN');
   f5.shelvesIn(
     'H',
     [
       { x0: frzX0 + 1.2, z0: 0.4, x1: width - 0.3, z1: frzLineZ0 - 0.3 },
-      { x0: frzX0 + 1.2, z0: frzLineZ1 + 0.3, x1: width - 0.3, z1: sz1 },
+      { x0: frzX0 + 1.2 + FRZ_INBOUND_W, z0: frzLineZ1 + 0.3, x1: width - 0.3, z1: sz1 },
     ],
     SKU_TARGET.FROZEN,
     '냉동 H 피킹 선반 (DPS 구역)',
@@ -725,7 +725,7 @@ export function buildLayout(): Layout {
     //  전실 ↔ 보관 칸막이 — 지게차 문(보관 랙 → 전실 피킹 선반 보충)
     [
       { kind: 'AIR_CURTAIN', x0: frzX0, z0: frzLineZ0 - 0.1, x1: frzX0, z1: frzLineZ1 + 0.1 },
-      { kind: 'ANTEROOM', x0: frzX0, z0: frzLineZ1 + 0.4, x1: frzX0, z1: frzLineZ1 + 2.2 },
+      { kind: 'ANTEROOM', x0: frzX0, z0: frzLineZ1 + 0.4, x1: frzX0, z1: frzLineZ1 + 2.8 }, // 사람·입고 팔레트(핸드자키) — 바로 안쪽이 냉동 입고 검수
       { kind: 'FORKLIFT', x0: frzX0, z0: bandDepth + 0.4, x1: frzX0, z1: bandDepth + 4.4 },
       { kind: 'FORKLIFT', x0: frzX0 + 1.5, z0: bandDepth, x1: frzX0 + 5.5, z1: bandDepth },
     ],
@@ -822,6 +822,9 @@ export function buildLayout(): Layout {
 }
 
 /** 용량·SKU 자리 계산(§4) — 총 용량은 계산값, 목표(520만·SKU)와 비교해 모자라면 보완안 */
+/** 냉동 입고 검수 자리 폭(m) — 전실 안 [가정] */
+const FRZ_INBOUND_W = 4; // 전실 선반이 통로 단위라 남는 폭 약 4.5m — 4m × 약 10m(팔레트 6장 정도)
+
 /** MFC 출고대기 자리 수(PPC-01~05 — 휠소터 슈트) */
 const MFC_SLOTS = 5;
 

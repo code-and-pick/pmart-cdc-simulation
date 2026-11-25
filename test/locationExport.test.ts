@@ -9,7 +9,7 @@ describe('위치 목록 내보내기 [CDC-7, cdc-location 0.2.0]', () => {
   it('랙·선반·출고대기·승강기 문·층 도크가 다 있고 코드가 겹치지 않는다', () => {
     expect(ex.counts.RESERVE + ex.counts.PICK_FACE).toBeGreaterThanOrEqual(18_048 + 18_000);
     expect(ex.counts.RESERVE).toBe(18_048 - 1_440); // 팔레트 18,048 − 랙 1단 박스 피킹면 1,440(5F C·D 528 + 7F G 912 — H 는 오토스토어라 피킹면 없음)
-    expect(ex.counts.STAGING).toBe(30 * 3 + 2 * 3); // 출고대기 30 × 3층 + 승강기 문 2 × 3층(도크가 층마다 생겨 승강기 4 → 2)
+    expect(ex.counts.STAGING).toBe(28 + 30 * 2 + 2 * 3); // 출고대기 5F 14 × 2 · 6F·7F 30 + 승강기 문 2 × 3층(도크가 층마다 생겨 승강기 4 → 2)
     expect(ex.counts.DOCK).toBe(2 + 3 + 4); // 냉동 5F 2 · 냉장 6F 3 · 상온 7F 4
     expect(new Set(ex.items.map((i) => i.locationCode)).size).toBe(ex.items.length);
     for (const i of ex.items) {

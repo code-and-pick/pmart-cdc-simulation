@@ -39,7 +39,10 @@ describe('층 배치 [사용자 §3]', () => {
     const amb = f.rooms.find((r) => r.temp === 'AMBIENT')!.rect;
     const s = f.equipment.find((x) => x.kind === 'WHEEL_SORTER' && x.temp === 'AMBIENT')!;
     expect(s.rect.x0 >= amb.x0 && s.rect.x1 <= amb.x1).toBe(true);
-    expect(f.equipment.some((e) => e.kind === 'INBOUND' && e.temp === 'FROZEN')).toBe(true); // 냉동 입고 검수 — 냉동 도크 옆
+    // 냉동 입고 검수 — 냉동 전실 안(검수가 오래 걸려 콜드체인)
+    const inb = f.equipment.find((e) => e.kind === 'INBOUND' && e.temp === 'FROZEN')!;
+    expect(inRects((inb.rect.x0 + inb.rect.x1) / 2, (inb.rect.z0 + inb.rect.z1) / 2, frz.rects)).toBe(true);
+    for (const l of f.shelves) expect(inRects(l.pos.x, l.pos.z, [inb.rect])).toBe(false);
     const dps = f.equipment.find((x) => x.kind === 'DPS')!;
     expect(inRects((dps.rect.x0 + dps.rect.x1) / 2, (dps.rect.z0 + dps.rect.z1) / 2, frz.rects)).toBe(true);
     expect(frz.doors.map((d) => d.kind).sort()).toEqual(['AIR_CURTAIN', 'ANTEROOM', 'FORKLIFT', 'FORKLIFT']); // 서쪽 벽 셋 + 전실↔보관 칸막이 지게차 문

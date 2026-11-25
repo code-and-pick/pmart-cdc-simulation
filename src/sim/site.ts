@@ -293,11 +293,10 @@ export function sorterLanes(r: Rect): { x: number; z: number; side: number }[] {
 
 /** 냉동 A 선반 칸 → DPS 구역 번호(선반 통로 x 순서로 FLOW.dps.zones 개로 나눔) */
 export function dpsZoneOf(f: FloorLayout): (l: Location) => number {
-  const xs = [...new Set(f.shelfAisles.filter((a) => a.zone === 'H').map((a) => +a.cx.toFixed(2)))].sort((p, q) => p - q);
+  // 구역은 선반 통로 단위 — 통로 번호를 x 순으로 늘어놓아 N 등분(한 통로 양쪽 선반이 다른 구역으로 갈리지 않게, 2026-11-26)
+  const aisles = f.shelfAisles.filter((a) => a.zone === 'H').sort((p, q) => p.cx - q.cx);
   const n = FLOW.dps.zones;
-  return (l: Location) => {
-    let best = 0;
-    for (let k = 1; k < xs.length; k++) if (Math.abs(xs[k] - l.pos.x) < Math.abs(xs[best] - l.pos.x)) best = k;
-    return Math.min(n - 1, Math.floor((best * n) / Math.max(1, xs.length)));
-  };
+  const zoneByAisle = new Map<number, number>();
+  aisles.forEach((a, i) => zoneByAisle.set(a.no, Math.min(n - 1, Math.floor((i * n) / Math.max(1, aisles.length)))));
+  return (l: Location) => zoneByAisle.get(l.aisle) ?? 0;
 }
