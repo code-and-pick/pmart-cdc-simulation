@@ -32,7 +32,7 @@ describe('층 배치 [사용자 §3]', () => {
     const f = F(5);
     const frz = f.coldRooms.find((r) => r.temp === 'FROZEN')!;
     const frzRack = f.rooms.find((r) => r.temp === 'FROZEN')!.rect;
-    for (const l of f.shelves.filter((s) => s.zone === 'A')) {
+    for (const l of f.shelves.filter((s) => s.zone === 'H')) {
       expect(inRects(l.pos.x, l.pos.z, frz.rects)).toBe(true);
       expect(l.pos.x > frzRack.x0 && l.pos.x < frzRack.x1).toBe(true);
     }
@@ -104,7 +104,7 @@ describe('출고 흐름 배치 [기사 — 상온·냉장·냉동 모두 휠소�
       const das = f.equipment.filter((e) => e.kind === 'DAS');
       expect(das.length).toBeGreaterThan(0);
       for (const d of das) {
-        const letter = d.temp === 'CHILLED' ? 'B' : f.floor === 7 ? 'G' : 'C';
+        const letter = d.temp === 'CHILLED' ? 'G' : f.floor === 7 ? 'E' : 'A';
         const xs = f.staging.filter((s) => s.zone === letter).map((s) => s.pos.x);
         expect(d.rect.x0 <= Math.min(...xs) && d.rect.x1 >= Math.max(...xs)).toBe(true);
         const sorter = f.equipment.find((e) => e.kind === 'WHEEL_SORTER' && e.temp === d.temp)!;
@@ -140,6 +140,6 @@ describe('위치 코드 [정본 CDC-3·5]', () => {
   });
 
   it('랙 1단 박스 피킹면(5F C·D, 7F G)은 PICK_FACE, 그 밖 팔레트(H 는 오토스토어 보충용 보관)는 RESERVE', () => {
-    for (const l of all) expect(l.type).toBe(['C', 'D', 'G'].includes(l.zone) && l.level === 1 ? 'PICK_FACE' : 'RESERVE');
+    for (const l of all) expect(l.type).toBe(['A', 'B', 'E'].includes(l.zone) && l.level === 1 ? 'PICK_FACE' : 'RESERVE');
   });
 });

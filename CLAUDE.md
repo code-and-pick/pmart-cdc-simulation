@@ -9,7 +9,7 @@ Vite 6 + TypeScript 5 (strict) + React 19 + react-three-fiber 9 (Three.js 0.169)
 - 시뮬레이션 엔진(`src/sim`)·백엔드 어댑터(`src/backend` — `port.ts` + `mock/` + `http/`)·도메인(`src/domain`)은 React 에 의존하지 않는다(테스트가 화면 없이 돈다).
 - 매 프레임 바뀌는 값(위치·수량)은 `useFrame` 안에서 three 객체를 직접 바꾸고 React 상태로 올리지 않는다.
 - 설정·스크립트·폴더 구조(`package.json`, `tsconfig.json`, `vite.config.ts`, `server/`, `test/**/*.test.ts`)는 MFC 시뮬레이터를 따른다. 버전을 올리거나 라이브러리를 더하려면 먼저 사용자에게 묻는다.
-- **MFC 시뮬레이터가 기준이다**(사용자 2026-11-24). 화면 UI/UX·구조·구역 글자 체계(A 냉동·B 냉장·C~H 상온 계열 — 칠곡 상세는 설계 §3.2)를 그대로 따른다. 백엔드 결정과 다르면 MFC 시뮬레이터를 따르고 백엔드에 요청한다. 다른 점은 설계 §9.
+- **MFC 시뮬레이터가 기준이다**(사용자 2026-11-24). 화면 UI/UX·구조를 그대로 따른다. 단 구역 글자는 DC 만 기사 사진대로 상온부터 A(5F 상온 A~D · 7F 생활용품 E·F · 냉장 G · 냉동 H, 사용자 2026-11-26) — MFC 는 그대로. 백엔드 결정과 다르면 MFC 시뮬레이터를 따르고 백엔드에 요청한다. 다른 점은 설계 §9.
 - 개발 서버 포트: **5182**. 이미 쓰는 포트 — 백오피스 5173~5176, MFC 시뮬레이터 5180, 라이더 시뮬레이터 5181, rider-backoffice 목 모드 5186.
 
 ## 센터 고정값 — 절대 바꾸지 않는다 (사용자 2026-11-24)
@@ -22,7 +22,7 @@ Vite 6 + TypeScript 5 (strict) + React 19 + react-three-fiber 9 (Three.js 0.169)
 - 우아한청년들 https://www.woowayouths.com/story/culture/view/5/24 (실제 내부: DAS·DPS·휠소터·오토스토어, 보냉 커버 롤테이너)
 - 같은 사이트 보도자료 https://www.woowayouths.com/media/press/view/1/27 (DAS 냉장·DPS 냉동·1차 고속분류기·비식재 오토스토어), 하루 일정 https://www.woowayouths.com/story/culture/view/1/10 (08:00 입고·13:00 선별·23:00 출발).
 - 확인한 내용은 `docs/design/cdc-design.md` §2.
-- 사용자 결정(2026-11-24): 층마다 2,867평 균등, 차량은 지하로 들어오고 승강기로 올림, 주간조 있음. 작업 방식·장비·시간을 정할 때 이 자료와 어긋나면 안 된다.
+- 사용자 결정(2026-11-24): 층마다 2,867평 균등, 주간조 있음. 차량은 층마다 북쪽 벽 도크(기사 사진 도크 문 "4-16" = 층-번호, 사용자 2026-11-26 — 지하 B1 접안을 바꿈). 작업 방식·장비·시간을 정할 때 이 자료와 어긋나면 안 된다.
 - 사용자 개념도·DC Wave 초안은 `docs/design/ref/`(원본, 수정하지 않음).
 
 ## 비즈니스 로직 근거 (`../pmart-backend/docs`, 읽기 전용)

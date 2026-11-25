@@ -67,7 +67,7 @@ export class FloorSite {
   /** DPS 피커가 닫은 박스를 컨베이어에 올리는 곳(냉동 전실 안, 첫 선반 통로 북쪽 끝) */
   dpsLoad(): WalkPoint {
     const e = this.f.equipment.find((x) => x.kind === 'DPS');
-    const a = this.f.shelfAisles.filter((x) => x.zone === 'A').sort((p, q) => p.cx - q.cx)[0];
+    const a = this.f.shelfAisles.filter((x) => x.zone === 'H').sort((p, q) => p.cx - q.cx)[0];
     if (!e || !a) return this.home();
     return { x: a.cx, z: e.rect.z1 + 0.6, lane: 'S' };
   }
@@ -154,7 +154,7 @@ export class FloorSite {
 
   /** DPS 구역 i 의 컨베이어 x(가운데) · 작업자 서는 자리(그 구역 가운데 선반 통로, 컨베이어 남쪽) */
   dpsZoneX(i: number): number {
-    const as = this.f.shelfAisles.filter((a) => a.zone === 'A').map((a) => a.cx);
+    const as = this.f.shelfAisles.filter((a) => a.zone === 'H').map((a) => a.cx);
     const xs = [...new Set(as.map((x) => +x.toFixed(2)))].sort((p, q) => p - q);
     const n = FLOW.dps.zones;
     const g = xs.filter((_, k) => Math.floor((k * n) / xs.length) === i);
@@ -293,7 +293,7 @@ export function sorterLanes(r: Rect): { x: number; z: number; side: number }[] {
 
 /** 냉동 A 선반 칸 → DPS 구역 번호(선반 통로 x 순서로 FLOW.dps.zones 개로 나눔) */
 export function dpsZoneOf(f: FloorLayout): (l: Location) => number {
-  const xs = [...new Set(f.shelfAisles.filter((a) => a.zone === 'A').map((a) => +a.cx.toFixed(2)))].sort((p, q) => p - q);
+  const xs = [...new Set(f.shelfAisles.filter((a) => a.zone === 'H').map((a) => +a.cx.toFixed(2)))].sort((p, q) => p - q);
   const n = FLOW.dps.zones;
   return (l: Location) => {
     let best = 0;

@@ -138,7 +138,7 @@ export const SKU_PLACE = {
    */
   autostore: 2_400,
   /** 랙 1단이 박스 피킹면(PICK_FACE)인 구역 [가정] — 5F C·D 무거운 상자, 7F G 대용량 생활용품. H 랙은 오토스토어 보충용 보관(RESERVE)만 */
-  faceZones: ['C', 'D', 'G'] as readonly string[],
+  faceZones: ['A', 'B', 'E'] as readonly string[],
 };
 
 /** 6F 냉장 바닥 적치 레인 위치 코드 통로 [가정 — 백엔드 확인 필요] · 레인 모양 */
@@ -451,10 +451,10 @@ export const TMS = {
  * - 냉동 선반(A) = DPS · 랙 1단 박스 피킹면 = BOX_PICK · 6F 야채 바닥 레인(93) = DISTRIBUTION · 6F 냉장 선반(B) = LINE(라인 DAS) · 그 밖 선반·오토스토어 = FC.
  */
 export const AISLE_PICK_METHOD = {
-  frozenShelfZone: 'A',
-  lineShelfZone: 'B',
+  frozenShelfZone: 'H',
+  lineShelfZone: 'G',
   /** 상온에서 DAS 로 가는 선반 구역(모든 MFC 몫을 SKU 로 묶어 집는 LINE 통로) [가정] — 5F F 인기상품 · 7F G 생활용품 선반 */
-  ambientLineZones: ['F', 'G'] as readonly string[],
+  ambientLineZones: ['D', 'E'] as readonly string[],
   vegLaneAisle: 93,
 } as const;
 

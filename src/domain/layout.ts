@@ -516,7 +516,7 @@ class FloorBuilder {
     // 출고대기는 x 23 부터(승강기 4대 시절 자리 그대로 — 그 서쪽 빈자리는 도크) [사용자 2026-11-26 층마다 도크]
     let sx = Math.max(liftEnd + 2, STAGING_X0);
     this.spec.stagingLetters.forEach((letter, li) => {
-      const temp: Temp = letter === 'A' ? 'FROZEN' : letter === 'B' ? 'CHILLED' : 'AMBIENT';
+      const temp: Temp = this.spec.zones.find((z) => z.letter === letter)?.temp ?? 'AMBIENT';
       const per = this.spec.stagingLetters.length > 1 ? STAGING_SLOTS / 2 : STAGING_SLOTS;
       for (let k = 1; k <= per; k++) {
         const row = (k - 1) % 2;
@@ -681,11 +681,11 @@ export function buildLayout(): Layout {
   );
   const frzX0 = amb5;
   const nAf = aislesFit(width - frzX0);
-  f5.racks([{ spec: f5.zone('A'), aisles: nAf }], frzX0, width, '냉동');
+  f5.racks([{ spec: f5.zone('H'), aisles: nAf }], frzX0, width, '냉동');
   f5.liftsAndStaging();
   // 출고 흐름(기사 "상온·냉장·냉동 모두 … 휠소터를 이용한 DAS·DPS"): 상품 → 휠소터 ─ MFC 박스는 PPC 롤테이너 슈트로 / 여러 MFC 가 받는 인기 상품(F 선반, 모든 MFC 몫을 한꺼번에 집음)은 DAS 존으로.
-  const [c0, c1] = f5.stagingSpan('C');
-  const [a0] = f5.stagingSpan('A');
+  const [c0, c1] = f5.stagingSpan('A');
+  const [a0] = f5.stagingSpan('H');
   f5.equip('WHEEL_SORTER', '휠소터 (상온 — MFC 박스 → PPC 슈트 / 인기 상품 → DAS)', { x0: c0, z0: SORT_Z0, x1: amb5 - 0.6, z1: SORT_Z1 }, 'AMBIENT');
   // 도크 — 5F 는 출고대기 동쪽이 냉동 방 벽까지 좁아 승강기와 출고대기 사이에. 냉동 입고 검수는 출고대기 동쪽 북쪽 벽(아침 입고 차는 같은 도크) [사용자 "입고 검수 온도별로", 2026-11-26 지하 B1 없앰]
   f5.docksNorth(frzX0 - 0.4);
@@ -694,21 +694,21 @@ export function buildLayout(): Layout {
     f5.equip('INBOUND', '입고 검수 (냉동)', { x0: stEnd, z0: 0.4, x1: frzX0 - 0.4, z1: 4.6 }, 'FROZEN');
   }
   f5.equip('DAS', 'DAS 존 (상온)', { x0: c0, z0: DAS_Z0, x1: c1, z1: sz1 }, 'AMBIENT');
-  f5.shelvesIn('E', [{ x0: 2.5, z0: DAS_Z0, x1: c0 - 1, z1: sz1 }], SKU_PLACE.efShelf);
-  f5.shelvesIn('F', [{ x0: c1 + 1, z0: DAS_Z0, x1: amb5 - 0.6, z1: sz1 }], SKU_PLACE.efShelf);
+  f5.shelvesIn('C', [{ x0: 2.5, z0: DAS_Z0, x1: c0 - 1, z1: sz1 }], SKU_PLACE.efShelf);
+  f5.shelvesIn('D', [{ x0: c1 + 1, z0: DAS_Z0, x1: amb5 - 0.6, z1: sz1 }], SKU_PLACE.efShelf);
   // 냉동 전실: DPS 컨베이어(가운데 동서) — 위·아래 선반 블록을 지나 에어커튼 밖 냉동 휠소터 줄로, 슈트가 A 출고대기 롤테이너로
   const frzLineZ0 = 5.0;
   const frzLineZ1 = 6.2;
   f5.equip('WHEEL_SORTER', '휠소터 (냉동 — DPS 박스 → PPC 슈트)', { x0: a0, z0: frzLineZ0, x1: frzX0, z1: frzLineZ1 }, 'FROZEN');
   f5.equip('DPS', 'DPS 컨베이어 (냉동 전실 — 구역마다 불·수량)', { x0: frzX0, z0: frzLineZ0, x1: width - 0.5, z1: frzLineZ1 });
   f5.shelvesIn(
-    'A',
+    'H',
     [
       { x0: frzX0 + 1.2, z0: 0.4, x1: width - 0.3, z1: frzLineZ0 - 0.3 },
       { x0: frzX0 + 1.2, z0: frzLineZ1 + 0.3, x1: width - 0.3, z1: sz1 },
     ],
     SKU_TARGET.FROZEN,
-    '냉동 A 피킹 선반 (DPS 구역)',
+    '냉동 H 피킹 선반 (DPS 구역)',
   );
   f5.coldRoom(
     'FROZEN',
@@ -741,15 +741,15 @@ export function buildLayout(): Layout {
   const faceCount = [...L5.locations, ...f7.locations].filter((l) => l.type === 'PICK_FACE').length;
   const gShelf = SKU_TARGET.AMBIENT - faceCount - SKU_PLACE.efShelf * 2 - SKU_PLACE.autostore;
   if (gShelf < 0) throw new Error(`상온 SKU 목표보다 피킹면이 많음(${faceCount})`);
-  const [g0, g1] = f7.stagingSpan('G');
+  const [g0, g1] = f7.stagingSpan('E');
   f7.equip('DAS', 'DAS 존 (상온 생활용품)', { x0: g0, z0: DAS_Z0, x1: g1, z1: sz1 }, 'AMBIENT');
   const westUnits = Math.floor((sz1 - DAS_Z0 - 0.8) / SHELF.unitLen) * 2 * SHELF.levels * SHELF.slots;
   const westAisles = Math.floor((g0 - 1 - 2.5) / (SHELF.depth * 2 + SHELF.aisleW + 0.6));
   const gWest = Math.min(gShelf, westAisles * westUnits);
-  f7.shelvesIn('G', [{ x0: 2.5, z0: DAS_Z0, x1: g0 - 1, z1: sz1 }], gWest, '생활용품 G 피킹 선반 (서쪽)', '-W');
-  const gW = f7.shelvesIn('G', [{ x0: g1 + 1, z0: DAS_Z0, x1: width - 8, z1: sz1 }], gShelf - gWest, '생활용품 G 피킹 선반 (동쪽)', '-E');
+  f7.shelvesIn('E', [{ x0: 2.5, z0: DAS_Z0, x1: g0 - 1, z1: sz1 }], gWest, '생활용품 E 피킹 선반 (서쪽)', '-W');
+  const gW = f7.shelvesIn('E', [{ x0: g1 + 1, z0: DAS_Z0, x1: width - 8, z1: sz1 }], gShelf - gWest, '생활용품 E 피킹 선반 (동쪽)', '-E');
   const autoX0 = g1 + 1 + gW + 1.0;
-  const autoInfo = f7.autostore('H', autoX0, DAS_Z0, sz1, width - autoX0 - 0.5);
+  const autoInfo = f7.autostore('F', autoX0, DAS_Z0, sz1, width - autoX0 - 0.5);
   f7.equip('WHEEL_SORTER', '휠소터 (생활용품 — MFC 박스 → PPC 슈트 / G 선반 → DAS)', { x0: g0, z0: SORT_Z0, x1: autoInfo.rect.x1, z1: SORT_Z1 }, 'AMBIENT');
   f7.equip('OFFICE', 'DC 관리자 사무실', { x0: amb7 + 1, z0: bandDepth + 1, x1: width - 1, z1: bandDepth + 18 });
   f7.equip('INBOUND', '입고 검수 (상온)', { x0: amb7 + 1, z0: bandDepth + 20, x1: width - 1, z1: bandDepth + 36 }, 'AMBIENT');
@@ -763,7 +763,7 @@ export function buildLayout(): Layout {
   let nB = CHILLED_RACK.startAisles;
   while (others + (nB - 1) * (perAisle6 / 2) < CHILLED_RACK.palletMin) nB++;
   const rack6W = rackWidth(nB) + 1;
-  f6.racks([{ spec: f6.zone('B'), aisles: nB }], 0, rack6W, '냉장');
+  f6.racks([{ spec: f6.zone('G'), aisles: nB }], 0, rack6W, '냉장');
   f6.liftsAndStaging();
   f6.docksNorth();
   const coldZ0 = SORT_Z0 - 0.25;
@@ -771,7 +771,7 @@ export function buildLayout(): Layout {
   const shX0 = rack6W + 1;
   const mid = bandDepth + 2 + (depth - bandDepth - 4) / 2;
   const shW = f6.shelvesIn(
-    'B',
+    'G',
     [
       { x0: shX0, z0: bandDepth + 0.6, x1: width - 22, z1: mid - 0.8 },
       { x0: shX0, z0: mid + 0.8, x1: width - 22, z1: depth - 1.2 },
@@ -780,13 +780,13 @@ export function buildLayout(): Layout {
     '냉장 B 피킹 선반 (라인 상품)',
   );
   // 냉장 방 안, 출고대기 바로 앞: 휠소터 줄 → DAS 존(컨베이어로 상품이 들어옴 — 핸드자키 대신, 사용자 §9). 동쪽: 분배(크레이트) → 야채 바닥 레인
-  const [b0, b1] = f6.stagingSpan('B');
+  const [b0, b1] = f6.stagingSpan('G');
   const ex0 = shX0 + shW + 1.2;
   f6.equip('WHEEL_SORTER', '휠소터 (냉장 — 박스째 → PPC 슈트 / 낱개 → DAS)', { x0: b0, z0: SORT_Z0, x1: ex0 - 0.5, z1: SORT_Z1 }, 'CHILLED');
   f6.equip('DAS', 'DAS 존 (냉장)', { x0: b0, z0: DAS_Z0, x1: b1, z1: sz1 }, 'CHILLED');
   const splitZ1 = bandDepth + 10;
   f6.equip('SPLIT', '분배 (MFC 크레이트 — 출고 용기)', { x0: ex0, z0: DAS_Z0, x1: width - 1, z1: splitZ1 });
-  f6.vegLanes('B', { x0: ex0, z0: splitZ1 + 1, x1: width - 1, z1: depth - 1 }, SKU_PLACE.veg);
+  f6.vegLanes('G', { x0: ex0, z0: splitZ1 + 1, x1: width - 1, z1: depth - 1 }, SKU_PLACE.veg);
   f6.equip('INBOUND', '입고 검수 (냉장)', { x0: 2, z0: DAS_Z0, x1: Math.min(16, b0 - 1), z1: sz1 }, 'CHILLED');
   f6.coldRoom(
     'CHILLED',
@@ -864,11 +864,11 @@ export function skuQuota(): Map<string, number> {
       const faces = f.locations.filter((l) => l.zone === z.letter && l.type === 'PICK_FACE').length;
       const pick = f.shelves.filter((l) => l.zone === z.letter);
       let n = faces;
-      if (z.letter === 'A') n += SKU_TARGET.FROZEN;
-      else if (z.letter === 'B') n += SKU_TARGET.CHILLED;
-      else if (z.letter === 'E' || z.letter === 'F') n += SKU_PLACE.efShelf;
-      else if (z.letter === 'G') n += SKU_TARGET.AMBIENT - L.floors.flatMap((x) => x.locations).filter((l) => l.type === 'PICK_FACE' && l.temp === 'AMBIENT').length - SKU_PLACE.efShelf * 2 - SKU_PLACE.autostore;
-      else if (z.letter === 'H') n += SKU_PLACE.autostore;
+      if (z.letter === 'H') n += SKU_TARGET.FROZEN;
+      else if (z.letter === 'G') n += SKU_TARGET.CHILLED;
+      else if (z.letter === 'C' || z.letter === 'D') n += SKU_PLACE.efShelf;
+      else if (z.letter === 'E') n += SKU_TARGET.AMBIENT - L.floors.flatMap((x) => x.locations).filter((l) => l.type === 'PICK_FACE' && l.temp === 'AMBIENT').length - SKU_PLACE.efShelf * 2 - SKU_PLACE.autostore;
+      else if (z.letter === 'F') n += SKU_PLACE.autostore;
       void pick;
       out.set(z.letter, (out.get(z.letter) ?? 0) + n);
     }
@@ -886,7 +886,7 @@ export function stagingCodeFor(rackLocationCode: string, stagingNo: number): str
   const spec = CHILGOK_FLOORS.find((f) => f.floor === floor);
   if (!spec) throw new Error(`층 없음: ${rackLocationCode}`);
   const temp = spec.zones.find((z) => z.letter === zone)?.temp ?? 'AMBIENT';
-  const want = temp === 'FROZEN' ? 'A' : temp === 'CHILLED' ? 'B' : null;
-  const letter = (want && spec.stagingLetters.find((l) => l === want)) ?? spec.stagingLetters.find((l) => l !== 'A' && l !== 'B') ?? spec.stagingLetters[0];
+  const want = temp === 'FROZEN' ? 'H' : temp === 'CHILLED' ? 'G' : null;
+  const letter = (want && spec.stagingLetters.find((l) => l === want)) ?? spec.stagingLetters.find((l) => l !== 'H' && l !== 'G') ?? spec.stagingLetters[0];
   return locationCode(letter, floor, 91, stagingNo, 0, 1);
 }

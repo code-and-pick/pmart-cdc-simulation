@@ -48,20 +48,20 @@ export interface Catalog {
 
 // 구역 성격별 상품 이름 [시뮬] — 실제 회사·상표 이름은 쓰지 않는다(설계 §9).
 const WORDS: Record<string, string[]> = {
-  A: ['냉동만두', '아이스크림', '냉동피자', '냉동새우', '돈까스', '냉동볶음밥', '떡갈비', '군만두', '냉동블루베리', '얼음컵'],
-  B: ['우유', '두부', '요거트', '계란', '햄', '치즈', '김치', '어묵', '소시지', '생크림'],
-  C: ['생수 2L', '쌀 10kg', '라면 박스', '식용유', '탄산수', '보리차'],
-  D: ['캔커피 박스', '즉석밥 묶음', '통조림', '밀가루', '설탕', '간장'],
-  E: ['시리얼', '참치캔', '즉석카레', '파스타면', '케첩', '마요네즈'],
-  F: ['감자칩', '초코과자', '콜라', '사이다', '젤리', '컵라면', '에너지바'],
-  G: ['물티슈', '주방세제', '섬유유연제', '세탁세제 리필', '샴푸', '바디워시', '고무장갑'],
+  H: ['냉동만두', '아이스크림', '냉동피자', '냉동새우', '돈까스', '냉동볶음밥', '떡갈비', '군만두', '냉동블루베리', '얼음컵'],
+  G: ['우유', '두부', '요거트', '계란', '햄', '치즈', '김치', '어묵', '소시지', '생크림'],
+  A: ['생수 2L', '쌀 10kg', '라면 박스', '식용유', '탄산수', '보리차'],
+  B: ['캔커피 박스', '즉석밥 묶음', '통조림', '밀가루', '설탕', '간장'],
+  C: ['시리얼', '참치캔', '즉석카레', '파스타면', '케첩', '마요네즈'],
+  D: ['감자칩', '초코과자', '콜라', '사이다', '젤리', '컵라면', '에너지바'],
+  E: ['물티슈', '주방세제', '섬유유연제', '세탁세제 리필', '샴푸', '바디워시', '고무장갑'],
   // 7F H 오토스토어 — 작고 가벼운 비식재(통 30kg·높이 425mm 안) [사용자 §5]
-  H: ['칫솔', '건전지', '치약', '면봉', '위생장갑', '지퍼백', '수세미', '소형 주방용품', '욕실 소품'],
+  F: ['칫솔', '건전지', '치약', '면봉', '위생장갑', '지퍼백', '수세미', '소형 주방용품', '욕실 소품'],
   // 랙 1단 박스 피킹면 — 5F 무거운 상자 · 7F 대용량
-  C_FACE: ['생수 2L 묶음', '쌀 10kg', '라면 박스', '식용유 박스', '탄산수 박스', '보리차 박스'],
-  D_FACE: ['캔커피 박스', '즉석밥 묶음', '통조림 박스', '밀가루 박스', '설탕 박스', '간장 박스'],
-  G_FACE: ['대용량 화장지', '키친타월 묶음', '세탁세제 대용량', '쓰레기봉투 묶음'],
-  H_FACE: ['대용량 화장지', '키친타월 묶음', '물티슈 박스', '세제 대용량'],
+  A_FACE: ['생수 2L 묶음', '쌀 10kg', '라면 박스', '식용유 박스', '탄산수 박스', '보리차 박스'],
+  B_FACE: ['캔커피 박스', '즉석밥 묶음', '통조림 박스', '밀가루 박스', '설탕 박스', '간장 박스'],
+  E_FACE: ['대용량 화장지', '키친타월 묶음', '세탁세제 대용량', '쓰레기봉투 묶음'],
+  F_FACE: ['대용량 화장지', '키친타월 묶음', '물티슈 박스', '세제 대용량'],
   // 6F 바닥 레인 → 분배
   VEG: ['샐러드', '콩나물', '버섯', '양배추', '상추', '깻잎', '대파', '양파'],
 };
@@ -105,18 +105,18 @@ export function buildCatalog(layout: Layout, baseDate: string): Catalog {
         if (arr.length < n) throw new Error(`구역 ${z} 피킹 칸 ${arr.length} < SKU ${n}`);
         for (const loc of arr.slice(0, n)) places.push({ loc, alt: [], handling, words });
       };
-      for (const loc of faces) places.push({ loc, alt: [], handling: z === 'C' || z === 'D' ? 'BOX' : 'FC', words: WORDS[`${z}_FACE`] ?? WORDS[z] });
+      for (const loc of faces) places.push({ loc, alt: [], handling: z === 'A' || z === 'B' ? 'BOX' : 'FC', words: WORDS[`${z}_FACE`] ?? WORDS[z] });
       const n = (quota.get(z) ?? 0) - faces.length;
-      if (z === 'A') take(shelves, n, 'DPS', WORDS.A);
-      else if (z === 'B') {
-        take(shelves, n - SKU_PLACE.veg, 'LINE', WORDS.B);
+      if (z === 'H') take(shelves, n, 'DPS', WORDS.H);
+      else if (z === 'G') {
+        take(shelves, n - SKU_PLACE.veg, 'LINE', WORDS.G);
         take(lanes, SKU_PLACE.veg, 'SPLIT', WORDS.VEG);
-      } else if (z === 'H') {
+      } else if (z === 'F') {
         // 오토스토어: SKU 하나 = 서로 다른 통의 칸 AUTOSTORE.compartmentsPerSku 개
         const per = AUTOSTORE.compartmentsPerSku;
         const k = Math.floor(comps.length / per);
         if (k < n) throw new Error(`오토스토어 칸 ${comps.length} 으로 SKU ${n} 못 둠`);
-        for (let i = 0; i < n; i++) places.push({ loc: comps[i], alt: Array.from({ length: per - 1 }, (_, j) => comps[i + (j + 1) * k]), handling: 'PORT', words: WORDS.H });
+        for (let i = 0; i < n; i++) places.push({ loc: comps[i], alt: Array.from({ length: per - 1 }, (_, j) => comps[i + (j + 1) * k]), handling: 'PORT', words: WORDS.F });
       } else if (n > 0) take(shelves, n, 'FC', WORDS[z] ?? ['상품']);
 
       // 보충 출발지 — 그 구역 보관 칸(RESERVE) 기둥(같은 통로·베이·슬롯), 피킹면 구역은 2~4단

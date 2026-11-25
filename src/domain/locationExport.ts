@@ -44,7 +44,7 @@ export function buildLocationExport(layout: Layout): LocationExport {
     for (const l of f.staging) put(l, { locationType: 'STAGING', capacity: { unit: 'BOX' } });
     for (const lift of f.lifts) {
       const letter = lift.code.split('-')[1];
-      const temp: TemperatureZone = letter === 'A' ? 'FROZEN' : letter === 'B' ? 'CHILLED' : 'AMBIENT';
+      const temp: TemperatureZone = letter === 'H' ? 'FROZEN' : letter === 'G' ? 'CHILLED' : 'AMBIENT';
       items.push({ locationCode: lift.code, centerId: CENTER_ID, temperatureZone: temp, locationType: 'STAGING', capacity: { unit: 'BOX' } });
       geometry[lift.code] = { floor: String(f.floor), x: round((lift.rect.x0 + lift.rect.x1) / 2), y: 0, z: round((lift.rect.z0 + lift.rect.z1) / 2) };
     }

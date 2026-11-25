@@ -331,7 +331,7 @@ const OUT_BOX = 0xf3f4f1;
 function WheelSorter({ e, floor }: { e: Equip; floor: FloorNo }) {
   const { sim, layout } = useApp();
   const f = layout.floors.find((x) => x.floor === floor)!;
-  const letter = e.temp === 'FROZEN' ? 'A' : e.temp === 'CHILLED' ? 'B' : floor === 7 ? 'G' : 'C';
+  const letter = e.temp === 'FROZEN' ? 'H' : e.temp === 'CHILLED' ? 'G' : floor === 7 ? 'E' : 'A';
   const slots = f.staging.filter((s) => s.zone === letter && s.bay <= MFCS.length);
   const busy = () => sim.speed > 0 && sim.sorterLog.some((x) => x.floor === floor && x.temp === e.temp && x.kind === 'IN' && sim.time - x.at < 90);
   const r = e.rect;

@@ -33,8 +33,8 @@ export interface FloorSpec {
   /** 문서 면적(평) — 보관 방은 이 평수 그대로, 나머지가 DT [정본 CDC-2, 사용자 2026-11-25 문서 면적 고정] */
   docPyeong: { storage: Record<string, number>; dt: number };
   /** 출고대기(91)·승강기 문(92)에 쓰는 구역 글자 — 그 층 구역 [정본 CDC-5] */
-  stagingLetters: ('A' | 'B' | 'C' | 'G')[];
-  liftLetter: 'B' | 'C' | 'G';
+  stagingLetters: ('A' | 'E' | 'G' | 'H')[];
+  liftLetter: 'A' | 'E' | 'G';
   /** 설비 자리(모두 DT) — band 북쪽 띠(선반 동쪽), east 보관 방 동쪽 [사용자 2026-11-25 2안] */
   equipment: { kind: EquipKind; label: string; where: 'band' | 'east'; temp?: Temp; weight?: number; maxW?: number; len?: number }[];
 }
@@ -46,15 +46,15 @@ export const CHILGOK_FLOORS: FloorSpec[] = [
     floor: 5,
     label: '5F 상온·냉동',
     zones: [
-      amb('C', '상온 C (무거운 상자)', 0),
-      amb('D', '상온 D (무거운 상자)', 0),
-      amb('E', '상온 E', 0),
-      amb('F', '상온 F (인기상품)', 0),
-      { letter: 'A', temp: 'FROZEN', label: '냉동 A', share: 1, levels: RACK.levels },
+      amb('A', '상온 A (무거운 상자)', 0),
+      amb('B', '상온 B (무거운 상자)', 0),
+      amb('C', '상온 C', 0),
+      amb('D', '상온 D (인기상품)', 0),
+      { letter: 'H', temp: 'FROZEN', label: '냉동 H', share: 1, levels: RACK.levels },
     ],
     docPyeong: { storage: { 상온: 1233, 냉동: 1000 }, dt: 633 },
-    stagingLetters: ['C', 'A'],
-    liftLetter: 'C',
+    stagingLetters: ['A', 'H'],
+    liftLetter: 'A',
     equipment: [
       { kind: 'WHEEL_SORTER', label: '1차 고속분류기(휠소터) (C·D 박스 → MFC 롤테이너)', where: 'band', weight: 1.3 },
       // DPS 피킹은 냉동 선반에서 — 여기는 MFC 빈 박스가 오가는 컨베이어만(사용자 2026-11-25)
@@ -67,10 +67,10 @@ export const CHILGOK_FLOORS: FloorSpec[] = [
   {
     floor: 6,
     label: '6F 냉장',
-    zones: [{ letter: 'B', temp: 'CHILLED', label: '냉장 B', share: 1, levels: RACK.levels }],
+    zones: [{ letter: 'G', temp: 'CHILLED', label: '냉장 G', share: 1, levels: RACK.levels }],
     docPyeong: { storage: { 냉장: 1700 }, dt: 1167 },
-    stagingLetters: ['B'],
-    liftLetter: 'B',
+    stagingLetters: ['G'],
+    liftLetter: 'G',
     equipment: [
       { kind: 'INBOUND', label: '입고 검수 (냉장)', where: 'band', temp: 'CHILLED', maxW: 14 },
       { kind: 'DAS', label: '라인 (DAS)', where: 'east' },
@@ -80,10 +80,10 @@ export const CHILGOK_FLOORS: FloorSpec[] = [
   {
     floor: 7,
     label: '7F 생활용품',
-    zones: [amb('G', '생활용품 G'), { ...amb('H', '생활용품 H (비식재 소형)'), bins: true }],
+    zones: [amb('E', '생활용품 E'), { ...amb('F', '생활용품 F (비식재 소형)'), bins: true }],
     docPyeong: { storage: { 상온: 2067 }, dt: 800 },
-    stagingLetters: ['G'],
-    liftLetter: 'G',
+    stagingLetters: ['E'],
+    liftLetter: 'E',
     equipment: [
       { kind: 'AUTOSTORE', label: '오토스토어 (비식재 H)', where: 'band', weight: 2.2 },
       { kind: 'INBOUND', label: '입고 검수 (상온)', where: 'band', temp: 'AMBIENT', maxW: 14 },

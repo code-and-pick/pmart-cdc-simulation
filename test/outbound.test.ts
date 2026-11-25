@@ -320,7 +320,7 @@ describe('다음 작업 받기·착수 (0.2.0 — 사용자 결정: PDA 자동 �
     // (0.9.0) 작업 기한 = 몫 TRF 중 가장 이른 기한 — 첫 작업에 이른 TRF 몫이 든다
     expect((await mb.pullNextTask('CDC01', 'fc-01', {}, key())).task.trfIds).toContain(trfs[1].trfId);
     const b = await mb.pullNextTask('CDC01', 'fc-02', { floor: '7' }, key());
-    expect(b.task.lines.every((l) => /^CDC01-[GH]-7-/.test(l.locationCode))).toBe(true);
+    expect(b.task.lines.every((l) => /^CDC01-[EF]-7-/.test(l.locationCode))).toBe(true);
     expect(await code(mb.pullNextTask('CDC01', 'fc-03', { zone: 'Z' }, key()))).toBe('NO_TASK_AVAILABLE');
     await drain();
     expect(await code(mb.pullNextTask('CDC01', 'fc-99', {}, key()))).toBe('NO_TASK_AVAILABLE');

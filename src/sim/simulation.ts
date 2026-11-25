@@ -796,7 +796,7 @@ export class Simulation implements DutyClock {
         // 5F FC 는 상온 C·D·E·F 만(냉동 A 는 DPS 컨베이어) — 다음 작업 받기 구역 거르기(계약 그대로)
         let got: Task | null = null;
         let last: unknown = null;
-        for (const z of ['C', 'D', 'E', 'F']) {
+        for (const z of ['A', 'B', 'C', 'D']) {
           try {
             got = (await this.backend.pullNextTask(CENTER_ID, a.id, { kind: 'PICK', floor: '5', zone: z }, newId('next'))).task;
             break;
@@ -1150,7 +1150,7 @@ export class Simulation implements DutyClock {
       const f = this.layout.floors.find((x) => x.floor === 5)!;
       const zoneOf = dpsZoneOf(f);
       const by: Set<string>[] = Array.from({ length: FLOW.dps.zones }, () => new Set());
-      for (const l of f.shelves) if (l.zone === 'A') by[zoneOf(l)].add(l.code.split('-')[3]);
+      for (const l of f.shelves) if (l.zone === 'H') by[zoneOf(l)].add(l.code.split('-')[3]);
       this.dpsAislesCache = by.map((x) => [...x].sort());
     }
     return this.dpsAislesCache[zi] ?? [];
@@ -1217,7 +1217,7 @@ export class Simulation implements DutyClock {
       }
       try {
         // 자기 통로 작업만 받는다(0.10.0 aisles[]) — 자리를 지키는 구역 작업자
-        ({ task } = await this.backend.pullNextTask(CENTER_ID, a.id, { kind: 'PICK', floor: '5', zone: 'A', pickMode: 'DISCRETE', aisles: myAisles }, newId('next')));
+        ({ task } = await this.backend.pullNextTask(CENTER_ID, a.id, { kind: 'PICK', floor: '5', zone: 'H', pickMode: 'DISCRETE', aisles: myAisles }, newId('next')));
         if (task.state === 'ACCEPTED') task = await this.backend.startTask(task.taskId, a.id, newId('start'), task.version);
       } catch (e) {
         if (!(e instanceof ApiProblem && e.problem.code === 'NO_TASK_AVAILABLE')) throw e;

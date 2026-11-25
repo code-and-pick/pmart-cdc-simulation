@@ -22,13 +22,13 @@ describe('위치 목록 내보내기 [CDC-7, cdc-location 0.2.0]', () => {
     for (const i of ex.items) {
       const [, zone, , aisle, bay, level, slot] = i.locationCode.split('-').map((x, k) => (k >= 3 ? Number(x) : x)) as [string, string, string, number, number, number, number];
       if (aisle <= 60) {
-        expect(i.locationType).toBe(['C', 'D', 'G'].includes(zone) && level === 1 ? 'PICK_FACE' : 'RESERVE');
+        expect(i.locationType).toBe(['A', 'B', 'E'].includes(zone) && level === 1 ? 'PICK_FACE' : 'RESERVE');
         expect(level >= 1 && level <= 4 && slot >= 1 && slot <= 2).toBe(true);
       } else if (aisle === 93) {
         expect(i.locationType).toBe('PICK_FACE');
       } else if (aisle <= 89) {
         expect(i.locationType).toBe('PICK_FACE');
-        expect(bay >= 1 && level >= 1 && level <= (zone === 'H' ? 16 : 5) && slot >= 1 && slot <= 3).toBe(true);
+        expect(bay >= 1 && level >= 1 && level <= (zone === 'F' ? 16 : 5) && slot >= 1 && slot <= 3).toBe(true);
         expect(i.pickFaceMinQty).toBeNull();
         expect(i.pickFaceTargetQty).toBeNull();
       } else if (aisle === 90) expect(i.locationType).toBe('DOCK');
