@@ -39,8 +39,7 @@ describe('층 배치 [사용자 §3]', () => {
     const amb = f.rooms.find((r) => r.temp === 'AMBIENT')!.rect;
     const s = f.equipment.find((x) => x.kind === 'WHEEL_SORTER' && x.temp === 'AMBIENT')!;
     expect(s.rect.x0 >= amb.x0 && s.rect.x1 <= amb.x1).toBe(true);
-    expect(f.equipment.some((e) => e.kind === 'INBOUND')).toBe(false); // 5F 띠가 모자라 입고 검수는 B1 도크 쪽
-    expect(L.b1Equipment.some((e) => e.kind === 'INBOUND' && e.temp === 'FROZEN')).toBe(true);
+    expect(f.equipment.some((e) => e.kind === 'INBOUND' && e.temp === 'FROZEN')).toBe(true); // 냉동 입고 검수 — 냉동 도크 옆
     const dps = f.equipment.find((x) => x.kind === 'DPS')!;
     expect(inRects((dps.rect.x0 + dps.rect.x1) / 2, (dps.rect.z0 + dps.rect.z1) / 2, frz.rects)).toBe(true);
     expect(frz.doors.map((d) => d.kind).sort()).toEqual(['AIR_CURTAIN', 'ANTEROOM', 'FORKLIFT']);
@@ -75,6 +74,26 @@ describe('층 배치 [사용자 §3]', () => {
     for (const f of L.floors) {
       for (const r of f.rows) expect((r.z1 - r.z0) / RACK.bayW).toBeCloseTo(RACK.bundleBays, 6);
       for (const r of f.rows) expect(f.rows.filter((o) => o !== r && o.z0 === r.z0 && Math.abs(Math.abs(o.cx - r.cx) - RACK.depth) < 1e-6)).toHaveLength(1);
+    }
+  });
+});
+
+describe('도크 [사용자 2026-11-26 — 기사 사진 도크 문 "4-16" = 층-번호]', () => {
+  it('층마다 북쪽 벽 도크 — 냉동 5F·냉장 6F·상온 7F, 문 번호 = 층-번호, 위치 코드 90 DOCK, 지하 B1 없음', () => {
+    expect(L.docks.length).toBeGreaterThan(0);
+    for (const d of L.docks) {
+      expect(d.type).toBe('DOCK');
+      expect(d.aisle).toBe(90);
+      expect(d.short.startsWith(`${d.floor}-`)).toBe(true);
+      expect(d.floor).toBe(({ FROZEN: 5, CHILLED: 6, AMBIENT: 7 } as const)[d.temp]);
+      expect(d.pos.z).toBeLessThan(1); // 북쪽 벽
+    }
+    for (const f of L.floors) {
+      // 출고대기 동쪽, 자리가 없으면(5F — 냉동 방 벽) 승강기와 출고대기 사이 — 출고대기·승강기와 겹치지 않음
+      const st0 = Math.min(...f.staging.map((s) => s.pos.x));
+      const st1 = Math.max(...f.staging.map((s) => s.pos.x));
+      const liftX1 = Math.max(...f.lifts.map((l) => l.rect.x1));
+      for (const d of f.docks) expect(d.pos.x > st1 || (d.pos.x > liftX1 && d.pos.x < st0)).toBe(true);
     }
   });
 });

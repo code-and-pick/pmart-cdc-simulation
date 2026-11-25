@@ -17,7 +17,6 @@ const FLOORS: { key: FloorKey; text: string }[] = [
   { key: 5, text: '5F 상온·냉동' },
   { key: 6, text: '6F 냉장' },
   { key: 7, text: '7F 생활용품' },
-  { key: 'B1', text: 'B1 접안' },
 ];
 
 export function TopBar() {

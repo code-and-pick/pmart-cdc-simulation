@@ -66,7 +66,7 @@ function Summary() {
     ['자키 대기 박스', q.jockey],
     ['출고대기 검품 전·중', q.stagedWait],
     ['출고대기 합격(하강 전)', q.stagedPassed],
-    ['지하 마당 R/T', q.atB1],
+    ['도크 앞 R/T', q.atDock],
     ['켜진 불(DPS·라인)', q.lights],
   ];
   return (

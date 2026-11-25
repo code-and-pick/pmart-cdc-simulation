@@ -325,6 +325,9 @@ function FlowBoxes({ path, n, busy, color = 0xd2a679, size = [0.5, 0.32, 0.38] }
  * 휠소터 줄 [사용자 §9 — 배민 인천기지 구조] — 출고대기 바로 앞을 동서로 지나는 본선, PPC-01~05 출고대기 롤테이너 자리로 북쪽 슈트(짧은 갈래).
  * 박스째 가는 상품은 슈트로 롤테이너에 바로, 낱개로 나눌 상품은 남쪽 DAS 존으로. 실제로 투입된 때만(최근 90초) 박스가 흐른다.
  */
+/** 흰 출고 박스(MFC 박스) 색 */
+const OUT_BOX = 0xf3f4f1;
+
 function WheelSorter({ e, floor }: { e: Equip; floor: FloorNo }) {
   const { sim, layout } = useApp();
   const f = layout.floors.find((x) => x.floor === floor)!;
@@ -354,7 +357,8 @@ function WheelSorter({ e, floor }: { e: Equip; floor: FloorNo }) {
       })}
       </StaticMerge>
       <TowerLight x={r.x1 - 0.4} z={r.z1 + 0.3} busy={busy} />
-      <FlowBoxes path={[new THREE.Vector3(r.x1 - 0.5, 0.86, cz), new THREE.Vector3(r.x0 + 0.5, 0.86, cz)]} n={Math.max(4, Math.floor(len / 4))} busy={busy} />
+      {/* 휠소터 위는 닫은 흰 출고 박스(기사 사진 — 손잡이 구멍 있는 흰 박스) */}
+      <FlowBoxes path={[new THREE.Vector3(r.x1 - 0.5, 0.86, cz), new THREE.Vector3(r.x0 + 0.5, 0.86, cz)]} n={Math.max(4, Math.floor(len / 4))} busy={busy} color={OUT_BOX} />
     </group>
   );
 }
@@ -395,7 +399,7 @@ function DpsZones({ floor }: { floor: FloorNo }) {
       ))}
       <instancedMesh ref={boxes} args={[undefined, undefined, 40]} frustumCulled={false}>
         <boxGeometry args={[0.42, 0.3, 0.34]} />
-        <meshStandardMaterial color={0xd2a679} roughness={0.85} map={boxTexture()} />
+        <meshStandardMaterial color={OUT_BOX} roughness={0.85} map={boxTexture()} />
       </instancedMesh>
     </group>
   );
@@ -570,7 +574,7 @@ function DpsConveyor({ e, floor }: { e: Equip; floor: FloorNo }) {
       <StaticMerge>
         <Conveyor x={cx} z={cz} len={len} dir={alongX ? 'x' : 'z'} w={0.8} h={0.8} />
       </StaticMerge>
-      <FlowBoxes path={path} n={Math.max(4, Math.floor(len / 3))} busy={busy} color={0xd2a679} size={[0.42, 0.3, 0.32]} />
+      <FlowBoxes path={path} n={Math.max(4, Math.floor(len / 3))} busy={busy} color={OUT_BOX} size={[0.42, 0.3, 0.32]} />
     </group>
   );
 }
@@ -633,7 +637,7 @@ function PortBoxes({ e }: { e: Equip }) {
           <group key={`${p}${m.id}`} position={[px + (i - (MFCS.length - 1) / 2) * 0.42, 0, e.rect.z1 - 0.3]}>
             <mesh position={[0, 0.95, 0]}>
               <boxGeometry args={[0.36, 0.26, 0.3]} />
-              <meshStandardMaterial color={0xd2a679} roughness={0.85} map={boxTexture()} />
+              <meshStandardMaterial color={OUT_BOX} roughness={0.85} map={boxTexture()} />
             </mesh>
           </group>
         )),

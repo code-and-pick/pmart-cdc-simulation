@@ -1,12 +1,12 @@
-// 칠곡 DC 하루 — 시계, 근무(주간조·석간·지하 상차), TRF 유입, Wave 배포, 작업자,
-// 검품 → 승강기 하강 → 지하 상차 → 23:00 출발 검증(TOUT: CDC −q · Transit +q).
+// 칠곡 DC 하루 — 시계, 근무(주간조·석간·도크 상차), TRF 유입, Wave 배포, 작업자,
+// 검품 → 도크로(5F 상온은 승강기로 7F) → 도크 상차 → 23:00 출발 검증(TOUT: CDC −q · Transit +q).
 // 근거: 설계 §5·§6·§12, 알바몬 후기(석간 13~22시·휴식·FC 지역 바코드·분배·라인·21시~ 하강·보냉 커버),
 //       우아한청년들 하루 일정(08:00 입고·13:00 선별·23:00 출발), WMS CDC-F-019~022(1요청·1이관·1출발).
 // 백엔드와는 계약 API 로만 주고받는다 — 지금은 MockBackend(설계 §12 ⑧ 실서버 모드 전).
 // 운송(§12 ⑦): 22:00 배차(고정 노선 × 온도대, MockTms) → 출차 30분 전 상차(방문 역순) → 노선별 출차 → 주행 → MFC 도착·하차(동시 3대)·인계 → 복귀.
 // React·three 에 의존하지 않는다(시험이 화면 없이 하루를 돌린다).
 
-import { AUTOSTORE, FLOW, CENTER_ID, MFCS, SHELF, OUTBOUND, SHIFT, SIM_START, SUPPLY, TMS, WORK, WORKFORCE } from '../config';
+import { AUTOSTORE, DOCK_FLOOR, DOCKS, FLOW, CENTER_ID, MFCS, SHELF, OUTBOUND, SHIFT, SIM_START, SUPPLY, TMS, WORK, WORKFORCE } from '../config';
 // 시간표 근거: 정본 CDC-8(PR #447) — 21:30 WMS 완료 · 22:00 R/T 카운팅 · 22:30 상차 · 23:00~ 출차
 import type { MockBackend } from '../backend/mock/MockBackend';
 import type { ApiCallRecord, DomainEventRecord } from '../backend/port';
@@ -17,7 +17,7 @@ import { stagingCodeFor, type FloorLayout, type Layout, type Location } from '..
 import type { FloorKey, FloorNo } from '../domain/sites/chilgok';
 import { newId, Rng } from '../util/rng';
 import { Agent, ROLE_KO, type DutyClock, type Role, type Shift } from './agent';
-import { B1Site, dasRows, dpsZoneOf, FloorSite, liftDoor, type P, type WalkPoint } from './site';
+import { dasRows, dpsZoneOf, FloorSite, liftDoor, type P, type WalkPoint } from './site';
 
 /** 설비 줄 수(라인·분배) */
 const dasRowsOf = (f: FloorLayout, kind: 'DAS' | 'SPLIT') => {
@@ -129,12 +129,13 @@ export interface StagedBox {
   contents: Contents;
 }
 
-/** 지하 상차 마당에 내려온 롤테이너 */
-interface RollAtB1 {
+/** 도크 앞에 내려놓은 롤테이너 */
+/** 도크 앞에 내려놓은 R/T — 도크 층(냉동 5F·냉장 6F·상온 7F) [사용자 2026-11-26 층마다 도크] */
+interface RollAtDock {
   boxes: StagedBox[];
   mfcId: string;
   trfId: string;
-  lift: number;
+  floor: FloorNo;
 }
 
 /** 한 운행(차 한 대 · 온도대 하나 · 정차 ≤3) — 계획은 MockTms, 진행은 시뮬레이터가 시각대로 기록 */
@@ -148,7 +149,7 @@ export interface TripRun {
   departedAt?: number;
   result?: string;
   stops: { mfcId: string; trfIds: string[]; arrivedAt?: number; handedAt?: number; leftAt?: number; received?: number; rtOut?: number; rtBack?: number }[];
-  /** 칠곡으로 돌아와 지하 B1 에 내린 빈 R/T 수 */
+  /** 칠곡으로 돌아와 도크에 내린 빈 R/T 수 */
   rtUnloaded?: number;
   returnedAt?: number;
 }
@@ -177,7 +178,6 @@ export class Simulation implements DutyClock {
   speed = 15;
   readonly agents: Agent[] = [];
   readonly sites = new Map<FloorNo, FloorSite>();
-  readonly b1: B1Site;
   readonly events: SimEvent[] = [];
   /** 오른쪽 API·이벤트 탭 — 계약 호출과 도메인 사건(최근 500) */
   readonly apiLog: ApiCallRecord[] = [];
@@ -208,7 +208,7 @@ export class Simulation implements DutyClock {
   readonly boxTravel: { floor: FloorNo; dist: number; sec: number; by?: 'PERSON' | 'CONVEYOR' }[] = [];
   private splitRow = 0;
   /** 지금 싣는 중인 R/T — 방문 역순 지키기 */
-  private readonly rollsLoading = new Set<RollAtB1>();
+  private readonly rollsLoading = new Set<RollAtDock>();
   /** 라인: 스캔 1회당 켜진 칸 수 분포(인덱스 = 칸 수) [사용자 §7] */
   readonly lineLitHist: number[] = [];
   readonly lineLitByFloor = new Map<FloorNo, number[]>();
@@ -228,8 +228,8 @@ export class Simulation implements DutyClock {
   readonly jockeyQueue = new Map<FloorNo, JockeyJob[]>(FLOORS.map((f) => [f, []]));
   /** 출고대기 자리(91 코드) → 그 자리에 놓인 박스 */
   readonly staged = new Map<string, StagedBox[]>();
-  /** 지하 상차 마당에 내려와 실을 차례를 기다리는 롤테이너 */
-  readonly atB1: RollAtB1[] = [];
+  /** 도크 앞에서 실을 차례를 기다리는 롤테이너(도크 층) */
+  readonly atDock: RollAtDock[] = [];
   /** TMS — MOCK 운송(fleet·planning·execution) */
   readonly tms: MockTms;
   /** 운행 진행 (tripId →) */
@@ -253,7 +253,6 @@ export class Simulation implements DutyClock {
     private readonly opt: SimOptions,
   ) {
     this.rng = new Rng(opt.seed ?? 20261125);
-    this.b1 = new B1Site(layout);
     this.tms = new MockTms({ now: () => this.time, baseDate: opt.baseDate, outbound: backend });
     const keep = <T,>(arr: T[], x: T) => {
       arr.push(x);
@@ -274,11 +273,15 @@ export class Simulation implements DutyClock {
       this.log('flow', `${e.type} · ${e.summary}`);
     });
     for (const fl of FLOORS) this.hire(fl);
-    for (let i = 1; i <= OUTBOUND.loaders; i++) {
-      const no = String(i).padStart(2, '0');
-      const home = this.b1.home();
-      this.agents.push(new Agent(`loader-b1-${no}`, `${ROLE_KO.LOADER} B1-${no}`, 'LOADER', 'B1', 'NIGHT', { ...home, x: home.x + i * 0.6 }, this));
-    }
+    // 상차 작업자 — 도크 층마다(냉동 5F·냉장 6F·상온 7F) [사용자 2026-11-26 층마다 도크]
+    const dockFloors = [...new Set(DOCKS.map((d) => d.floor))];
+    const per = Math.ceil(OUTBOUND.loaders / dockFloors.length);
+    for (const fl of dockFloors)
+      for (let i = 1; i <= per; i++) {
+        const no = String(i).padStart(2, '0');
+        const home = this.sites.get(fl)!.dockYard();
+        this.agents.push(new Agent(`loader-${fl}-${no}`, `${ROLE_KO.LOADER} ${fl}F-${no}`, 'LOADER', fl, 'NIGHT', { ...home, x: home.x + i * 0.6 }, this));
+      }
     for (const a of this.agents) void this.run(a);
   }
 
@@ -345,7 +348,7 @@ export class Simulation implements DutyClock {
     add('FC', 'EVENING', w.fc);
     add('SORT', 'EVENING', w.sort);
     add('JOCKEY', 'EVENING', w.jockey);
-    // 야간 자키 — 22:00 뒤 남은 R/T 하강(지하 상차와 같은 시간대) [가정]
+    // 야간 자키 — 22:00 뒤 남은 R/T 하강(도크 상차와 같은 시간대) [가정]
     add('JOCKEY', 'NIGHT', OUTBOUND.nightJockeys, w.jockey + 1);
     add('INSPECT', 'EVENING', OUTBOUND.inspectorsPerFloor);
     if (this.sites.get(fl)!.f.equipment.some((e) => e.kind === 'DPS')) add('DPS', 'EVENING', FLOW.dps.zones * FLOW.dps.workersPerZone);
@@ -444,7 +447,7 @@ export class Simulation implements DutyClock {
       // 22:00 PDA R/T 카운팅 — 박스 스캔 → R/T, 온도대별 [CDC-8]
       this.day.rtCounted = true;
       for (const mf of MFCS) {
-        const boxes = [...[...this.staged.values()].flat(), ...this.atB1.flatMap((r) => r.boxes)].filter((b) => b.mfcId === mf.id);
+        const boxes = [...[...this.staged.values()].flat(), ...this.atDock.flatMap((r) => r.boxes)].filter((b) => b.mfcId === mf.id);
         const byTemp = new Map<TemperatureZone, number>();
         for (const b of boxes) byTemp.set(b.temp, (byTemp.get(b.temp) ?? 0) + 1);
         const rt = [...byTemp.entries()].map(([k, n]) => `${TEMP_KO[k]} ${Math.ceil(n / OUTBOUND.boxesPerRt)}`).join(' · ');
@@ -473,15 +476,15 @@ export class Simulation implements DutyClock {
   }
 
   private planTrips() {
-    // 22:00 R/T 카운팅 — TRF 마다 R/T 수(출고대기·지하 마당·아직 오는 박스) → 한 대 R/T 를 넘으면 알림(용차 없음 — 모두 정규차, 사용자 2026-11-25)
+    // 22:00 R/T 카운팅 — TRF 마다 R/T 수(출고대기·도크 앞·아직 오는 박스) → 한 대 R/T 를 넘으면 알림(용차 없음 — 모두 정규차, 사용자 2026-11-25)
     const rtByTrf = new Map<string, number>();
-    const boxes = [...[...this.staged.values()].flat(), ...this.atB1.flatMap((r) => r.boxes)];
+    const boxes = [...[...this.staged.values()].flat(), ...this.atDock.flatMap((r) => r.boxes)];
     for (const t of this.backend.listTransfers()) rtByTrf.set(t.trfId, Math.ceil(boxes.filter((b) => b.trfId === t.trfId).length / OUTBOUND.boxesPerRt));
     const plans = this.tms.planDay(this.backend.listTransfers(), 0, rtByTrf);
     const docksByTemp: Record<TemperatureZone, Location[]> = {
-      FROZEN: this.layout.docks.filter((d) => d.zone === 'A'),
-      CHILLED: this.layout.docks.filter((d) => d.zone === 'B'),
-      AMBIENT: this.layout.docks.filter((d) => d.zone === 'C'),
+      FROZEN: this.layout.docks.filter((d) => d.temp === 'FROZEN'),
+      CHILLED: this.layout.docks.filter((d) => d.temp === 'CHILLED'),
+      AMBIENT: this.layout.docks.filter((d) => d.temp === 'AMBIENT'),
     };
     const used: Record<TemperatureZone, number> = { FROZEN: 0, CHILLED: 0, AMBIENT: 0 };
     for (const plan of plans) {
@@ -522,14 +525,14 @@ export class Simulation implements DutyClock {
     return new Date(Date.parse(`${this.opt.baseDate}T00:00:00+09:00`) + sec * 1000).toISOString();
   }
 
-  /** 그 운행 몫이 모두 실렸는지 — 피킹·분류·출고대기·하강·지하 마당·싣는 중에 남은 것 없음 */
+  /** 그 운행 몫이 모두 실렸는지 — 피킹·분류·출고대기·도크로 옮기는 중·도크 앞·싣는 중에 남은 것 없음 */
   private tripLoaded(r: TripRun): boolean {
     if (!this.day.released || !r.loaded.length || this.loading.has(r.plan.tripId)) return false;
     const ids = new Set(r.plan.stops.flatMap((s) => s.trfIds));
     if (this.backend.findTasks((t) => t.trfIds.some((id) => ids.has(id)) && !TERMINAL.includes(t.state)).length) return false;
     for (const id of ids) if (this.pendingTrf(id)) return false;
     if ([...this.staged.values()].flat().some((b) => ids.has(b.trfId))) return false;
-    return !this.atB1.some((x) => ids.has(x.trfId));
+    return !this.atDock.some((x) => ids.has(x.trfId));
   }
 
   /**
@@ -582,7 +585,7 @@ export class Simulation implements DutyClock {
           r.state = 'RETURNED';
           r.returnedAt = this.time;
           r.rtUnloaded = r.stops.reduce((a, x) => a + (x.rtBack ?? 0), 0);
-          if (r.rtUnloaded) this.log('flow', `${hm(this.time)} ${r.plateNo} 복귀 — 지하 B1 에 빈 R/T ${r.rtUnloaded}대 내림`);
+          if (r.rtUnloaded) this.log('flow', `${hm(this.time)} ${r.plateNo} 복귀 — 도크에 빈 R/T ${r.rtUnloaded}대 내림`);
         });
         return;
       }
@@ -673,7 +676,7 @@ export class Simulation implements DutyClock {
   }
 
   private siteOf(a: Agent): RouteSite {
-    return a.floor === 'B1' ? this.b1 : this.sites.get(a.floor)!;
+    return this.sites.get(a.floor as FloorNo)!;
   }
   private floorSite(a: Agent): FloorSite {
     return this.sites.get(a.floor as FloorNo)!;
@@ -1594,20 +1597,27 @@ export class Simulation implements DutyClock {
     const first = arr.find((b) => b.state === 'PASSED')!;
     const boxes = arr.filter((b) => b.state === 'PASSED' && b.trfId === first.trfId).slice(0, OUTBOUND.boxesPerRt);
     for (const b of boxes) b.state = 'MOVING';
+    // 그 온도 도크 층으로 — 같은 층이면 도크 앞에 바로, 아니면(5F 상온 → 7F) 승강기로 [사용자 2026-11-26 층마다 도크]
+    const dockFl = DOCK_FLOOR[ready.temp as 'FROZEN' | 'CHILLED' | 'AMBIENT'];
     const lift = (MFCS.find((x) => x.id === boxes[0].mfcId)?.staging ?? 1) % f.lifts.length || f.lifts.length;
-    a.pda = { title: '자키 — 하강', step: `${ready.short} 롤테이너 → 승강기 ${lift}`, rows: [['박스', `${boxes.length}`], ['MFC', MFCS.find((x) => x.id === boxes[0].mfcId)?.name ?? '']] };
+    a.pda = { title: '자키 — 도크로', step: dockFl === fl ? `${ready.short} 롤테이너 → 도크 앞` : `${ready.short} 롤테이너 → 승강기 ${lift} → ${dockFl}F 도크`, rows: [['박스', `${boxes.length}`], ['MFC', MFCS.find((x) => x.id === boxes[0].mfcId)?.name ?? '']] };
     await this.go(a, site.front(ready), WORK.walk, `출고대기로 (${ready.short})`);
     await a.wait(WORK.jockeyHandle, '롤테이너 싣기');
     a.carrying = 'ROLL';
     a.cold = ready.temp !== 'AMBIENT';
-    await this.go(a, liftDoor(f, lift), WORK.cart, `승강기 ${lift} 로`);
-    await a.wait(OUTBOUND.liftRide, '승강기로 지하에 내림');
+    if (dockFl === fl) {
+      await this.go(a, site.dockYard(), WORK.cart, '도크 앞으로');
+      await a.wait(WORK.jockeyHandle, '도크 앞에 내려놓기');
+    } else {
+      await this.go(a, liftDoor(f, lift), WORK.cart, `승강기 ${lift} 로`);
+      await a.wait(OUTBOUND.liftRide, `승강기로 ${dockFl}F 도크 층에`);
+    }
     // 지금 목록에서 뺀다 — 처음에 읽은 arr 로 덮으면 그사이 다른 자키가 내린 박스가 'MOVING' 으로 되살아나 출차가 막혔다(2026-11-25)
     this.staged.set(
       ready.code,
       (this.staged.get(ready.code) ?? []).filter((b) => !boxes.includes(b)),
     );
-    this.atB1.push({ boxes, mfcId: boxes[0].mfcId, trfId: boxes[0].trfId, lift });
+    this.atDock.push({ boxes, mfcId: boxes[0].mfcId, trfId: boxes[0].trfId, floor: dockFl });
     a.carrying = null;
     a.cold = false;
     a.done += boxes.length;
@@ -1648,15 +1658,16 @@ export class Simulation implements DutyClock {
   }
 
   /**
-   * 지하 상차 — 그 운행 출차 30분 전부터(TMS §3), 방문 역순(뒤 정차 R/T 먼저, §7.4)으로 승강기에서 내려온 R/T 를 차에 싣고 LOADED 등록.
+   * 도크 상차 — 그 운행 출차 30분 전부터(TMS §3), 방문 역순(뒤 정차 R/T 먼저, §7.4)으로 승강기에서 내려온 R/T 를 차에 싣고 LOADED 등록.
    * LOADED ≠ 출발, 수량 전기 없음.
    */
   private async loadOnce(a: Agent) {
-    const ready = this.atB1
+    const ready = this.atDock
+      .filter((roll) => roll.floor === a.floor)
       .map((roll) => ({ roll, run: this.runByTrf.get(roll.trfId) }))
-      .filter((x): x is { roll: RollAtB1; run: TripRun } => !!x.run && (x.run.state === 'PLANNED' || x.run.state === 'LOADING') && this.time >= (x.run.plan.plannedDepartMin - TMS.loadLeadMin) * 60)
+      .filter((x): x is { roll: RollAtDock; run: TripRun } => !!x.run && (x.run.state === 'PLANNED' || x.run.state === 'LOADING') && this.time >= (x.run.plan.plannedDepartMin - TMS.loadLeadMin) * 60)
       // 방문 역순 — 뒤 정차 몫이 아직 내려오는 중이면 앞 정차 R/T 는 기다린다(차 안쪽부터 뒤 정차 몫)
-      .filter(({ roll, run }) => !run.plan.stops.slice(this.stopSeq(run, roll.trfId) + 1).some((st) => st.trfIds.some((id) => this.pendingTrf(id) || [...this.staged.values()].flat().some((b) => b.trfId === id) || this.atB1.some((x) => x !== roll && x.trfId === id) || [...this.rollsLoading].some((x) => x.trfId === id))))
+      .filter(({ roll, run }) => !run.plan.stops.slice(this.stopSeq(run, roll.trfId) + 1).some((st) => st.trfIds.some((id) => this.pendingTrf(id) || [...this.staged.values()].flat().some((b) => b.trfId === id) || this.atDock.some((x) => x !== roll && x.trfId === id) || [...this.rollsLoading].some((x) => x.trfId === id))))
       .sort((x, y) => x.run.plan.plannedDepartMin - y.run.plan.plannedDepartMin || this.stopSeq(y.run, y.roll.trfId) - this.stopSeq(x.run, x.roll.trfId));
     const pick = ready[0];
     if (!pick) {
@@ -1666,7 +1677,7 @@ export class Simulation implements DutyClock {
       return;
     }
     const { roll, run } = pick;
-    this.atB1.splice(this.atB1.indexOf(roll), 1);
+    this.atDock.splice(this.atDock.indexOf(roll), 1);
     this.rollsLoading.add(roll);
     const id = run.plan.tripId;
     this.loading.set(id, (this.loading.get(id) ?? 0) + 1);
@@ -1684,18 +1695,19 @@ export class Simulation implements DutyClock {
     return run.plan.stops.findIndex((s) => s.trfIds.includes(trfId));
   }
 
-  private async loadRoll(a: Agent, roll: RollAtB1, run: TripRun) {
+  private async loadRoll(a: Agent, roll: RollAtDock, run: TripRun) {
     const p = run.plan;
     if (run.state === 'PLANNED') {
       run.state = 'LOADING';
       this.tms.markLoading(p.tripId);
     }
     const mfcName = MFCS.find((m) => m.id === roll.mfcId)?.name ?? roll.mfcId;
-    a.pda = { title: '상차', step: `승강기 ${roll.lift} → ${run.dock.short}`, rows: [['차', `${run.plateNo} (${TEMP_KO[p.temp]})`], ['노선', `${p.region} · 출차 ${fmt(p.plannedDepartMin)}`], ['정차', `${this.stopSeq(run, roll.trfId) + 1}/${p.stops.length} ${mfcName}`], ['박스', `${roll.boxes.length}`]] };
-    await this.go(a, this.b1.liftLanding(roll.lift), WORK.walk, `승강기 ${roll.lift} 착지로`);
+    a.pda = { title: '상차', step: `도크 앞 → ${run.dock.short}`, rows: [['차', `${run.plateNo} (${TEMP_KO[p.temp]})`], ['노선', `${p.region} · 출차 ${fmt(p.plannedDepartMin)}`], ['정차', `${this.stopSeq(run, roll.trfId) + 1}/${p.stops.length} ${mfcName}`], ['박스', `${roll.boxes.length}`]] };
+    const site = this.floorSite(a);
+    await this.go(a, site.dockYard(), WORK.walk, '도크 앞 R/T 로');
     a.carrying = 'ROLL';
     a.cold = p.temp !== 'AMBIENT';
-    await this.go(a, this.b1.dock(run.dock), WORK.cart, `${run.dock.short} 차로`);
+    await this.go(a, site.front(run.dock), WORK.cart, `${run.dock.short} 차로`);
     a.pda.step = `박스 ${roll.boxes.length}개 스캔 대조 (MFC·TRF·온도)`;
     await a.wait(roll.boxes.length * WORK.loadScan, '박스 스캔 대조 — MFC·TRF·온도 확인');
     a.pda.step = '차에 싣기 (방문 역순)';
@@ -1742,7 +1754,7 @@ export class Simulation implements DutyClock {
     if (m < 13 * 60) return '주간 · TRF 할당·선반 보충';
     if (m < OUTBOUND.lowerFrom) return '석간 · 피킹·분류·검품';
     if (m < OUTBOUND.loadFrom) return '하강 · R/T 카운팅·배차';
-    if (!runs.some((r) => r.departedAt !== undefined)) return '지하 상차';
+    if (!runs.some((r) => r.departedAt !== undefined)) return '도크 상차';
     if (runs.some((r) => r.state !== 'RETURNED' && r.state !== 'CANCELLED')) return '운송 · MFC 인계';
     return '마감 · 복귀';
   }
@@ -1756,7 +1768,7 @@ export class Simulation implements DutyClock {
       jockey: [...this.jockeyQueue.values()].reduce((s, q) => s + q.length, 0),
       stagedWait: staged.filter((b) => b.state !== 'PASSED' && b.state !== 'MOVING').length,
       stagedPassed: staged.filter((b) => b.state === 'PASSED').length,
-      atB1: this.atB1.length,
+      atDock: this.atDock.length,
       carts: this.carts.size,
       lights: this.lights.length,
     };

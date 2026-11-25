@@ -100,6 +100,13 @@ export class FloorSite {
     };
   }
 
+  /** 도크 앞 R/T 내려놓는 자리 — 이 층 도크 줄 가운데, 북쪽 벽 안쪽 [사용자 2026-11-26 층마다 도크] */
+  dockYard(): WalkPoint {
+    const xs = this.f.docks.map((d) => d.pos.x);
+    const x = xs.length ? (Math.min(...xs) + Math.max(...xs)) / 2 : this.home().x;
+    return { x, z: Math.min(3.2, this.f.walk.northZ), lane: 'N' };
+  }
+
   /** 설비에 물건을 내려놓는 자리 — 띠 설비는 북쪽 통로 쪽, 동쪽 설비는 랙 앞 통로 쪽 */
   dropAt(kind: EquipKind): WalkPoint {
     const e = this.f.equipment.find((x) => x.kind === kind);

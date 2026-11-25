@@ -284,9 +284,9 @@ function Settings() {
               </tr>
             ))}
             <tr>
-              <th>B1</th>
+              <th>도크</th>
               <td colSpan={6} className="left">
-                상차 {OUTBOUND.loaders}명 · {hm(OUTBOUND.loaderShift.start)}~{hm(OUTBOUND.loaderShift.end % (24 * 60))}
+                상차 {OUTBOUND.loaders}명(냉동 5F·냉장 6F·상온 7F) · {hm(OUTBOUND.loaderShift.start)}~{hm(OUTBOUND.loaderShift.end % (24 * 60))}
               </td>
             </tr>
           </tbody>
@@ -324,7 +324,6 @@ function ZoneInfo() {
   const { layout } = useApp();
   const view = useView();
   useTick();
-  if (view.floor === 'B1') return <B1Info />;
   const f = view.floorLayout()!;
   const views = view.zoneViews().filter((v) => v.key !== 'ALL');
   const zone = f.zones.find((z) => z.id === view.focusedZone);
@@ -574,37 +573,6 @@ function CellCard() {
   );
 }
 
-/** B1 지하 — 접안 자리·차·마당 R/T */
-function B1Info() {
-  const { layout, sim } = useApp();
-  const runs = [...sim.runs.values()];
-  return (
-    <section className="sec zone-panel">
-      <h4 className="zone-h">
-        B1 지하 차량 접안 <span>8,600평 밖</span>
-      </h4>
-      <div className="stats">
-        <Stat v={layout.docks.length} k="접안 자리(90)" />
-        <Stat v={runs.filter((r) => r.state === 'LOADING' || r.state === 'PLANNED').length} k="대기·상차 중 차" />
-        <Stat v={sim.atB1.length} k="마당 R/T" />
-        <Stat v={runs.filter((r) => r.departedAt !== undefined).length} k="출차한 차" />
-      </div>
-      <div className="lows">
-        {runs.map((r) => (
-          <div key={r.plan.tripId}>
-            <span>{r.plateNo}</span>
-            <span>
-              {r.plan.region} {TEMP_NAME[r.plan.temp]}
-            </span>
-            <span>R/T {Math.ceil(r.loaded.length / OUTBOUND.boxesPerRt)}</span>
-          </div>
-        ))}
-      </div>
-    </section>
-  );
-}
-
-/** 실서버 연결 점검 — 서비스마다 조회 하나(서버 상태를 바꾸지 않음) */
 function RealCheck() {
   const { real } = useApp();
   const [rows, setRows] = useState<ProbeResult[] | null>(null);
@@ -640,7 +608,7 @@ function Workers() {
   useTick();
   return (
     <>
-      {([5, 6, 7, 'B1'] as const).map((fl) => {
+      {([5, 6, 7] as const).map((fl) => {
         const people = sim.agents.filter((a) => a.floor === fl).sort((a, b) => ROLE_ORDER.indexOf(a.role) - ROLE_ORDER.indexOf(b.role));
         const busy = people.filter((a) => !a.idle).length;
         // 층 가동률(근무 시간 가중) — 사용자 2026-11-25 "작업자별 UPH·유휴율"
@@ -648,7 +616,7 @@ function Workers() {
         const idle = people.reduce((x, a) => x + a.idleSeconds, 0);
         const util = on > 0 ? Math.round((100 * (on - idle)) / on) : null;
         return (
-          <Sec key={fl} title={fl === 'B1' ? 'B1 지하 상차' : `${fl}F`} aside={`일하는 사람 ${busy}/${people.length}${util !== null ? ` · 가동 ${util}%` : ''}`}>
+          <Sec key={fl} title={`${fl}F`} aside={`일하는 사람 ${busy}/${people.length}${util !== null ? ` · 가동 ${util}%` : ''}`}>
             {people.map((a) => (
               <button
                 key={a.id}
@@ -681,9 +649,9 @@ function Help() {
         <p>조작(MFC 와 같음): 왼쪽 끌기 = 이동, 오른쪽 끌기 = 돌리기, 휠 = 마우스가 가리킨 곳으로 확대, 화살표·WASD = 이동, Esc = 나가기. 가까이 확대하면 빔 앞에 칸 번호(위치 코드)가 붙습니다(번호 · 랙만 · 끔).</p>
         <p>칸(빈 칸도)을 누르면 멀리서는 그 구역 위로, 가까이서는 그 칸 정면으로 가고 왼쪽에 위치 코드·상품·LOT·현물·예약이 나옵니다. 사람을 누르면 PDA.</p>
         <p>위치 코드: 센터-구역-층-통로-베이-단-슬롯 (예 CDC01-C-5-02-24-3-1). 구역 글자 A 냉동 · B 냉장 · C~H 상온.</p>
-        <p>91 = 출고대기 롤테이너 자리, 92 = 승강기 반출 문, 90 = 지하 차량 접안.</p>
-        <p>밤: 22:00 배차(노선 × 온도대, 차 한 대 = 온도대 하나) → 출차 30분 전 지하 상차(방문 역순) → 노선별 출차(목포·춘천 01:00, 세종·부산 03:00 — 05:30 도착) → MFC 도착·하차·인계 → MFC 수령 → 복귀. 오른쪽 ⛟ 운송에서 차마다 봅니다.</p>
-        <p>하루: 07:55 시작 → 08:00 주간조가 TRF 를 받아 할당하고 지게차로 팔레트 랙 → 피킹 선반 보충 → 13:00 석간 Wave 배포 → FC 가 PDA 로 다음 작업을 받아 선반에서 피킹 → 분배·라인이 MFC 칸에 박스로 담기 → 자키가 출고대기(91)로 → 검품 → 21:30 부터 R/T 를 승강기로 지하에 → 22:00 R/T 카운팅 → 22:30 지하 상차 → 노선별 출차(이때만 CDC −q · Transit +q).</p>
+        <p>91 = 출고대기 롤테이너 자리, 92 = 승강기 문(5F 상온 R/T → 7F), 90 = 층마다 북쪽 벽 도크(문 번호 층-번호, 냉동 5F·냉장 6F·상온 7F).</p>
+        <p>밤: 22:00 배차(노선 × 온도대, 차 한 대 = 온도대 하나) → 출차 30분 전 도크 상차(방문 역순) → 노선별 출차(목포·춘천 01:00, 세종·부산 03:00 — 05:30 도착) → MFC 도착·하차·인계 → MFC 수령 → 복귀. 오른쪽 ⛟ 운송에서 차마다 봅니다.</p>
+        <p>하루: 07:55 시작 → 08:00 주간조가 TRF 를 받아 할당하고 지게차로 팔레트 랙 → 피킹 선반 보충 → 13:00 석간 Wave 배포 → FC 가 PDA 로 다음 작업을 받아 선반에서 피킹 → 분배·라인이 MFC 칸에 박스로 담기 → 자키가 출고대기(91)로 → 검품 → 21:30 부터 R/T 를 도크 앞으로(5F 상온은 승강기로 7F) → 22:00 R/T 카운팅 → 22:30 도크 상차 → 노선별 출차(이때만 CDC −q · Transit +q).</p>
         <p>위 오른쪽 배속(1×~120×)으로 시간을 빠르게, ❚❚ 로 멈춥니다. 왼쪽 ☺ 작업자에서 사람을 누르면 PDA 화면이 나옵니다.</p>
       </div>
     </Sec>

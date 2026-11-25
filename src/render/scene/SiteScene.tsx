@@ -6,13 +6,12 @@ import * as THREE from 'three';
 import { AppContext, useApp, useTick, useView, type AppCtx } from '../../app/context';
 import { OUTBOUND, RACK, SHELF, TMS, BUILDING, MFCS } from '../../config';
 import { TEMP_KO } from '../../sim/simulation';
-import { B1 } from '../../sim/site';
 import type { FloorLayout, Location } from '../../domain/layout';
-import { SCENE, ZONE_COLOR, zoneBoxColor } from '../colors';
+import { SCENE, zoneBoxColor } from '../colors';
 import { boxTexture, palletTexture, plateTexture } from '../sprites';
 import { Agents, SimDriver } from './Agents';
 import { Facility, Lights } from './Facility';
-import { EquipmentModel, FreightLift, Inbound, RollContainer, WorkLights } from './Equipment3D';
+import { EquipmentModel, FreightLift, RollContainer, WorkLights } from './Equipment3D';
 import { CameraRig, CellLabels, Picker } from './Core';
 import { Shelves } from './Shelves';
 import { BEAM_H, beamY, LOAD_MAX } from '../rackGeom';
@@ -52,7 +51,6 @@ function Backdrop() {
 function FloorContent() {
   const { layout } = useApp();
   const view = useView();
-  if (view.floor === 'B1') return <Basement />;
   const f = layout.floors.find((x) => x.floor === view.floor)!;
   return (
     <group key={f.floor}>
@@ -63,6 +61,7 @@ function FloorContent() {
       {view.labelMode !== 'off' && <Plates f={f} />}
       <Lifts f={f} />
       <Staging f={f} />
+      <FloorDocks f={f} />
       <Equipment f={f} />
       <WorkLights floor={f.floor} />
       <Selected />
@@ -207,19 +206,25 @@ function Loads({ f }: { f: FloorLayout }) {
   );
 }
 
-/** 랙 끝 위 흰 번호판(예 C02) — 사진의 A10·A11 판 */
+/**
+ * 랙 번호판 — 기사 사진(A10·A11·A12 …)처럼 랙 줄 끝 기둥 위쪽에 붙인 흰 판(사용자 2026-11-26 "사진대로").
+ * 통로 번호판은 그 통로 동쪽 랙 줄(마지막 통로는 서쪽 랙 줄) 끝 기둥에, 묶음마다 가로 통로 쪽 끝에 단다.
+ */
 function Plates({ f }: { f: FloorLayout }) {
-  const y = (lv: number) => lv * RACK.levelH + 0.9;
+  const y = (lv: number) => (lv - 0.5) * RACK.levelH + 0.4;
   return (
     <>
       {f.aisles.flatMap((a) => {
         const levels = f.spec.zones.find((z) => z.letter === a.zone)!.levels;
-        // 묶음 줄마다 북쪽 끝 위(가로 통로에서 보이게)
-        return [...new Set(f.rows.map((r) => r.z0))].map((z0) => (
-          <sprite key={`${a.plate}@${z0}`} position={[a.cx, y(levels), z0 - 0.4]} scale={[2.4, 1.2, 1]}>
-            <spriteMaterial map={plateTexture(a.plate)} depthWrite={false} />
-          </sprite>
-        ));
+        return [...new Set(f.rows.map((r) => r.z0))].map((z0) => {
+          const row = f.rows.find((r) => r.zone === a.zone && r.aisle === a.no && r.z0 === z0 && r.side === 'E') ?? f.rows.find((r) => r.zone === a.zone && r.aisle === a.no && r.z0 === z0);
+          if (!row) return null;
+          return (
+            <sprite key={`${a.plate}@${z0}`} position={[row.cx, y(levels), z0 - 0.12]} scale={[1.5, 0.95, 1]}>
+              <spriteMaterial map={plateTexture(a.plate, { w: 256, h: 160 })} depthWrite={false} />
+            </sprite>
+          );
+        });
       })}
     </>
   );
@@ -309,58 +314,38 @@ function Selected() {
 }
 
 /**
- * 지하 B1 — 차량 접안 자리(90). 8,600평 밖 공용 시설. 북쪽에 승강기 착지(위층과 같은 승강기), 그 남쪽 상차 마당, 접안 문 남쪽에 차.
- * 차는 운행(노선 × 온도대)마다 한 대 — 22:00 배차 뒤 접안 문에 서고, 실린 R/T 수를 차 위에, 출차하면 사라진다.
+ * 층 도크 — 북쪽 벽 접안 문(기사 사진: 셔터 문틀·도크 레벨러·주황 띠 볼라드·둥근 문 번호판 "4-16") + 바깥에 댄 차 + 도크 앞 R/T.
+ * 차는 출차 1시간 전부터(또는 상차 중) 그 도크에 보인다 [사용자 2026-11-26 층마다 도크].
  */
-function Basement() {
-  const { layout, sim } = useApp();
+function FloorDocks({ f }: { f: FloorLayout }) {
+  const { sim } = useApp();
   useTick();
-  const w = Math.max(6 + layout.docks.length * 4.5 + 4, layout.floors[0].lifts[layout.floors[0].lifts.length - 1].rect.x1 + 4);
+  const DOOR_Z = 0.05;
+  const T0 = -12.5;
+  const T1 = -1.2;
+  const rolls = sim.atDock.filter((r) => r.floor === f.floor);
+  const yardX = f.docks.length ? (Math.min(...f.docks.map((d) => d.pos.x)) + Math.max(...f.docks.map((d) => d.pos.x))) / 2 : 0;
   return (
     <group>
-      <mesh rotation-x={-Math.PI / 2} position={[w / 2, -0.01, 4]}>
-        <planeGeometry args={[w, 30]} />
-        <meshStandardMaterial color={SCENE.floor} />
-      </mesh>
-      <mesh rotation-x={-Math.PI / 2} position={[w / 2, 0.004, B1.corridorZ]}>
-        <planeGeometry args={[w, 1.4]} />
-        <meshBasicMaterial color={SCENE.hazard} transparent opacity={0.25} />
-      </mesh>
-      {layout.floors[0].lifts.map((l) => (
-        <FreightLift
-          key={l.no}
-          cx={(l.rect.x0 + l.rect.x1) / 2}
-          w={l.rect.x1 - l.rect.x0}
-          zBack={B1.liftZ - 1.75}
-          zFront={B1.liftZ + 1.75}
-          label={`화물 승강기 ${l.no}`}
-          open={() => (sim.agents.some((a) => a.floor === 'B1' && Math.abs(a.pos.x - (l.rect.x0 + l.rect.x1) / 2) < 2 && a.pos.z > B1.liftZ + 1 && a.pos.z < B1.liftZ + 5) ? 1 : 0)}
-        />
-      ))}
-      {layout.b1Equipment.map((e) => (
-        <Inbound key={e.label} e={e} />
-      ))}
-      {layout.docks.map((d) => (
+      {f.docks.map((d) => (
         <group key={d.code} position={[d.pos.x, 0, 0]}>
-          <mesh rotation-x={-Math.PI / 2} position={[0, 0.01, (B1.truckZ0 + B1.truckZ1) / 2]}>
-            <planeGeometry args={[3.6, B1.truckZ1 - B1.truckZ0 + 2]} />
-            <meshBasicMaterial color={ZONE_COLOR[d.temp]} transparent opacity={0.3} />
-          </mesh>
-          {/* 접안 문(사진: 셔터 반쯤 열림·문틀) + 도크 레벨러(무늬 강판) + 양옆 볼라드(주황 띠) + 노란 바닥선 */}
-          <mesh position={[0, 2.6, B1.doorZ + 1.2]}>
-            <boxGeometry args={[3.4, 5.2, 0.25]} />
-            <meshStandardMaterial color={0x8f969f} transparent opacity={0.35} />
-          </mesh>
-          <mesh position={[0, 4.4, B1.doorZ + 1.1]}>
+          {/* 접안 문(셔터 반쯤 열림·문틀) + 도크 레벨러(무늬 강판) + 양옆 볼라드(주황 띠) + 노란 바닥선 */}
+          <mesh position={[0, 4.4, DOOR_Z]}>
             <boxGeometry args={[3.0, 1.6, 0.3]} />
             <meshStandardMaterial color={0xd2d6db} metalness={0.1} roughness={0.6} />
           </mesh>
-          <mesh rotation-x={-Math.PI / 2} position={[0, 0.03, B1.doorZ + 0.3]}>
-            <planeGeometry args={[2.4, 1.6]} />
+          {[-1.6, 1.6].map((bx) => (
+            <mesh key={bx} position={[bx, 2.6, DOOR_Z]}>
+              <boxGeometry args={[0.2, 5.2, 0.3]} />
+              <meshStandardMaterial color={0x8f969f} />
+            </mesh>
+          ))}
+          <mesh rotation-x={-Math.PI / 2} position={[0, 0.03, 1.1]}>
+            <planeGeometry args={[2.4, 1.8]} />
             <meshStandardMaterial color={0xc3c8ce} metalness={0.1} roughness={0.6} />
           </mesh>
           {[-1.45, 1.45].map((bx) => (
-            <group key={bx} position={[bx, 0, B1.doorZ - 0.5]}>
+            <group key={bx} position={[bx, 0, 2.3]}>
               <mesh position={[0, 0.6, 0]}>
                 <cylinderGeometry args={[0.08, 0.08, 1.2, 12]} />
                 <meshStandardMaterial color={0xe3e6ea} metalness={0.15} roughness={0.4} />
@@ -373,34 +358,37 @@ function Basement() {
               ))}
             </group>
           ))}
-          <mesh rotation-x={-Math.PI / 2} position={[0, 0.02, B1.doorZ - 1.4]}>
+          <mesh rotation-x={-Math.PI / 2} position={[0, 0.02, 2.5]}>
             <planeGeometry args={[3.4, 0.12]} />
             <meshBasicMaterial color={SCENE.hazard} />
           </mesh>
-          {/* 문 번호 — 사진의 둥근 판("4-16")처럼 */}
-          <sprite position={[0, 5.6, B1.doorZ + 0.9]} scale={[1.6, 1.6, 1]}>
-            <spriteMaterial map={plateTexture(d.short.replace('B1-', 'B1·'), { bg: '#2fa7c9', fg: '#ffffff', w: 192, h: 192 })} />
+          {/* 문 번호 — 사진의 둥근 판("4-16")처럼 층-번호 */}
+          <sprite position={[0, 5.7, DOOR_Z + 0.3]} scale={[1.5, 1.5, 1]}>
+            <spriteMaterial map={plateTexture(d.short, { bg: '#2fa7c9', fg: '#ffffff', w: 192, h: 192 })} depthWrite={false} />
           </sprite>
         </group>
       ))}
+      {/* 도크 앞에 내려놓은 R/T(상차 대기) */}
+      {rolls.slice(0, 14).map((_r, i) => (
+        <RollContainer key={i} x={yardX - 6 + (i % 7) * 1.0} z={3.0 + Math.floor(i / 7) * 0.9} cold={f.floor !== 7} fill={0.8} />
+      ))}
       {[...sim.runs.values()]
-        .filter((r) => r.state === 'PLANNED' || r.state === 'LOADING')
+        .filter((r) => r.dock.floor === f.floor && (r.state === 'LOADING' || (r.state === 'PLANNED' && sim.time / 60 >= r.plan.plannedDepartMin - 60)))
         .map((r) => {
           const rts = Math.ceil(r.loaded.length / OUTBOUND.boxesPerRt);
-          // 접안 간격 4.5 m 안에 들어가게 짧게 두 줄 — 노선·정차는 오른쪽 ⛟ 운송 표에
           const name = `${r.plan.region.replace(/권$/, '')} ${TEMP_KO[r.plan.temp]}`;
           return (
             <group key={r.plan.tripId} position={[r.dock.pos.x, 0, 0]}>
-              <mesh position={[0, 1.7, (B1.truckZ0 + B1.truckZ1 - 2) / 2]}>
-                <boxGeometry args={[2.4, 2.6, B1.truckZ1 - B1.truckZ0 - 2]} />
+              <mesh position={[0, 1.7, (T0 + T1 + 2) / 2]}>
+                <boxGeometry args={[2.4, 2.6, T1 - T0 - 2]} />
                 <meshStandardMaterial color={r.plan.temp === 'AMBIENT' ? 0xf4f6fa : r.plan.temp === 'CHILLED' ? 0xd8ecff : 0xcfe0f5} />
               </mesh>
-              <mesh position={[0, 1.4, B1.truckZ1 - 0.8]}>
+              <mesh position={[0, 1.4, T0 + 0.8]}>
                 <boxGeometry args={[2.3, 2.2, 1.6]} />
                 <meshStandardMaterial color={0x2f6fd6} />
               </mesh>
-              <sprite position={[0, 4.4, (B1.truckZ0 + B1.truckZ1) / 2]} scale={[4.2, 1.7, 1]}>
-                <spriteMaterial map={plateTexture(`${name}\n${rts}/${TMS.vehicle.maxRt} R/T`, { w: 384, h: 156 })} />
+              <sprite position={[0, 4.4, (T0 + T1) / 2]} scale={[4.2, 1.7, 1]}>
+                <spriteMaterial map={plateTexture(`${name}\n${rts}/${TMS.vehicle.maxRt} R/T`, { w: 384, h: 156 })} depthWrite={false} />
               </sprite>
             </group>
           );

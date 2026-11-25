@@ -28,10 +28,10 @@ function useTrfRows() {
   });
 }
 
-/** 그 TRF 의 LPN(출고대기·지하 마당·차) */
+/** 그 TRF 의 LPN(출고대기·도크 앞·차) */
 function lpnsOf(sim: ReturnType<typeof useApp>['sim'], trfId: string): string[] {
   const out = [...sim.staged.values()].flat().filter((b) => b.trfId === trfId).map((b) => b.lpn);
-  for (const r of sim.atB1) if (r.trfId === trfId) out.push(...r.boxes.map((b) => b.lpn));
+  for (const r of sim.atDock) if (r.trfId === trfId) out.push(...r.boxes.map((b) => b.lpn));
   for (const r of sim.runs.values()) out.push(...r.loaded.filter((b) => b.trfId === trfId).map((b) => b.lpn));
   return out;
 }
@@ -234,14 +234,14 @@ export function AdminBoard() {
       )}
       {tab === 'rt' && (
         <>
-          <div className="note">MFC 에 R/T 를 내리고 인계할 때 비워 둔 빈 R/T 를 같은 수만큼 돌려받아 싣고, 칠곡에 돌아오면 지하 B1 에 내립니다. 판매 불가·파손 상품 회수는 계약이 없어 넣지 않았습니다.</div>
+          <div className="note">MFC 에 R/T 를 내리고 인계할 때 비워 둔 빈 R/T 를 같은 수만큼 돌려받아 싣고, 칠곡에 돌아오면 도크에 내립니다. 판매 불가·파손 상품 회수는 계약이 없어 넣지 않았습니다.</div>
           <table className="inv">
             <thead>
               <tr>
                 <th>MFC</th>
                 <th>나간 R/T</th>
                 <th>회수(차에 실음)</th>
-                <th>B1 도착</th>
+                <th>칠곡 도착</th>
                 <th>남음</th>
               </tr>
             </thead>
@@ -368,7 +368,7 @@ export function MovesBoard() {
   );
 }
 
-/** 바코드 — QR/바코드 전환, 위치 코드·카트·R/T·LPN·지하 도크, 인쇄용 묶음 (사용자 §6-8, MFC Barcode 그대로) */
+/** 바코드 — QR/바코드 전환, 위치 코드·카트·R/T·LPN·도크, 인쇄용 묶음 (사용자 §6-8, MFC Barcode 그대로) */
 export function BarcodeBoard() {
   const { sim, layout } = useApp();
   const view = useView();
@@ -383,7 +383,7 @@ export function BarcodeBoard() {
     ['카트', carts.map((a) => ({ value: `CART-${a.id.toUpperCase()}`, caption: a.name }))],
     ['R/T', MFCS.filter((m) => !view.mfcFilter || m.id === view.mfcFilter).map((m) => ({ value: `RT-${m.id}-${String(m.staging).padStart(2, '0')}`, caption: `${m.name} R/T` }))],
     ['LPN', staged.slice(-6).map((b) => ({ value: b.lpn, caption: `${mfcName(b.mfcId).replace(/^\d호점 /, '')} 박스 ${b.units}개` }))],
-    ['지하 도크', layout.docks.slice(0, 6).map((d) => ({ value: d.code, caption: `접안 ${d.short}` }))],
+    ['도크', layout.docks.slice(0, 6).map((d) => ({ value: d.code, caption: `도크 ${d.short}` }))],
   ];
   return (
     <div className={print ? 'print-sheet' : ''}>

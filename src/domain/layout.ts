@@ -6,7 +6,7 @@
 // 방 밖(승강기·출고대기)으로는 닫은 박스와 R/T 만 나간다(에어커튼). 7F H 작은 비식재는 오토스토어(§5).
 // 위치 코드 형식(CDC01-구역-층-통로-베이-단-슬롯)은 그대로 [정본 CDC-3].
 
-import { AISLE_PITCH, AUTOSTORE, B1_DOCKS, BUILDING, CAPACITY, CDC_FACTS, CENTER_ID, CHILLED_RACK, FLOOR_PYEONG, LIFTS_PER_FLOOR, PYEONG_M2, RACK, SHELF, SKU_PLACE, SKU_TARGET, STAGING_SLOTS, STORE, VEG_LANES } from '../config';
+import { AISLE_PITCH, AUTOSTORE, BUILDING, DOCK_PITCH, DOCKS, STAGING_X0, CAPACITY, CDC_FACTS, CENTER_ID, CHILLED_RACK, FLOOR_PYEONG, LIFTS_PER_FLOOR, PYEONG_M2, RACK, SHELF, SKU_PLACE, SKU_TARGET, STAGING_SLOTS, STORE, VEG_LANES } from '../config';
 import { CHILGOK_FLOORS, type EquipKind, type FloorNo, type FloorSpec, type RackZoneSpec, type Temp } from './sites/chilgok';
 
 export interface Rect {
@@ -166,6 +166,8 @@ export interface FloorLayout {
   shelfAisles: Aisle[];
   walk: WalkNet;
   lifts: Lift[];
+  /** 이 층 차량 접안 도크(90) — 북쪽 벽 */
+  docks: Location[];
   equipment: Equip[];
   /** 이 층 배치 면적(평) — 보관(랙) · 그 밖 */
   layoutPyeong: { storage: number; band: number };
@@ -207,10 +209,8 @@ export interface Layout {
   depth: number;
   bandDepth: number;
   floors: FloorLayout[];
-  /** 지하 B1 차량 접안(90 DOCK) — 8,600평 밖 [사용자·정본 R-07] */
+  /** 차량 접안 도크(90 DOCK) — 층마다 북쪽 벽(모든 층 합) [사용자 2026-11-26 기사 사진] */
   docks: Location[];
-  /** 지하 B1 설비(냉동 입고 검수 — 5F 자리 부족) */
-  b1Equipment: Equip[];
   autostore: AutostoreInfo | null;
   capacity: CapacityReport;
   /** 칸 용량 합(계산값) */
@@ -284,6 +284,7 @@ class FloorBuilder {
   readonly coldRooms: ColdRoom[] = [];
   readonly staging: Location[] = [];
   readonly lifts: Lift[] = [];
+  readonly docks: Location[] = [];
   /** 구역마다 다음 선반 통로 번호 */
   private nextShelfAisle = new Map<string, number>();
 
@@ -512,7 +513,8 @@ class FloorBuilder {
     }
     const liftEnd = 1 + LIFTS_PER_FLOOR * (liftW + 1);
     const slotW = 1.4;
-    let sx = liftEnd + 2;
+    // 출고대기는 x 23 부터(승강기 4대 시절 자리 그대로 — 그 서쪽 빈자리는 도크) [사용자 2026-11-26 층마다 도크]
+    let sx = Math.max(liftEnd + 2, STAGING_X0);
     this.spec.stagingLetters.forEach((letter, li) => {
       const temp: Temp = letter === 'A' ? 'FROZEN' : letter === 'B' ? 'CHILLED' : 'AMBIENT';
       const per = this.spec.stagingLetters.length > 1 ? STAGING_SLOTS / 2 : STAGING_SLOTS;
@@ -537,6 +539,32 @@ class FloorBuilder {
       sx += Math.ceil(per / 2) * slotW + (li === 0 ? 3 : 0);
     });
     return sx;
+  }
+
+  /**
+   * 도크 — 북쪽 벽, 출고대기 동쪽 [사용자 2026-11-26 기사 사진]. 문 번호 = 층-번호(사진 "4-16"), 위치 코드 = 90 DOCK(구역 글자 = 그 온도 출고대기 글자).
+   * 돌려주는 값 = 도크 줄 동쪽 끝 x.
+   */
+  docksNorth(limitX = this.B.width - 1): { x0: number; x1: number; west: boolean } {
+    const need = DOCKS.filter((k) => k.floor === this.floor).reduce((a, k) => a + k.count, 0) * DOCK_PITCH;
+    const east = Math.max(...this.staging.map((x) => x.pos.x)) + 2.2;
+    const liftEnd = Math.max(...this.lifts.map((l) => l.rect.x1)) + 1;
+    // 출고대기 동쪽에 자리가 있으면 거기, 없으면 승강기와 출고대기 사이
+    const west = east + need > limitX;
+    const start = west ? liftEnd : east;
+    if (west && start + need > Math.min(...this.staging.map((x) => x.pos.x)) - 0.8) throw new Error(`${this.floor}F 도크 ${need}m 자리 없음`);
+    let x = start;
+    let no = 0;
+    for (const d of DOCKS.filter((k) => k.floor === this.floor)) {
+      const letter = this.staging.find((st) => st.temp === d.temp)?.zone ?? this.spec.stagingLetters[0];
+      for (let i = 0; i < d.count; i++) {
+        no += 1;
+        x += DOCK_PITCH / 2;
+        this.docks.push({ code: locationCode(letter, this.floor, 90, no, 0, 1), short: `${this.floor}-${pad2(no)}`, floor: this.floor, zone: letter, temp: d.temp, type: 'DOCK', aisle: 90, bay: no, level: 0, slot: 1, capacity: 0, pos: { x, y: 0, z: 0.3 } });
+        x += DOCK_PITCH / 2;
+      }
+    }
+    return { x0: start, x1: x, west };
   }
 
   /** 출고대기 구역 글자(letter)의 x 범위 */
@@ -571,6 +599,7 @@ class FloorBuilder {
       shelfAisles: this.shelfAisles,
       walk,
       lifts: this.lifts,
+      docks: this.docks,
       equipment: this.equipment,
       layoutPyeong: { storage: storageM2 / PYEONG_M2, band: (this.B.width * this.B.depth - storageM2) / PYEONG_M2 },
     };
@@ -658,6 +687,12 @@ export function buildLayout(): Layout {
   const [c0, c1] = f5.stagingSpan('C');
   const [a0] = f5.stagingSpan('A');
   f5.equip('WHEEL_SORTER', '휠소터 (상온 — MFC 박스 → PPC 슈트 / 인기 상품 → DAS)', { x0: c0, z0: SORT_Z0, x1: amb5 - 0.6, z1: SORT_Z1 }, 'AMBIENT');
+  // 도크 — 5F 는 출고대기 동쪽이 냉동 방 벽까지 좁아 승강기와 출고대기 사이에. 냉동 입고 검수는 출고대기 동쪽 북쪽 벽(아침 입고 차는 같은 도크) [사용자 "입고 검수 온도별로", 2026-11-26 지하 B1 없앰]
+  f5.docksNorth(frzX0 - 0.4);
+  {
+    const stEnd = Math.max(...f5.staging.map((x) => x.pos.x)) + 1.6;
+    f5.equip('INBOUND', '입고 검수 (냉동)', { x0: stEnd, z0: 0.4, x1: frzX0 - 0.4, z1: 4.6 }, 'FROZEN');
+  }
   f5.equip('DAS', 'DAS 존 (상온)', { x0: c0, z0: DAS_Z0, x1: c1, z1: sz1 }, 'AMBIENT');
   f5.shelvesIn('E', [{ x0: 2.5, z0: DAS_Z0, x1: c0 - 1, z1: sz1 }], SKU_PLACE.efShelf);
   f5.shelvesIn('F', [{ x0: c1 + 1, z0: DAS_Z0, x1: amb5 - 0.6, z1: sz1 }], SKU_PLACE.efShelf);
@@ -701,6 +736,7 @@ export function buildLayout(): Layout {
     '상온',
   );
   f7.liftsAndStaging();
+  f7.docksNorth();
   // 상온 SKU 8,500 = C·D·G·H 랙 1단 박스 피킹면 + E·F 선반 + 오토스토어 + G 선반(나머지)
   const faceCount = [...L5.locations, ...f7.locations].filter((l) => l.type === 'PICK_FACE').length;
   const gShelf = SKU_TARGET.AMBIENT - faceCount - SKU_PLACE.efShelf * 2 - SKU_PLACE.autostore;
@@ -729,6 +765,7 @@ export function buildLayout(): Layout {
   const rack6W = rackWidth(nB) + 1;
   f6.racks([{ spec: f6.zone('B'), aisles: nB }], 0, rack6W, '냉장');
   f6.liftsAndStaging();
+  f6.docksNorth();
   const coldZ0 = SORT_Z0 - 0.25;
   // 냉장 피킹 선반(라인 상품 = 냉장 목표 − 야채): 랙 동쪽, 남북 두 블록
   const shX0 = rack6W + 1;
@@ -763,23 +800,11 @@ export function buildLayout(): Layout {
 
   const floors = [L5, L6, L7];
 
-  // ── B1 — 접안 + 냉동 입고 검수(5F 자리 부족 → 지하 도크 쪽) ──
-  const docks: Location[] = [];
-  let bay = 1;
-  for (const d of B1_DOCKS) {
-    const temp: Temp = d.temp === 'A' ? 'FROZEN' : d.temp === 'B' ? 'CHILLED' : 'AMBIENT';
-    for (let i = 0; i < d.count; i++, bay++) {
-      docks.push({ code: locationCode(d.temp, 'B1', 90, bay, 0, 1), short: `B1-${pad2(bay)}`, floor: 'B1', zone: d.temp, temp, type: 'DOCK', aisle: 90, bay, level: 0, slot: 1, capacity: 0, pos: { x: 6 + (bay - 1) * 4.5, y: 0, z: 2 } });
-    }
-  }
-  const b1x0 = 6 + docks.length * 4.5 + 2;
-  const b1Equipment: Equip[] = [
-    { kind: 'INBOUND', label: '입고 검수 (냉동 — 지하 도크)', rect: { x0: b1x0, z0: -8.5, x1: b1x0 + 12, z1: -0.5 }, temp: 'FROZEN' },
-    { kind: 'INBOUND', label: '입고 검수 (5F 상온 — 지하 도크)', rect: { x0: b1x0 + 13, z0: -8.5, x1: b1x0 + 25, z1: -0.5 }, temp: 'AMBIENT' },
-  ];
+  // 차량 접안은 층마다 도크(기사 사진) — 지하 B1 없음(사용자 2026-11-26)
+  const docks: Location[] = floors.flatMap((f) => f.docks);
 
   const capacity = capacityReport(floors);
-  layoutCache = { width, depth, bandDepth, floors, docks, b1Equipment, autostore: autoInfo, capacity, totalCapacity: capacity.total };
+  layoutCache = { width, depth, bandDepth, floors, docks, autostore: autoInfo, capacity, totalCapacity: capacity.total };
   return layoutCache;
 }
 

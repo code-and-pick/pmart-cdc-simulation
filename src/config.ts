@@ -61,14 +61,24 @@ export const AISLE_PITCH = RACK.depth * 2 + RACK.aisleW;
  */
 export const FLOOR_PYEONG: Record<5 | 6 | 7, number> = { 5: 2866, 6: 2867, 7: 2867 };
 
-/** 화물 승강기 — 층마다 대수 [가정], 지하 B1 차량 접안으로 오르내린다 [사용자] */
-export const LIFTS_PER_FLOOR = 4;
-/** 지하 B1 차량 접안 자리 [가정] — 90 DOCK, 구역 칸 = 차량 온도(A 냉동·B 냉장·C 상온) [정본 CDC-5] */
-export const B1_DOCKS: { temp: 'A' | 'B' | 'C'; count: number }[] = [
-  { temp: 'A', count: 4 },
-  { temp: 'B', count: 4 },
-  { temp: 'C', count: 6 },
+/** 화물 승강기 — 층마다 대수 [가정]. 차는 층마다 도크에 대므로 승강기는 층 사이(5F 상온 R/T → 7F 도크)에만 쓴다 */
+export const LIFTS_PER_FLOOR = 2;
+/**
+ * 차량 접안 도크 — 층마다(기사 사진: 도크 문 번호 "4-16"·"4-17" = 층-번호, 문 앞 레벨러) [사용자 2026-11-26 "사진대로", 지하 B1 접안을 바꿈].
+ * 온도대마다 그 짐이 있는 층의 북쪽 벽 [가정]: 냉동 5F · 냉장 6F · 상온 7F(5F 상온 R/T 는 승강기로 7F 도크로).
+ * 수 [가정] — 같은 시각에 나가는 차가 온도대마다 2대(목포·춘천 01:00, 세종·부산 03:00), 위치 코드 90 DOCK.
+ */
+export const DOCKS: { temp: 'FROZEN' | 'CHILLED' | 'AMBIENT'; floor: 5 | 6 | 7; count: number }[] = [
+  { temp: 'FROZEN', floor: 5, count: 2 },
+  { temp: 'CHILLED', floor: 6, count: 3 },
+  { temp: 'AMBIENT', floor: 7, count: 4 },
 ];
+/** 온도대 → 도크 층 */
+export const DOCK_FLOOR: Record<'FROZEN' | 'CHILLED' | 'AMBIENT', 5 | 6 | 7> = { FROZEN: 5, CHILLED: 6, AMBIENT: 7 };
+/** 도크 문 간격(m) [가정] */
+export const DOCK_PITCH = 4.5;
+/** 북쪽 띠 출고대기 시작 x(m) — 승강기 4대 시절 자리 그대로, 그 서쪽 빈자리는 도크 [가정] */
+export const STAGING_X0 = 23;
 /** 층별 출고대기 롤테이너 자리(91) — 개념도 PPC-01~30 [개념도], 01~05 는 MFC 기본 배정 [정본 CDC-5] */
 export const STAGING_SLOTS = 30;
 
