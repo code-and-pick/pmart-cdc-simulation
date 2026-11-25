@@ -2,10 +2,11 @@
 import { lazy, Suspense, useEffect, useState, type ReactNode } from 'react';
 import { checkReadiness, READINESS_KO, type ProbeResult } from '../backend/http/readiness';
 import { useApp, useTick, useView } from '../app/context';
-import { CDC_FACTS, MFCS, OUTBOUND, SHIFT, WORK, WORKFORCE, RACK, FLOW, AUTOSTORE } from '../config';
+import { CDC_FACTS, MFCS, OUTBOUND, SHIFT, WORK, RACK, FLOW, AUTOSTORE } from '../config';
 import { ROLE_KO, type Role } from '../sim/agent';
 import { equipZoneId } from '../domain/layout';
 import type { FloorNo } from '../domain/sites/chilgok';
+import { DayTimeline, Meter, Tile } from './viz';
 
 function Sec({ title, aside, children }: { title: string; aside?: ReactNode; children: ReactNode }) {
   return (
@@ -200,43 +201,107 @@ export function LeftPanel() {
 }
 
 function Settings() {
-  const { real, layout } = useApp();
+  const { real, layout, sim } = useApp();
+  useTick();
   return (
     <>
       {real && <RealCheck />}
       <VirtualWorkers />
-      <Sec title="센터" aside="고정값">
-        <Row k="이름" v={CDC_FACTS.name} />
-        <Row k="주소" v={CDC_FACTS.address} />
-        <Row k="면적" v={`${CDC_FACTS.areaPyeong.toLocaleString()}평`} />
-        <Row k="사용 층" v={`${CDC_FACTS.floors[0]}~${CDC_FACTS.floors[CDC_FACTS.floors.length - 1]}층 (차량은 지하 B1)`} />
-        {/* 보관 용량은 칸 용량 합(계산값) — 520만은 목표(사용자 2026-11-25 "고정값을 계산값으로") */}
-        <Row k="보관 용량" v={`${(layout.capacity.total / 10_000).toFixed(1)}만 유닛 (계산 · 목표 ${(CDC_FACTS.capacityUnits / 10_000).toLocaleString()}만)`} />
+      {/* 글 줄 대신 숫자 타일·막대·표(사용자 2026-11-25 "글이 많아 직관적으로 안 보여") */}
+      <Sec title={CDC_FACTS.name} aside="고정값">
+        <div className="sub-line" title={CDC_FACTS.address}>
+          {CDC_FACTS.address}
+        </div>
+        <div className="tiles3">
+          <Tile v={`${CDC_FACTS.areaPyeong.toLocaleString()}평`} k="면적" />
+          <Tile v={`${CDC_FACTS.floors[0]}~${CDC_FACTS.floors[CDC_FACTS.floors.length - 1]}F`} k="사용 층" />
+          {/* 보관 용량은 칸 용량 합(계산값) — 520만은 목표(사용자 2026-11-25 "고정값을 계산값으로") */}
+          <Tile v={`${(layout.capacity.total / 10_000).toFixed(0)}만`} k="보관 유닛">
+            <Meter value={layout.capacity.total} max={Math.max(layout.capacity.total, CDC_FACTS.capacityUnits) * 1.1} tone={layout.capacity.total >= CDC_FACTS.capacityUnits ? 'ok' : 'bad'} title={`계산 ${layout.capacity.total.toLocaleString()} / 목표 ${CDC_FACTS.capacityUnits.toLocaleString()}`} />
+          </Tile>
+        </div>
       </Sec>
-      <Sec title="층 배치" aside="보관 = 팔레트 랙 면적">
-        {layout.floors.map((f) => (
-          <Row key={f.floor} k={f.label} v={`보관 ${Math.round(f.layoutPyeong.storage).toLocaleString()} · DT ${Math.round(f.layoutPyeong.band).toLocaleString()}평 · 팔레트 ${f.locations.length.toLocaleString()} · 선반 ${f.shelves.length.toLocaleString()}칸`} />
-        ))}
-        <Row k="랙" v={`6m 4단 · 묶음 12개 × 양면 · 지게차 통로 ${RACK.aisleW}m`} />
+      <Sec title="층 배치" aside={`랙 6m 4단 · 통로 ${RACK.aisleW}m`}>
+        {(() => {
+          const maxP = Math.max(...layout.floors.map((f) => f.locations.length));
+          const maxS = Math.max(...layout.floors.map((f) => f.shelves.length));
+          return layout.floors.map((f) => (
+            <div key={f.floor} className="floor-row" title={`보관(팔레트 랙) ${Math.round(f.layoutPyeong.storage).toLocaleString()}평 · 작업장(DT) ${Math.round(f.layoutPyeong.band).toLocaleString()}평`}>
+              <span className="fl-badge">{f.floor}F</span>
+              <span className="fl-name">{f.label.replace(/^\dF\s*/, '')}</span>
+              <span className="fl-bars">
+                <span>
+                  팔레트 <b>{f.locations.length.toLocaleString()}</b>
+                  <Meter value={f.locations.length} max={maxP} />
+                </span>
+                <span>
+                  선반 <b>{f.shelves.length.toLocaleString()}</b>
+                  <Meter value={f.shelves.length} max={maxS} tone="ok" />
+                </span>
+              </span>
+            </div>
+          ));
+        })()}
       </Sec>
-      <Sec title="하루 시간표">
-        <Row k="주간조" v={`${hm(SHIFT.day.start)}~${hm(SHIFT.day.end)}`} />
-        <Row k="석간조" v={`${hm(SHIFT.evening.start)}~${hm(SHIFT.evening.end)}`} />
-        <Row k="휴식" v={SHIFT.breaks.map((b) => hm(b.start)).join(' · ')} />
-        <Row k="R/T 카운팅·상차" v={`${hm(OUTBOUND.rtCountAt)} · ${hm(OUTBOUND.loadFrom)}~`} />
-        <Row k="차량 출발" v={`${hm(SHIFT.departure)}~`} />
+      <Sec title="하루 시간표" aside={`휴식 ${SHIFT.breaks.map((b) => hm(b.start)).join(' · ')}`}>
+        <DayTimeline nowMin={sim.time / 60} />
+        <div className="time-chips">
+          <span>
+            주간조 <b>{hm(SHIFT.day.start)}~{hm(SHIFT.day.end)}</b>
+          </span>
+          <span>
+            석간조 <b>{hm(SHIFT.evening.start)}~{hm(SHIFT.evening.end)}</b>
+          </span>
+          <span>
+            R/T 카운팅 <b>{hm(OUTBOUND.rtCountAt)}</b>
+          </span>
+          <span>
+            출차 <b>{hm(SHIFT.departure)}~</b>
+          </span>
+        </div>
       </Sec>
-      <Sec title="작업자 (층마다)" aside="[가정]">
-        {([5, 6, 7] as const).map((fl) => {
-          const w = WORKFORCE[fl];
-          return <Row key={fl} k={`${fl}F`} v={`지게차 ${w.replDay}+${w.replEve} · FC ${w.fc} · 분배·라인 ${w.sort} · 자키 ${w.jockey} · 검품 ${OUTBOUND.inspectorsPerFloor}`} />;
-        })}
-        <Row k="B1" v={`상차 ${OUTBOUND.loaders} (${hm(OUTBOUND.loaderShift.start)}~${hm(OUTBOUND.loaderShift.end % (24 * 60))})`} />
+      <Sec title="작업자 (층마다, 지금 인원)">
+        <table className="mini-tbl">
+          <thead>
+            <tr>
+              <th />
+              <th>FC</th>
+              <th>DPS</th>
+              <th>DAS</th>
+              <th>자키</th>
+              <th>지게차</th>
+              <th>검품</th>
+            </tr>
+          </thead>
+          <tbody>
+            {([5, 6, 7] as const).map((fl) => (
+              <tr key={fl}>
+                <th>{fl}F</th>
+                {(['FC', 'DPS', 'SORT', 'JOCKEY', 'REPL', 'INSPECT'] as const).map((r) => {
+                  const n = sim.headcount(fl, r, r === 'REPL' ? 'DAY' : undefined);
+                  return <td key={r}>{n || <span className="zero">·</span>}</td>;
+                })}
+              </tr>
+            ))}
+            <tr>
+              <th>B1</th>
+              <td colSpan={6} className="left">
+                상차 {OUTBOUND.loaders}명 · {hm(OUTBOUND.loaderShift.start)}~{hm(OUTBOUND.loaderShift.end % (24 * 60))}
+              </td>
+            </tr>
+          </tbody>
+        </table>
       </Sec>
       <Sec title="공급 MFC" aside={`${MFCS.length}곳`}>
-        {MFCS.map((m) => (
-          <Row key={m.id} k={`${m.region} · PPC-${String(m.staging).padStart(2, '0')}`} v={m.name} />
-        ))}
+        <div className="mfc-chips">
+          {MFCS.map((m) => (
+            <span key={m.id} title={`${m.id} · ${m.region}`}>
+              <i>PPC-{String(m.staging).padStart(2, '0')}</i>
+              {m.name.replace(/^\d호점 /, '')}
+              <small>{m.region}</small>
+            </span>
+          ))}
+        </div>
       </Sec>
     </>
   );

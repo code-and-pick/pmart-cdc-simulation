@@ -9,6 +9,7 @@ import type { RightView } from '../render/controller';
 import { TEMP_KO } from '../sim/simulation';
 import { trfTemp } from '../sim/supply';
 import { AdminBoard, BarcodeBoard, MfcPick, MovesBoard, StockSearch, TrfBoard } from './Boards';
+import { DayTimeline, Meter, Tile } from './viz';
 
 const clock = (sec: number) => `${String(Math.floor(sec / 3600) % 24).padStart(2, '0')}:${String(Math.floor(sec / 60) % 60).padStart(2, '0')}`;
 /** 큰 수는 만 단위로 짧게 */
@@ -70,21 +71,30 @@ function Summary() {
   ];
   return (
     <div className="summary">
-      <div className="flow">
+      {/* 지금 — 단계 이름 + 하루 시간띠(지금 위치) */}
+      <div className="now-card">
+        <div className="now-h">
+          <b>{key[0][1]}</b>
+          <span>{sim.clockText()}</span>
+        </div>
+        <DayTimeline nowMin={sim.time / 60} />
+      </div>
+      {/* 하루 흐름 — 승인 대비 막대(글 대신 막대, 사용자 2026-11-25) */}
+      <div className="flow2">
         {flow.map(([k, v, w]) => (
-          <div key={k} className={w ? 'w' : ''} title={`${k} ${v.toLocaleString()}개`}>
+          <div key={k} className={w ? 'w' : ''} title={`${k} ${v.toLocaleString()}개 (승인 대비 ${d.approved ? Math.round((100 * v) / d.approved) : 0}%)`}>
             <b>{short(v)}</b>
+            <Meter value={v} max={d.approved} tone={w ? 'warn' : k === '수령' && v > 0 ? 'ok' : 'accent'} />
             <small>{k}</small>
           </div>
         ))}
       </div>
-      <div className="kpis four">
-        {key.map(([k, v]) => (
-          <div className="kpi" key={k}>
-            <div className="v">{v}</div>
-            <div className="k">{k}</div>
-          </div>
-        ))}
+      <div className="tiles3">
+        <Tile v={`${d.busy}/${sim.agents.length}`} k="작업 중">
+          <Meter value={d.busy} max={sim.agents.length} tone="ok" />
+        </Tile>
+        <Tile v={short(sim.pickedLastHour())} k="최근 1시간 피킹" />
+        <Tile v={short(sim.shortUnits)} k="결품 보고" tone={sim.shortUnits > 0 ? 'warn' : undefined} />
       </div>
       <details className="more">
         <summary>숫자 모두</summary>
@@ -117,8 +127,22 @@ const GROUPS = ['접수·보충', '피킹', '분류', '검품', '상차', '출�
  * 현장 흐름판 — MFC SiteFlow 와 같은 모양: 맨 위 단계별 MFC 수(누르면 그 단계만), 아래 MFC × 온도대(TRF)마다 단계 막대.
  * 단계 막대 값 = 이관 진행(승인·피킹·분류·검품·상차·출발 수량)과 운행 인계. 맨 아래 현장 사건 기록 접기.
  */
+/** 격자 한 줄 — MFC 이름 + 온도대 칸 3개 */
+function MfcRow({ name, region, children }: { name: string; region: string; children: ReactNode }) {
+  return (
+    <>
+      <span className="mg-n">
+        <b>{name}</b>
+        <small>{region}</small>
+      </span>
+      {children}
+    </>
+  );
+}
+
 function SiteFlow() {
   const { sim, backend } = useApp();
+  const view = useView();
   const [only, setOnly] = useState<number | null>(null);
   const handed = new Map<string, number>();
   for (const r of sim.runs.values()) for (const st of r.stops) if (st.handedAt !== undefined) for (const id of st.trfIds ?? []) handed.set(id, st.handedAt);
@@ -136,7 +160,6 @@ function SiteFlow() {
     return { t, p, dots, cur };
   });
   const count = GROUPS.map((_, i) => rows.filter((x) => x.cur === i).length);
-  const mfc = (id: string) => MFCS.find((m) => m.id === id);
   return (
     <div className="sfl">
       <div className="sfl-pipe" style={{ gridTemplateColumns: `repeat(${GROUPS.length}, 1fr)` }}>
@@ -148,45 +171,64 @@ function SiteFlow() {
         ))}
       </div>
       {!rows.length && <div className="note">08:00 에 MFC 보충 요청(TRF)을 받습니다.</div>}
-      {GROUPS.map((g, gi) => {
-        if (only != null && only !== gi) return null;
-        const list = rows.filter((x) => x.cur === gi);
-        if (!list.length) return null;
-        return (
-          <section key={g} className="sfl-g">
-            <h4>
-              {g} <span>{list.length}건</span>
-            </h4>
-            {list.map(({ t, p, dots }) => {
-              const m = mfc(t.mfcId);
-              const temp = TEMP_KO[trfTemp(t)];
-              const under = [p.pk, p.so, p.ins, p.ld, p.dp].map((v) => (v ? short(v) : '')).concat(handed.has(t.trfId) ? clock(handed.get(t.trfId)!) : '');
-              const tone = gi === 7 ? 'done' : dots.includes('now') ? 'run' : 'wait';
-              return (
-                <div key={t.trfId} className={`sfl-r tone-${tone}`} title={t.trfId}>
-                  <div className="sfl-h">
-                    <b>
-                      {m?.name ?? t.mfcId} {temp}
-                    </b>
-                    <span className="st">
-                      {m?.region} · 승인 {short(p.ap)}
+      {/* MFC × 온도대 격자 — 칸 하나 = TRF 하나: 지금 단계 + 6단계 막대(글 대신, 사용자 2026-11-25). 누르면 그 MFC 의 TRF 카드로 */}
+      {rows.length > 0 && (
+        <div className="mfc-grid">
+          <span />
+          {(['AMBIENT', 'CHILLED', 'FROZEN'] as const).map((tp) => (
+            <span key={tp} className="mg-h">
+              {TEMP_KO[tp]}
+            </span>
+          ))}
+          {MFCS.map((m) => (
+            <MfcRow key={m.id} name={m.name.replace(/^\d호점 /, '')} region={m.region}>
+              {(['AMBIENT', 'CHILLED', 'FROZEN'] as const).map((tp) => {
+                const r = rows.find((x) => x.t.mfcId === m.id && trfTemp(x.t) === tp);
+                if (!r) return <span key={tp} className="mg-c empty">—</span>;
+                const { t, p, dots, cur } = r;
+                const dim = only != null && only !== cur;
+                const tip = `${t.trfId}\n승인 ${p.ap.toLocaleString()} · 피킹 ${p.pk.toLocaleString()} · 분류 ${p.so.toLocaleString()} · 검품 ${p.ins.toLocaleString()} · 상차 ${p.ld.toLocaleString()} · 출발 ${p.dp.toLocaleString()}${handed.has(t.trfId) ? ` · 인계 ${clock(handed.get(t.trfId)!)}` : ''}`;
+                return (
+                  <button
+                    key={tp}
+                    className={`mg-c st-${cur} ${dim ? 'dim' : ''}`}
+                    title={tip}
+                    onClick={() => {
+                      view.setMfcFilter(m.id);
+                      if (view.rightView !== 'trf') view.toggleRight('trf');
+                    }}
+                  >
+                    <b>{GROUPS[cur]}</b>
+                    <span className="mg-steps">
+                      {dots.map((d, i) => (
+                        <i key={i} className={d} title={STEPS[i]} />
+                      ))}
                     </span>
-                  </div>
-                  <ol className="sfl-steps">
-                    {STEPS.map((s, i) => (
-                      <li key={s} className={dots[i]}>
-                        <i />
-                        <span className="n">{s}</span>
-                        <span className="u">{under[i]}</span>
-                      </li>
-                    ))}
-                  </ol>
-                </div>
-              );
-            })}
-          </section>
-        );
-      })}
+                    <small>{short(p.ap)}</small>
+                  </button>
+                );
+              })}
+            </MfcRow>
+          ))}
+        </div>
+      )}
+      {rows.length > 0 && (
+        <div className="mg-legend">
+          <span>
+            <i className="done" />
+            끝난 단계
+          </span>
+          <span>
+            <i className="now" />
+            진행 중
+          </span>
+          <span>
+            <i className="wait" />
+            아직
+          </span>
+          <span className="mg-tip">칸을 누르면 그 MFC 의 TRF</span>
+        </div>
+      )}
       <details className="sfl-log">
         <summary>현장 사건 기록 {sim.events.length ? `${sim.events.length}건` : ''} (보충·Wave·결품·검품·출발)</summary>
         {sim.events.length ? (

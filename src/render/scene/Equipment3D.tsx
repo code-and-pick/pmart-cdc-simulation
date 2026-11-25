@@ -626,18 +626,24 @@ function VegLanes({ e, floor }: { e: Equip; floor: FloorNo }) {
   );
 }
 
-/** 오토스토어 포트 앞 MFC 박스 다섯(PPC-01~05) + 위 정보판(로봇·대기 통·포트 가동률) [사용자 §5] */
+/** 오토스토어 포트 앞 MFC 박스 다섯(PPC-01~05) + 위 정보 카드 하나(통 수·SKU·로봇·포트·대기 통·포트 가동률) [사용자 §5, 2026-11-25 "빈 수 표시"] */
 function PortBoxes({ e }: { e: Equip }) {
-  const { sim } = useApp();
+  const { sim, layout } = useApp();
+  const a = layout.autostore;
   const ports = autostorePorts(e.rect);
   const info = useRef<THREE.Sprite>(null!);
   const last = useRef('');
   useFrame(() => {
     const u = sim.portUtil();
-    const text = `로봇 ${AUTOSTORE.robots} · 대기 통 ${sim.auto.waiting}\n포트 가동률 ${u.length ? u.map((x) => Math.round(x * 100) + '%').join(' / ') : '-'}`;
+    const text = [
+      '오토스토어',
+      `통 ${(a?.bins ?? 0).toLocaleString()}개 (자리 ${(a?.binsFit ?? 0).toLocaleString()}) · SKU ${(a?.skus ?? 0).toLocaleString()}`,
+      `로봇 ${AUTOSTORE.robots} · 포트 ${AUTOSTORE.ports} · 대기 통 ${sim.auto.waiting}`,
+      `포트 가동률 ${u.length ? u.map((x) => Math.round(x * 100) + '%').join(' · ') : '아직 없음'}`,
+    ].join('\n');
     if (text !== last.current && info.current) {
       last.current = text;
-      (info.current.material as THREE.SpriteMaterial).map = plateTexture(text, { w: 384, h: 128 });
+      (info.current.material as THREE.SpriteMaterial).map = plateTexture(text, { w: 512, h: 240 });
       (info.current.material as THREE.SpriteMaterial).needsUpdate = true;
     }
   });
@@ -658,8 +664,8 @@ function PortBoxes({ e }: { e: Equip }) {
           </group>
         )),
       )}
-      <sprite ref={info} position={[(e.rect.x0 + e.rect.x1) / 2, 6.2, (e.rect.z0 + e.rect.z1) / 2]} scale={[4.2, 1.4, 1]}>
-        <spriteMaterial map={plateTexture('오토스토어', { w: 384, h: 128 })} depthWrite={false} />
+      <sprite ref={info} position={[(e.rect.x0 + e.rect.x1) / 2, 6.4, (e.rect.z0 + e.rect.z1) / 2]} scale={[4.8, 2.25, 1]}>
+        <spriteMaterial map={plateTexture('오토스토어', { w: 512, h: 240 })} depthWrite={false} />
       </sprite>
     </group>
   );
@@ -777,8 +783,7 @@ function Office({ e }: { e: Equip }) {
 
 /** 오토스토어 — 알루미늄 격자(위), 옥색 옆판, 빨간 로봇들이 격자 위를 오감, 남쪽(앞) 포트 2개 */
 function AutoStore({ e }: { e: Equip }) {
-  const { sim, layout } = useApp();
-  const info = layout.autostore;
+  const { sim } = useApp();
   const r = e.rect;
   const H = 4.4;
   const cell = 0.7;
@@ -851,13 +856,6 @@ function AutoStore({ e }: { e: Equip }) {
         <boxGeometry args={[0.62, 0.5, 0.62]} />
         <meshStandardMaterial color={0xe5322d} />
       </instancedMesh>
-      {/* 통 수 표시(사용자 2026-11-25 "오토스토어 빈 수를 화면에 표시") */}
-      {info && (
-        <sprite position={[(r.x0 + r.x1) / 2, H + 1.0, (r.z0 + r.z1) / 2]} scale={[4.6, 1.15, 1]}>
-          <spriteMaterial map={plateTexture(`오토스토어 통 ${info.bins.toLocaleString()}개 (자리 ${info.binsFit.toLocaleString()})
-SKU ${info.skus.toLocaleString()} · 로봇 ${info.robots} · 포트 ${info.ports}`, { w: 512, h: 128 })} depthWrite={false} />
-        </sprite>
-      )}
       {/* 포트(작업자가 빈에서 꺼내 MFC 박스에 담는 자리) */}
       {autostorePorts(r).map((px) => (
         <group key={px} position={[px, 0, r.z1 - 0.9]}>

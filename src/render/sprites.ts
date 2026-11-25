@@ -3,7 +3,31 @@ import * as THREE from 'three';
 
 const cache = new Map<string, THREE.CanvasTexture>();
 
-/** 흰 판에 검은 글자 — 사진의 랙 끝 번호판(A10, A11 …) 모양 */
+/** 둥근 사각형 경로 */
+function roundRect(g: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
+  g.beginPath();
+  g.moveTo(x + r, y);
+  g.arcTo(x + w, y, x + w, y + h, r);
+  g.arcTo(x + w, y + h, x, y + h, r);
+  g.arcTo(x, y + h, x, y, r);
+  g.arcTo(x, y, x + w, y, r);
+  g.closePath();
+}
+
+/** 글자가 폭에 들어가게 글꼴 크기를 줄인다 */
+function fitFont(g: CanvasRenderingContext2D, text: string, weight: number, size: number, maxW: number): number {
+  let px = size;
+  for (; px > 8; px -= 1) {
+    g.font = `${weight} ${px}px 'Noto Sans KR', 'Pretendard', sans-serif`;
+    if (g.measureText(text).width <= maxW) break;
+  }
+  return px;
+}
+
+/**
+ * 이름판 — 흰 둥근 카드(옅은 그림자·가는 테두리), 첫 줄 굵게·둘째 줄부터 작고 옅게(사용자 2026-11-25 "하양 좋은데 모양이 못생겼어").
+ * 랙 통로 번호판(A01…)·선반 번호·PPC·문 이름·설비 정보판이 같이 쓴다. 색 판(bg)도 같은 모양.
+ */
 export function plateTexture(text: string, opts: { bg?: string; fg?: string; w?: number; h?: number } = {}): THREE.CanvasTexture {
   const key = `${text}|${opts.bg}|${opts.fg}|${opts.w}|${opts.h}`;
   const hit = cache.get(key);
@@ -14,19 +38,46 @@ export function plateTexture(text: string, opts: { bg?: string; fg?: string; w?:
   c.width = w;
   c.height = h;
   const g = c.getContext('2d')!;
-  g.fillStyle = opts.bg ?? '#ffffff';
-  g.fillRect(0, 0, w, h);
-  g.strokeStyle = '#22262e';
-  g.lineWidth = 4;
-  g.strokeRect(2, 2, w - 4, h - 4);
-  g.fillStyle = opts.fg ?? '#111318';
-  // 줄바꿈(\n)이 있으면 여러 줄로
+  const bg = opts.bg ?? '#ffffff';
+  const white = bg.toLowerCase() === '#ffffff';
+  const m = Math.max(3, Math.round(h * 0.06));
+  const r = Math.min(h * 0.24, 22);
+  g.save();
+  g.shadowColor = 'rgba(15, 23, 42, 0.28)';
+  g.shadowBlur = m * 1.4;
+  g.shadowOffsetY = m * 0.4;
+  roundRect(g, m, m, w - 2 * m, h - 2 * m - m * 0.4, r);
+  g.fillStyle = bg;
+  g.fill();
+  g.restore();
+  if (white) {
+    g.lineWidth = Math.max(1.5, h * 0.018);
+    g.strokeStyle = 'rgba(15, 23, 42, 0.14)';
+    roundRect(g, m, m, w - 2 * m, h - 2 * m - m * 0.4, r);
+    g.stroke();
+  }
   const lines = text.split('\n');
-  const lh = h / lines.length;
-  g.font = `700 ${Math.floor(lh * 0.62)}px 'Noto Sans KR', sans-serif`;
+  const innerW = w - 2 * m - r;
+  const top = m;
+  const avail = h - 2 * m - m * 0.4;
   g.textAlign = 'center';
   g.textBaseline = 'middle';
-  lines.forEach((ln, i) => g.fillText(ln, w / 2, lh * (i + 0.5) + 2, w - 12));
+  if (lines.length === 1) {
+    g.fillStyle = opts.fg ?? '#1f2937';
+    fitFont(g, lines[0], 800, Math.floor(avail * 0.62), innerW);
+    g.fillText(lines[0], w / 2, top + avail / 2 + 1);
+  } else {
+    // 제목 줄 크게, 나머지 작게
+    const unit = avail / (1.35 + (lines.length - 1) * 0.95);
+    let y = top + unit * 0.7;
+    lines.forEach((ln, k) => {
+      const big = k === 0;
+      g.fillStyle = big ? (opts.fg ?? '#1f2937') : white ? '#64748b' : 'rgba(255,255,255,0.86)';
+      fitFont(g, ln, big ? 800 : 600, Math.floor(unit * (big ? 0.92 : 0.66)), innerW);
+      g.fillText(ln, w / 2, y + 1);
+      y += big ? unit * 1.15 : unit * 0.95;
+    });
+  }
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.SRGBColorSpace;
   t.anisotropy = 4;

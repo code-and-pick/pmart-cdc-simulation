@@ -99,13 +99,45 @@ export function ViewBar() {
           ))}
         </div>
         {view.floor !== 'B1' && (
-          <div className="seg float" id="zones" aria-label="구역">
-            {view.zoneViews().map((v) => (
-              <button key={v.key} className={view.focusedZone === v.key ? 'on' : undefined} onClick={() => view.focusZone(v.key)}>
-                {v.label}
-              </button>
-            ))}
-          </div>
+          // 구역 고르기 — 칩 줄이 길어 오른쪽 패널에 가려서 고르기 상자로(사용자 2026-11-25). 보관·피킹 선반·설비로 묶음
+          <label className="seg float zone-pick" id="zones">
+            <span>구역</span>
+            <select value={view.focusedZone} onChange={(e) => view.focusZone(e.target.value)} aria-label="구역">
+              {(() => {
+                const vs = view.zoneViews();
+                const all = vs.filter((v) => v.key === 'ALL');
+                const store = vs.filter((v) => /^\d-[A-Z]$/.test(v.key));
+                const shelf = vs.filter((v) => v.key.includes('SHELF'));
+                const equip = vs.filter((v) => !all.includes(v) && !store.includes(v) && !shelf.includes(v));
+                return (
+                  <>
+                    {all.map((v) => (
+                      <option key={v.key} value={v.key}>
+                        {v.label}
+                      </option>
+                    ))}
+                    {(
+                      [
+                        ['보관 (팔레트 랙)', store],
+                        ['피킹 선반', shelf],
+                        ['설비', equip],
+                      ] as const
+                    ).map(([g, list]) =>
+                      list.length ? (
+                        <optgroup key={g} label={g}>
+                          {list.map((v) => (
+                            <option key={v.key} value={v.key}>
+                              {v.label}
+                            </option>
+                          ))}
+                        </optgroup>
+                      ) : null,
+                    )}
+                  </>
+                );
+              })()}
+            </select>
+          </label>
         )}
       </div>
       <div className="seg float" title="랙 번호판은 늘, 칸 번호는 가까이 확대했을 때 보입니다">
