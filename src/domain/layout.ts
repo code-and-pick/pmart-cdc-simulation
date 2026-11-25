@@ -1,7 +1,7 @@
 // 칠곡 DC 층별 배치 — 센터 데이터(sites/chilgok.ts)를 받아 층·구역·랙·칸·비랙 위치를 만든다.
 // 좌표 단위 m, x = 동쪽, z = 남쪽(화면 아래), y = 높이. 층마다 같은 바닥(건물 한 층).
-// 북쪽 띠(z 0 ~ bandDepth, DT) = 승강기·출고대기 줄 + 그 남쪽 분류 설비. 그 남쪽 = 온도대 보관 방(문서 평수 그대로):
-// 방 북쪽 블록 = 피킹 선반·오토스토어, 그 남쪽 = 팔레트 랙 묶음(12개 × 양면 24개, 지게차 통로가 남북으로 뻗고 묶음 사이 가로 통로).
+// 북쪽 띠(z 0 ~ bandDepth, DT) = 승강기·출고대기 줄 + 그 남쪽 피킹 선반(서쪽)·분류 설비·오토스토어(동쪽). 그 남쪽 = 온도대 보관 방(문서 평수 그대로):
+// 팔레트 랙 묶음(12개 × 양면 24개, 지게차 통로 3.0m 가 남북으로 뻗고 묶음 사이 가로 통로) [사용자 2026-11-25 2안].
 // 팔레트 랙은 입고·적치 보관 자리이고 피킹은 선반에서 한다(사용자 2026-11-25).
 
 import { AISLE_PITCH, B1_DOCKS, CAPACITY, CATALOG, CDC_FACTS, CENTER_ID, FLOOR_PYEONG, LIFTS_PER_FLOOR, PYEONG_M2, RACK, SHELF, STAGING_SLOTS, STORE } from '../config';
@@ -161,9 +161,9 @@ const ROOM_OF: Record<Temp, string> = { AMBIENT: '상온', FROZEN: '냉동', CHI
 /** 랙 묶음 한 줄 길이 = 랙 12개 × 2.6m [사용자 2026-11-25] */
 export const BUNDLE_LEN = RACK.bundleBays * RACK.bayW;
 
-/** 보관 방 깊이(남북) — 북쪽 선반 블록 + 가로 통로·묶음 줄 번갈아 */
+/** 보관 방 깊이(남북) — 가로 통로·묶음 줄 번갈아 */
 export function storageDepth(): number {
-  return STORE.shelfDepth + RACK.crossAisle * (STORE.bundleRows + 1) + STORE.bundleRows * BUNDLE_LEN;
+  return RACK.crossAisle * (STORE.bundleRows + 1) + STORE.bundleRows * BUNDLE_LEN;
 }
 
 interface RoomPlan {
@@ -238,7 +238,7 @@ export function buildLayout(): Layout {
   const plan = sitePlan();
   const { width, depth, bandDepth } = plan;
   const roomZ0 = bandDepth;
-  const rackZ0 = roomZ0 + STORE.shelfDepth + RACK.crossAisle;
+  const rackZ0 = roomZ0 + RACK.crossAisle;
   const segZ0 = (s: number) => rackZ0 + s * (BUNDLE_LEN + RACK.crossAisle);
   const northZ = SHELF.northStrip - 0.6;
 
@@ -335,20 +335,22 @@ export function buildLayout(): Layout {
       sx += Math.ceil(per / 2) * slotW + (li === 0 ? 3 : 0);
     });
 
-    // 피킹 선반 — 그 온도대 방의 북쪽 블록(보관 면적 안, 사용자 2026-11-25), 구역마다 SKU 수만큼 칸, 통로 번호 61 부터 [시뮬 R-13]
+    // 피킹 선반 — DT(북쪽 띠 남쪽 부분, 북쪽 통로와 보관 방 사이)에 층 서쪽부터 [사용자 2026-11-25 2안], 구역마다 SKU 수만큼 칸, 통로 번호 61 부터 [시뮬 R-13]
     const shelves: Location[] = [];
     const shelfRows: ShelfRow[] = [];
     const shelfAisles: Aisle[] = [];
-    const unitsPerSide = Math.floor((STORE.shelfDepth - 2.5) / SHELF.unitLen);
+    const sz0 = northZ + 1.5;
+    const sz1 = bandDepth - 1.6;
+    const uz0 = sz0 + 0.4;
+    const unitsPerSide = Math.floor((sz1 - uz0) / SHELF.unitLen);
     const perAisle = unitsPerSide * 2 * SHELF.levels * SHELF.slots;
     const shelfPitch = SHELF.depth * 2 + SHELF.aisleW + 0.6;
     const quota = skuQuota();
     const shelfTarget = shelfTargets();
     const equipment: Equip[] = [];
-    const uz0 = roomZ0 + 1.2;
-    for (const rp of roomPlans) {
-      let shx = rp.x0 + 2.5;
-      for (const { spec: z } of rp.zones) {
+    let shx = 2.5;
+    {
+      for (const z of spec.zones) {
         const need = Math.max(quota.get(z.letter) ?? 0, shelfTarget.get(z.letter) ?? 0);
         const nAisles = Math.max(1, Math.ceil(need / perAisle));
         const zx0 = shx - 0.3;
@@ -384,21 +386,17 @@ export function buildLayout(): Layout {
           }
           shx += shelfPitch;
         }
-        zones.push({ id: `${spec.floor}-${z.letter}-SHELF`, label: `${z.label} 피킹 선반`, temp: z.temp, kind: 'SHELF', rect: { x0: zx0, z0: roomZ0 + 0.6, x1: shx - 0.3, z1: roomZ0 + STORE.shelfDepth - 0.6 } });
+        zones.push({ id: `${spec.floor}-${z.letter}-SHELF`, label: `${z.label} 피킹 선반`, temp: z.temp, kind: 'SHELF', rect: { x0: zx0, z0: sz0, x1: shx - 0.3, z1: sz1 } });
         shx += 0.6;
-      }
-      if (shx > rp.x1 - 0.5) throw new Error(`${spec.floor}F ${rp.key} 방 선반이 방 폭을 넘음`);
-      // 그 방 북쪽 블록 남는 폭 = 오토스토어(보관 면적 안 설비)
-      for (const e of spec.equipment.filter((x) => x.where === 'storage' && x.room === rp.key)) {
-        if (rp.x1 - 1 - (shx + 1.5) < 6) throw new Error(`${spec.floor}F ${rp.key} 오토스토어 자리 부족`);
-        equipment.push({ kind: e.kind, label: e.label, rect: { x0: shx + 1.5, z0: roomZ0 + 1, x1: rp.x1 - 1, z1: roomZ0 + STORE.shelfDepth - 0.6 } });
       }
     }
 
+    // 띠 설비(휠소터·DPS·오토스토어) — 선반 동쪽, 선반과 같은 줄
     const band = spec.equipment.filter((e) => e.where === 'band');
-    const bandX0 = sx + 2;
+    const bandX0 = shx + 1.5;
     const bandW = (width - bandX0 - 1) / Math.max(1, band.length);
-    band.forEach((e, i) => equipment.push({ kind: e.kind, label: e.label, rect: { x0: bandX0 + i * bandW, z0: northZ + 1.5, x1: bandX0 + (i + 1) * bandW - 1, z1: bandDepth - 2.6 } }));
+    if (band.length && bandW < 9) throw new Error(`${spec.floor}F 띠 설비 자리 부족(${bandW.toFixed(1)}m)`);
+    band.forEach((e, i) => equipment.push({ kind: e.kind, label: e.label, rect: { x0: bandX0 + i * bandW, z0: sz0, x1: bandX0 + (i + 1) * bandW - 1, z1: sz1 } }));
     const east = spec.equipment.filter((e) => e.where === 'east');
     if (east.length) {
       if (width - storageEast < 6) throw new Error(`${spec.floor}F 동쪽 작업장 폭 부족`);
@@ -424,7 +422,7 @@ export function buildLayout(): Layout {
       shelves,
       shelfRows,
       shelfAisles,
-      walk: { northZ, roomZ: roomZ0 - 1.2, rackZ: roomZ0 + STORE.shelfDepth + RACK.crossAisle / 2, westX: 1.2 },
+      walk: { northZ, roomZ: roomZ0 - 0.8, rackZ: roomZ0 + RACK.crossAisle / 2, westX: 1.2 },
       lifts,
       equipment,
       layoutPyeong: { storage: storageM2 / PYEONG_M2, band: (width * depth - storageM2) / PYEONG_M2 },
@@ -460,9 +458,11 @@ export function shelfTargets(): Map<string, number> {
   for (const temp of ['FROZEN', 'CHILLED', 'AMBIENT'] as const) {
     const group = zs.filter((z) => z.temp === temp);
     const na = zoneAisles();
-    const total = group.reduce((s, z) => s + na.get(z.letter)!, 0);
     const want = SHELF.targetSlots[temp];
-    const q = group.map((z) => ({ z: z.letter, exact: (na.get(z.letter)! / total) * want }));
+    // 몫 = shelfShare(있으면) — 5F 상온 C~F 는 DT 가 좁아 SKU 수만큼만, 상온 목표는 7F G·H 로 [시뮬]
+    const w = (z: (typeof group)[number]) => z.shelfShare ?? na.get(z.letter)!;
+    const wt = group.reduce((s, z) => s + w(z), 0);
+    const q = group.map((z) => ({ z: z.letter, exact: (w(z) / wt) * want }));
     for (const x of q) out.set(x.z, Math.floor(x.exact));
     let left = want - q.reduce((s, x) => s + Math.floor(x.exact), 0);
     for (const x of [...q].sort((a, b) => (b.exact % 1) - (a.exact % 1))) {

@@ -60,8 +60,8 @@ export class FloorSite {
 
   /** 길: from → to 를 지나는 점들(from 제외) */
   route(from: WalkPoint, to: WalkPoint): P[] {
-    const { northZ, roomZ, rackZ, westX } = this.f.walk;
-    const corr = (p: WalkPoint) => (p.lane === 'N' ? [northZ] : p.lane === 'R' ? [rackZ] : [roomZ, rackZ]);
+    const { northZ, rackZ, westX } = this.f.walk;
+    const corr = (p: WalkPoint) => (p.lane === 'N' ? [northZ] : p.lane === 'R' ? [rackZ] : [northZ, rackZ]);
     const cf = corr(from);
     const ct = corr(to);
     const common = cf.filter((c) => ct.includes(c));

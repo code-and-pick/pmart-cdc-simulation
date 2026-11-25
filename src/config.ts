@@ -37,8 +37,8 @@ export const RACK = {
   levelLoadKg: 2000,
   /** 팔레트 [사용자] — 1.1 × 1.1m, 짐 포함 2m */
   pallet: { w: 1.1, d: 1.1, h: 2.0, deckH: 0.14 },
-  /** 지게차 통로 폭 — "지게차 하나가 여유롭게 들어가는 통로" [사용자 2026-11-25, 폭 3.5m 가정] */
-  aisleW: 3.5,
+  /** 지게차 통로 폭 3.0m — 처음 3.5m 가정에서 팔레트 18,000칸 이상(CDC-2·백엔드 R-17 회신) 위해 줄임 [사용자 2026-11-25 2안] */
+  aisleW: 3.0,
   /** 묶음 한 줄 랙 수 — "1줄에 랙 12개 양면으로 두니까 24개가 간격을 두는 랙 묶음 단위" [사용자 2026-11-25] */
   bundleBays: 12,
   /** 슬롯 — 1 왼쪽 · 2 오른쪽 [개념도] */
@@ -46,11 +46,11 @@ export const RACK = {
   /** 단 높이 2m [사용자] */
   levelH: 2.0,
   /** 묶음 앞뒤 가로 통로 — 지게차 통로와 같은 폭 [가정] */
-  crossAisle: 3.5,
+  crossAisle: 3.0,
 } as const;
 
-/** 보관 방 안 배치 [가정] — 북쪽 블록(피킹 선반·오토스토어) 깊이, 남북으로 놓는 묶음 줄 수 */
-export const STORE = { shelfDepth: 18, bundleRows: 2 } as const;
+/** 보관 방 안 배치 [가정] — 남북으로 놓는 묶음 줄 수. 피킹 선반·오토스토어는 DT [사용자 2026-11-25 2안] */
+export const STORE = { bundleRows: 2 } as const;
 
 /** 묶음 간격 = 묶음 폭(등 맞댄 랙 깊이 × 2) + 지게차 통로 */
 export const AISLE_PITCH = RACK.depth * 2 + RACK.aisleW;
