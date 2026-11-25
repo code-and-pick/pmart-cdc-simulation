@@ -42,7 +42,9 @@ describe('층 배치 [사용자 §3]', () => {
     expect(f.equipment.some((e) => e.kind === 'INBOUND' && e.temp === 'FROZEN')).toBe(true); // 냉동 입고 검수 — 냉동 도크 옆
     const dps = f.equipment.find((x) => x.kind === 'DPS')!;
     expect(inRects((dps.rect.x0 + dps.rect.x1) / 2, (dps.rect.z0 + dps.rect.z1) / 2, frz.rects)).toBe(true);
-    expect(frz.doors.map((d) => d.kind).sort()).toEqual(['AIR_CURTAIN', 'ANTEROOM', 'FORKLIFT']);
+    expect(frz.doors.map((d) => d.kind).sort()).toEqual(['AIR_CURTAIN', 'ANTEROOM', 'FORKLIFT', 'FORKLIFT']); // 서쪽 벽 셋 + 전실↔보관 칸막이 지게차 문
+    // 같은 벽의 문끼리 겹치지 않는다
+    for (const a of frz.doors) for (const b of frz.doors) if (a !== b && a.x0 === a.x1 && b.x0 === b.x1 && a.x0 === b.x0) expect(a.z1 <= b.z0 || b.z1 <= a.z0).toBe(true);
   });
 
   it('6F: 승강기·출고대기 줄을 뺀 층 전체가 냉장 방, 동쪽 라인 → 분배 → 야채 레인, 랙 통로는 출발 10 에서 팔레트 하한으로 늘림', () => {

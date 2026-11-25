@@ -121,6 +121,9 @@ function Zones({ f }: { f: FloorLayout }) {
  * 문 자리는 비우고 문 모양만: 지게차 출입문(노란 문틀) · 박스·R/T 반출 에어커튼(투명 띠) · 냉동 전실 문(문틀).
  * 투명도는 controller.wallOpacity — 위 [벽 / 벽 숨김] 토글(MFC 와 같음).
  */
+/** 문 높이(m) — 지게차 문 4.2, 사람·에어커튼 2.6 [가정] */
+const doorTop = (k: Door['kind']) => (k === 'FORKLIFT' ? 4.2 : 2.6);
+
 function Walls({ f, L }: { f: FloorLayout; L: Layout }) {
   const { controller } = useApp();
   const mats = useRef<THREE.MeshStandardMaterial[]>([]);
@@ -136,7 +139,7 @@ function Walls({ f, L }: { f: FloorLayout; L: Layout }) {
   });
   const t = 0.25;
   const { walls, doors, labels } = useMemo(() => {
-    const walls: { r: Rect; cold: boolean; h: number }[] = [
+    const walls: { r: Rect; cold: boolean; h: number; y0?: number }[] = [
       { r: { x0: -t, z0: -t, x1: L.width + t, z1: 0 }, cold: false, h: WALL_H },
       { r: { x0: -t, z0: L.depth, x1: L.width + t, z1: L.depth + t }, cold: false, h: WALL_H },
       { r: { x0: -t, z0: 0, x1: 0, z1: L.depth }, cold: false, h: WALL_H },
@@ -162,6 +165,13 @@ function Walls({ f, L }: { f: FloorLayout; L: Layout }) {
             walls.push({ r: along === 'x' ? { x0: cur, z0: s.z0 - t / 2, x1: c0, z1: s.z0 + t / 2 } : { x0: s.x0 - t / 2, z0: cur, x1: s.x0 + t / 2, z1: c0 }, cold: true, h: H });
           cur = Math.max(cur, c1);
         }
+        // 문 위는 벽으로 막는다(문 높이까지만 뚫림)
+        for (const d of room.doors) {
+          const on = along === 'x' ? d.z0 === d.z1 && Math.abs(d.z0 - s.z0) < 0.01 : d.x0 === d.x1 && Math.abs(d.x0 - s.x0) < 0.01;
+          const [c0, c1] = along === 'x' ? [d.x0, d.x1] : [d.z0, d.z1];
+          if (!on || c1 <= a0 || c0 >= a1) continue;
+          walls.push({ r: along === 'x' ? { x0: c0, z0: s.z0 - t / 2, x1: c1, z1: s.z0 + t / 2 } : { x0: s.x0 - t / 2, z0: c0, x1: s.x0 + t / 2, z1: c1 }, cold: true, h: H, y0: doorTop(d.kind) });
+        }
         // 벽 위 온도 표시 — 긴 벽마다 하나(문이 가운데면 조금 비켜서)
         if (a1 - a0 > 8) labels.push({ text: room.label, x: along === 'x' ? (a0 + a1) / 2 : s.x0, z: along === 'x' ? s.z0 : (a0 + a1) / 2, temp: room.temp });
       }
@@ -178,8 +188,8 @@ function Walls({ f, L }: { f: FloorLayout; L: Layout }) {
   return (
     <>
       {walls.map((w, i) => (
-        <mesh key={i} position={[(w.r.x0 + w.r.x1) / 2, w.h / 2, (w.r.z0 + w.r.z1) / 2]} raycast={() => null}>
-          <boxGeometry args={[w.r.x1 - w.r.x0, w.h, w.r.z1 - w.r.z0]} />
+        <mesh key={i} position={[(w.r.x0 + w.r.x1) / 2, ((w.y0 ?? 0) + w.h) / 2, (w.r.z0 + w.r.z1) / 2]} raycast={() => null}>
+          <boxGeometry args={[w.r.x1 - w.r.x0, w.h - (w.y0 ?? 0), w.r.z1 - w.r.z0]} />
           <meshStandardMaterial
             ref={(m: THREE.MeshStandardMaterial | null) => {
               if (m) {
@@ -195,7 +205,7 @@ function Walls({ f, L }: { f: FloorLayout; L: Layout }) {
           />
         </mesh>
       ))}
-      {doors.map(({ d, h }, i) => {
+      {doors.map(({ d }, i) => {
         const alongX = d.z0 === d.z1;
         const len = alongX ? d.x1 - d.x0 : d.z1 - d.z0;
         const cx = (d.x0 + d.x1) / 2;
@@ -210,8 +220,8 @@ function Walls({ f, L }: { f: FloorLayout; L: Layout }) {
           >
             {/* 문틀(양 기둥 + 윗틀) */}
             {[-1, 1].map((sgn) => (
-              <mesh key={sgn} position={alongX ? [cx + (sgn * len) / 2, h / 2, cz] : [cx, h / 2, cz + (sgn * len) / 2]} raycast={() => null}>
-                <boxGeometry args={[0.18, h, 0.18]} />
+              <mesh key={sgn} position={alongX ? [cx + (sgn * len) / 2, doorTop(d.kind) / 2, cz] : [cx, doorTop(d.kind) / 2, cz + (sgn * len) / 2]} raycast={() => null}>
+                <boxGeometry args={[0.18, doorTop(d.kind), 0.18]} />
                 <meshStandardMaterial color={color} />
               </mesh>
             ))}

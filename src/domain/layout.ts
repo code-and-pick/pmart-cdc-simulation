@@ -577,8 +577,9 @@ class FloorBuilder {
   }
 
   /** 온도 방 — 사각형 합의 바깥 둘레를 벽으로(건물 바깥벽과 겹치는 선은 뺀다), 문은 따로 */
-  coldRoom(temp: 'FROZEN' | 'CHILLED', rects: Rect[], doors: Door[]) {
-    const walls = perimeter(rects).filter((s) => !onOuterWall(s, this.B.width, this.B.depth));
+  /** inner = 방 안 칸막이 벽(예: 냉동 전실 ↔ 냉동 보관) */
+  coldRoom(temp: 'FROZEN' | 'CHILLED', rects: Rect[], doors: Door[], inner: { x0: number; z0: number; x1: number; z1: number }[] = []) {
+    const walls = [...perimeter(rects).filter((s) => !onOuterWall(s, this.B.width, this.B.depth)), ...inner];
     this.coldRooms.push({ temp, label: BUILDING.roomTempLabel[temp], rects, walls, doors });
   }
 
@@ -719,11 +720,16 @@ export function buildLayout(): Layout {
       { x0: frzX0, z0: 0, x1: width, z1: bandDepth },
       { x0: frzX0, z0: bandDepth, x1: width, z1: depth },
     ],
+    // 문(사용자 2026-11-26 "냉동 문이 이상하다" — 전실 문·지게차 문이 같은 벽에서 겹쳤고, 전실과 보관 사이 벽이 없었음):
+    //  서쪽 벽 — 에어커튼(휠소터 줄이 지나는 곳, 닫은 박스만) · 전실 문(북쪽 통로 끝, 사람) · 지게차 문(랙 앞 통로, 입고 팔레트 → 냉동 보관)
+    //  전실 ↔ 보관 칸막이 — 지게차 문(보관 랙 → 전실 피킹 선반 보충)
     [
       { kind: 'AIR_CURTAIN', x0: frzX0, z0: frzLineZ0 - 0.1, x1: frzX0, z1: frzLineZ1 + 0.1 },
-      { kind: 'ANTEROOM', x0: frzX0, z0: roomZ - 1.2, x1: frzX0, z1: roomZ + 1.2 },
-      { kind: 'FORKLIFT', x0: frzX0, z0: rackZ - 2, x1: frzX0, z1: rackZ + 2 },
+      { kind: 'ANTEROOM', x0: frzX0, z0: frzLineZ1 + 0.4, x1: frzX0, z1: frzLineZ1 + 2.2 },
+      { kind: 'FORKLIFT', x0: frzX0, z0: bandDepth + 0.4, x1: frzX0, z1: bandDepth + 4.4 },
+      { kind: 'FORKLIFT', x0: frzX0 + 1.5, z0: bandDepth, x1: frzX0 + 5.5, z1: bandDepth },
     ],
+    [{ x0: frzX0, z0: bandDepth, x1: width, z1: bandDepth }],
   );
   const L5 = f5.done({ northZ, northX1: frzX0 - 0.6, roomZ, rackZ, links: [1.2, c1 + 0.5], westX: 1.2 });
 
@@ -796,7 +802,11 @@ export function buildLayout(): Layout {
     [{ x0: 0, z0: coldZ0, x1: width, z1: depth }],
     [
       { kind: 'FORKLIFT', x0: 2.5, z0: coldZ0, x1: 6.5, z1: coldZ0 },
-      { kind: 'AIR_CURTAIN', x0: b0, z0: coldZ0, x1: b1, z1: coldZ0 },
+      // 에어커튼은 MFC 슈트(PPC-01~05)가 지나는 폭만(사용자 2026-11-26 — 전엔 출고대기 전체 20m)
+      (() => {
+        const xs = f6.staging.filter((st) => st.bay <= MFC_SLOTS).map((st) => st.pos.x);
+        return { kind: 'AIR_CURTAIN' as const, x0: Math.min(...xs) - 1, z0: coldZ0, x1: Math.max(...xs) + 1, z1: coldZ0 };
+      })(),
     ],
   );
   const L6 = f6.done({ northZ, northX1: width - 1, roomZ, rackZ, links: [4.5, (b0 + b1) / 2], westX: 4.5 });
@@ -812,6 +822,9 @@ export function buildLayout(): Layout {
 }
 
 /** 용량·SKU 자리 계산(§4) — 총 용량은 계산값, 목표(520만·SKU)와 비교해 모자라면 보완안 */
+/** MFC 출고대기 자리 수(PPC-01~05 — 휠소터 슈트) */
+const MFC_SLOTS = 5;
+
 export function capacityReport(floors: FloorLayout[]): CapacityReport {
   const temps: Temp[] = ['FROZEN', 'CHILLED', 'AMBIENT'];
   const byTemp = Object.fromEntries(
