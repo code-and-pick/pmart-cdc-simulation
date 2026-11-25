@@ -19,7 +19,7 @@ function useTrfRows() {
   const { sim, backend } = useApp();
   const handed = new Map<string, number>();
   for (const r of sim.runs.values()) for (const st of r.stops) if (st.handedAt !== undefined) for (const id of st.trfIds) handed.set(id, st.handedAt);
-  return backend.listTransfers().map((t) => {
+  return sim.live('trfs', 700, () => backend.listTransfers()).map((t) => {
     const p = t.progress.reduce((a, x) => ({ ap: a.ap + x.approvedQty, pk: a.pk + x.pickedQty, so: a.so + x.sortedQty, ins: a.ins + x.inspectedQty, ld: a.ld + x.loadedQty, dp: a.dp + x.departedQty }), { ap: 0, pk: 0, so: 0, ins: 0, ld: 0, dp: 0 });
     const base = p.pk || p.ap;
     const dot = (v: number, b: number): Dot => (b > 0 && v >= b ? 'done' : v > 0 ? 'now' : 'wait');

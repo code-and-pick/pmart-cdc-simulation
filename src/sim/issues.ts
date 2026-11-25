@@ -33,7 +33,7 @@ export function collectIssues(sim: Simulation, backend: MockBackend): Issue[] {
     if (!w.released && m > 13 * 60 + ISSUES.waveLateMin)
       out.push({ key: `wave-${w.waveId}`, level: 'warn', icon: '⏱', title: `${TEMP_KO[w.temp]} Wave 배포 지연`, what: `${w.waveId} — 선반 보충이 끝나야 배포(석간조 대기 중)`, go: { right: 'logs' } });
   // 보충 밀림 — 12시 넘었는데 보충할 칸이 남음(Wave 전)
-  const needs = backend.replenishmentNeeds();
+  const needs = sim.live('needs', 700, () => backend.replenishmentNeeds());
   if (needs.length && m > ISSUES.replLateHour * 60 && m < OUTBOUND.lowerFrom)
     out.push({ key: 'repl', level: 'warn', icon: '⇡', title: `보충 밀림 ${needs.length}칸`, what: `팔레트 → 피킹 칸 보충이 남았습니다 — 지게차 인원 확인`, go: { left: 'zone' } });
   // 최근 결품·검품 불합격

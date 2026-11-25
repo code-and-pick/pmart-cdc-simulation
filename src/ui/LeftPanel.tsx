@@ -1,10 +1,11 @@
 // 왼쪽 패널 — 설정(센터 고정값·시간표) · 구역(층·칸 정보) · 도움말. MFC 시뮬레이터 LeftPanel 의 sec/srow 모양을 쓴다.
-import { useEffect, useState, type ReactNode } from 'react';
+import { lazy, Suspense, useEffect, useState, type ReactNode } from 'react';
 import { checkReadiness, READINESS_KO, type ProbeResult } from '../backend/http/readiness';
 import { useApp, useTick, useView } from '../app/context';
 import { CDC_FACTS, MFCS, OUTBOUND, SHIFT, WORK, WORKFORCE, RACK } from '../config';
 import { ROLE_KO, type Role } from '../sim/agent';
 import { equipZoneId } from '../domain/layout';
+import type { FloorNo } from '../domain/sites/chilgok';
 
 function Sec({ title, aside, children }: { title: string; aside?: ReactNode; children: ReactNode }) {
   return (
@@ -30,10 +31,171 @@ function Row({ k, v }: { k: string; v: ReactNode }) {
 const TEMP_NAME = { AMBIENT: '상온', CHILLED: '냉장', FROZEN: '냉동' } as const;
 const hm = (m: number) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
 
+/** 한 줄 슬라이더 — MFC LeftPanel Slider 와 같은 모양(이름 · 막대 · 값 · ⓘ) */
+function Slider(props: { name: string; value: number; min: number; max: number; step: number; hint: string; unit?: string; apply: (v: number) => void }) {
+  return (
+    <div className="srow">
+      <span className="srow-l">{props.name}</span>
+      <input type="range" min={props.min} max={props.max} step={props.step} value={props.value} aria-label={props.name} onChange={(e) => props.apply(Number(e.target.value))} />
+      <b className="srow-v">
+        {props.value}
+        {props.unit ?? ''}
+      </b>
+      <span className="tip" tabIndex={0} aria-label={props.hint}>
+        i<span className="tip-box">{props.hint}</span>
+      </span>
+    </div>
+  );
+}
+
+const VW_ROLES: { role: Role; name: string; shift?: 'DAY' | 'EVENING'; max: number }[] = [
+  { role: 'FC', name: 'FC·DPS 피커', max: 20 },
+  { role: 'SORT', name: '라인·분배', max: 16 },
+  { role: 'JOCKEY', name: '자키', max: 10 },
+  { role: 'REPL', name: '지게차(주간)', shift: 'DAY', max: 12 },
+  { role: 'INSPECT', name: '검품', max: 6 },
+];
+
+/** 설정 → 가상 작업자 — 층별 인원 슬라이더와 속도 배수(MFC "가상 작업자"처럼) [사용자 §6-10] */
+function VirtualWorkers() {
+  const { sim } = useApp();
+  useTick();
+  const [fl, setFl] = useState<FloorNo>(5);
+  return (
+    <Sec title="가상 작업자" aside="바로 반영">
+      <div className="chips" style={{ marginBottom: 6 }}>
+        {([5, 6, 7] as const).map((n) => (
+          <button key={n} className={fl === n ? 'on' : ''} onClick={() => setFl(n)}>
+            {n}F
+          </button>
+        ))}
+      </div>
+      {VW_ROLES.map((r) => (
+        <Slider key={r.role} name={r.name} value={sim.headcount(fl, r.role, r.shift)} min={0} max={r.max} step={1} unit="명" hint={`${fl}F ${r.name} 인원 — 늘리면 바로 일하고, 줄이면 지금 일을 마치고 빠집니다`} apply={(v) => sim.setHeadcount(fl, r.role, v, r.shift)} />
+      ))}
+      <Slider name="속도 배수" value={sim.paceScale} min={0.5} max={2} step={0.05} unit="×" hint="모든 작업자 걸음·손 빠르기 배수(현장 속도 차이 0.85~1.15 에 곱함)" apply={(v) => (sim.paceScale = v)} />
+    </Sec>
+  );
+}
+
+/** 구역 카테고리별 막대 — 그 구역 SKU 를 이름(품목)으로 묶어 현물 합 [사용자 §6-9] */
+function CategoryBars({ letter }: { letter: string }) {
+  const { catalog, backend, sim } = useApp();
+  const stock = sim.live('stock', 500, () => backend.ledger.onHandByLocation());
+  const groups = new Map<string, number>();
+  for (const s of catalog.skus.filter((x) => x.zone === letter)) {
+    const k = s.name.replace(/ (대용량|소용량|오리지널|라이트|묶음|1\+1|가족용)$/, '');
+    const q = [s.shelf, ...s.alt].reduce((a, l) => a + (stock.get(l.code) ?? 0), 0);
+    groups.set(k, (groups.get(k) ?? 0) + q);
+  }
+  const rows = [...groups].sort((a, b) => b[1] - a[1]).slice(0, 8);
+  const max = Math.max(1, ...rows.map((r) => r[1]));
+  return (
+    <>
+      <div className="note">품목별 피킹 칸 현물</div>
+      {rows.map(([k, q]) => (
+        <div key={k} className="srow kv" title={`${k} ${q.toLocaleString()}개`}>
+          <span className="srow-l" style={{ minWidth: 90 }}>
+            {k}
+          </span>
+          <div className="bar" style={{ flex: 1 }}>
+            <i style={{ width: `${(q / max) * 100}%` }} />
+          </div>
+          <b className="srow-v">{q.toLocaleString()}</b>
+        </div>
+      ))}
+    </>
+  );
+}
+
+/** 랙별 목록 — › 누르면 단별, 단을 누르면 칸별(수량), 칸을 누르면 3D 에서 그 칸으로 [사용자 §6-9] */
+function RackList({ letter, shelf }: { letter: string; shelf: boolean }) {
+  const { backend, sim } = useApp();
+  const view = useView();
+  const f = view.floorLayout()!;
+  const [open, setOpen] = useState<string | null>(null);
+  const [lv, setLv] = useState<number | null>(null);
+  const stock = sim.live('stock', 500, () => backend.ledger.onHandByLocation());
+  const cells = (shelf ? f.shelves.filter((l) => !l.bin && !l.lane) : f.locations).filter((l) => l.zone === letter);
+  const aisles = [...new Set(cells.map((l) => l.aisle))].sort((a, b) => a - b);
+  return (
+    <div className="lows">
+      {aisles.map((a) => {
+        const ac = cells.filter((l) => l.aisle === a);
+        const key = `${letter}${a}`;
+        const on = ac.reduce((s, l) => s + (stock.get(l.code) ?? 0), 0);
+        return (
+          <div key={a} style={{ display: 'block' }}>
+            <div
+              onClick={() => {
+                setOpen(open === key ? null : key);
+                setLv(null);
+              }}
+              style={{ display: 'flex', justifyContent: 'space-between', cursor: 'pointer' }}
+            >
+              <span>
+                {open === key ? '⌄' : '›'} {letter}
+                {String(a).padStart(2, '0')}
+              </span>
+              <span>{ac.length.toLocaleString()}칸</span>
+              <span>{on.toLocaleString()}개</span>
+            </div>
+            {open === key &&
+              [...new Set(ac.map((l) => l.level))].sort((x, y) => x - y).map((level) => {
+                const lc = ac.filter((l) => l.level === level);
+                return (
+                  <div key={level} style={{ display: 'block', paddingLeft: 12 }}>
+                    <div onClick={() => setLv(lv === level ? null : level)} style={{ display: 'flex', justifyContent: 'space-between', cursor: 'pointer' }}>
+                      <span>
+                        {lv === level ? '⌄' : '›'} {level}단{!shelf && level === 1 && lc[0]?.type === 'PICK_FACE' ? ' (박스 피킹면)' : ''}
+                      </span>
+                      <span>{lc.filter((l) => (stock.get(l.code) ?? 0) > 0).length}/{lc.length}칸</span>
+                      <span>{lc.reduce((s, l) => s + (stock.get(l.code) ?? 0), 0).toLocaleString()}개</span>
+                    </div>
+                    {lv === level &&
+                      lc.slice(0, 60).map((l) => (
+                        <div key={l.code} style={{ display: 'flex', justifyContent: 'space-between', paddingLeft: 12, cursor: 'pointer' }} onClick={() => view.focusLocation(l)}>
+                          <span>{l.short}</span>
+                          <span>
+                            {(stock.get(l.code) ?? 0).toLocaleString()}/{l.capacity}
+                          </span>
+                        </div>
+                      ))}
+                  </div>
+                );
+              })}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// 개발용 성능 탭 — npm run dev 에서만(MFC 와 같음)
+const PerfPanel = import.meta.env.DEV ? lazy(() => import('../dev/perf').then((m) => ({ default: m.PerfPanel }))) : null;
+
 export function LeftPanel() {
   const view = useView();
   if (!view.leftView) return null;
-  return <div className="panel left">{view.leftView === 'zone' ? <ZoneInfo /> : view.leftView === 'workers' ? <Workers /> : view.leftView === 'help' ? <Help /> : <Settings />}</div>;
+  return (
+    <div className="panel left">
+      {view.leftView === 'perf' ? (
+        PerfPanel && (
+          <Suspense fallback={null}>
+            <PerfPanel />
+          </Suspense>
+        )
+      ) : view.leftView === 'zone' ? (
+        <ZoneInfo />
+      ) : view.leftView === 'workers' ? (
+        <Workers />
+      ) : view.leftView === 'help' ? (
+        <Help />
+      ) : (
+        <Settings />
+      )}
+    </div>
+  );
 }
 
 function Settings() {
@@ -41,6 +203,7 @@ function Settings() {
   return (
     <>
       {real && <RealCheck />}
+      <VirtualWorkers />
       <Sec title="센터" aside="고정값">
         <Row k="이름" v={CDC_FACTS.name} />
         <Row k="주소" v={CDC_FACTS.address} />
@@ -136,7 +299,7 @@ function ZoneBody({ zoneId }: { zoneId: string }) {
   const f = view.floorLayout()!;
   const zone = f.zones.find((z) => z.id === zoneId)!;
   const letter = zone.id.split('-')[1];
-  const stock = backend.ledger.onHandByLocation();
+  const stock = sim.live('stock', 500, () => backend.ledger.onHandByLocation());
   const people = (roles: string[]) => sim.agents.filter((a) => a.floor === f.floor && roles.includes(a.role) && !a.idle);
   const Bar = ({ pct, color }: { pct: number; color: string }) => (
     <div className="bar">
@@ -150,7 +313,7 @@ function ZoneBody({ zoneId }: { zoneId: string }) {
     const cap = cells.reduce((a, l) => a + l.capacity, 0);
     const filled = cells.filter((l) => (stock.get(l.code) ?? 0) > 0).length;
     const pct = cap ? Math.round((on / cap) * 100) : 0;
-    const needs = backend.replenishmentNeeds().filter((n) => n.from.split('-')[1] === letter && n.from.split('-')[2] === String(f.floor));
+    const needs = sim.live('needs', 700, () => backend.replenishmentNeeds()).filter((n) => n.from.split('-')[1] === letter && n.from.split('-')[2] === String(f.floor));
     const aisles = (zone.kind === 'RACK' ? f.aisles : f.shelfAisles).filter((a) => a.zone === letter);
     const skus = catalog.skus.filter((s) => s.zone === letter).length;
     const working = zone.kind === 'RACK' ? people(['REPL']) : people(['FC']);
@@ -195,6 +358,9 @@ function ZoneBody({ zoneId }: { zoneId: string }) {
             </div>
           </>
         )}
+        <CategoryBars letter={letter} />
+        <div className="note">{zone.kind === 'RACK' ? '랙별(통로) — › 누르면 단별·칸별' : '선반 통로별 — › 누르면 단별·칸별'}</div>
+        <RackList letter={letter} shelf={zone.kind === 'SHELF'} />
         {low.length > 0 && (
           <>
             <div className="note">거의 빈 선반 칸 — 누르면 그 칸으로</div>

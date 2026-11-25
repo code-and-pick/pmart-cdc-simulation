@@ -537,7 +537,7 @@ function DpsConveyor({ e, floor }: { e: Equip; floor: FloorNo }) {
 
 /** 야채 바닥 적치 레인(6F 냉장) — 자리마다 나무 팔레트 + 초록 크레이트 더미(현물만큼 높이). 크레이트는 입고 용기, 분배 크레이트(MFC 별)는 출고 용기 */
 function VegLanes({ e, floor }: { e: Equip; floor: FloorNo }) {
-  const { backend, layout } = useApp();
+  const { backend, layout, sim } = useApp();
   const f = layout.floors.find((x) => x.floor === floor)!;
   const cells = useMemo(() => f.shelves.filter((l) => l.lane), [f]);
   const pal = useRef<THREE.InstancedMesh>(null!);
@@ -556,7 +556,7 @@ function VegLanes({ e, floor }: { e: Equip; floor: FloorNo }) {
   useFrame(() => {
     if (ver.current === backend.ledger.version) return;
     ver.current = backend.ledger.version;
-    const stock = backend.ledger.onHandByLocation();
+    const stock = sim.live('stock', 500, () => backend.ledger.onHandByLocation());
     cells.forEach((l, i) => {
       const q = stock.get(l.code) ?? 0;
       const h = q ? 0.3 + 1.1 * Math.min(1, q / l.capacity) : 0;

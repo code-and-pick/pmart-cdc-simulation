@@ -17,7 +17,7 @@ const short = (n: number) => (n >= 10_000 ? `${(n / 10_000).toFixed(n >= 100_000
 /** 맨 위 요약 — 하루 흐름(승인 → 피킹 → 분류 → 검품 → 출발 → 수령) + 핵심 숫자 4개, 나머지는 "숫자 모두" */
 function Summary() {
   const { sim, backend, layout, catalog } = useApp();
-  const d = sim.summary();
+  const d = sim.live('summary', 700, () => sim.summary());
   const q = sim.queues();
   const t = backend.ledger.totals();
   const flow: [string, number, boolean?][] = [
@@ -42,7 +42,7 @@ function Summary() {
     ['CDC 현물', t.onHand.toLocaleString()],
     ['예약', t.reserved.toLocaleString()],
     ['Transit(미정산)', t.transit.toLocaleString()],
-    ['원장 불변식 위반', `${backend.ledger.check().length}건`],
+    ['원장 불변식 위반', `${sim.live('check', 2000, () => backend.ledger.check()).length}건`],
     ['팔레트 칸(보관)', layout.floors.reduce((s, f) => s + f.locations.length, 0).toLocaleString()],
     ['피킹 선반 칸', layout.floors.reduce((s, f) => s + f.shelves.length, 0).toLocaleString()],
     ['총 용량(유닛)', layout.totalCapacity.toLocaleString()],
@@ -112,7 +112,7 @@ function SiteFlow() {
   const [only, setOnly] = useState<number | null>(null);
   const handed = new Map<string, number>();
   for (const r of sim.runs.values()) for (const st of r.stops) if (st.handedAt !== undefined) for (const id of st.trfIds ?? []) handed.set(id, st.handedAt);
-  const rows = backend.listTransfers().map((t) => {
+  const rows = sim.live('trfs', 700, () => backend.listTransfers()).map((t) => {
     const p = t.progress.reduce(
       (a, x) => ({ ap: a.ap + x.approvedQty, pk: a.pk + x.pickedQty, so: a.so + x.sortedQty, ins: a.ins + x.inspectedQty, ld: a.ld + x.loadedQty, dp: a.dp + x.departedQty }),
       { ap: 0, pk: 0, so: 0, ins: 0, ld: 0, dp: 0 },
@@ -122,7 +122,7 @@ function SiteFlow() {
     const dots: Dot[] = [dot(p.pk, p.ap), dot(p.so, target), dot(p.ins, target), dot(p.ld, target), dot(p.dp, target), handed.has(t.trfId) ? 'done' : 'wait'];
     // 앞 단계가 끝나지 않았어도 뒤 단계가 시작됐으면 앞은 진행 중
     const first = dots.findIndex((x) => x !== 'done');
-    const cur = first < 0 ? 7 : !sim.summary().released && first === 0 && p.pk === 0 ? 0 : first + 1;
+    const cur = first < 0 ? 7 : !sim.live('summary', 700, () => sim.summary()).released && first === 0 && p.pk === 0 ? 0 : first + 1;
     return { t, p, dots, cur };
   });
   const count = GROUPS.map((_, i) => rows.filter((x) => x.cur === i).length);
@@ -199,11 +199,11 @@ function SiteFlow() {
 
 /** 재고 — 층·구역별 칸·용량·현물·예약(원장). 줄을 누르면 그 구역으로 */
 function Stock() {
-  const { layout, backend } = useApp();
+  const { layout, backend, sim } = useApp();
   const view = useView();
-  const stock = backend.ledger.onHandByLocation();
+  const stock = sim.live('stock', 500, () => backend.ledger.onHandByLocation());
   const t = backend.ledger.totals();
-  const v = backend.ledger.check();
+  const v = sim.live('check', 2000, () => backend.ledger.check());
   return (
     <>
       <div className="note">

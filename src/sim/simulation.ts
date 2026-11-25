@@ -1339,6 +1339,20 @@ export class Simulation implements DutyClock {
   }
 
   // ── 화면 요약 ───────────────────────────────────────
+  private readonly liveCache = new Map<string, { at: number; v: unknown }>();
+  /**
+   * 화면용 짧은 캐시 — 같은 무거운 계산(이관 진행·요약·원장 검사·칸별 현물)을 여러 패널이 1초에 여러 번 부르지 않게.
+   * 120배속에서 패널 갱신(4Hz)마다 100ms 넘게 써 화면이 7fps 로 떨어지던 원인(사용자 §6-11). 시험·계산은 원래 함수를 그대로 쓴다.
+   */
+  live<T>(key: string, ms: number, f: () => T): T {
+    const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    const c = this.liveCache.get(key);
+    if (c && now - c.at < ms) return c.v as T;
+    const v = f();
+    this.liveCache.set(key, { at: now, v });
+    return v;
+  }
+
   /** Wave 상태(온도대마다) — 이상 알림 */
   waveStatus() {
     return this.day.waves.map((w) => ({ ...w }));

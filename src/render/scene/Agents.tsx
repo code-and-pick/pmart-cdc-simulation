@@ -19,7 +19,8 @@ export function SimDriver() {
   const { sim, ticker } = useApp();
   const acc = useRef(0);
   useFrame((_, dt) => {
-    sim.advance(Math.min(dt, 0.1));
+    // 화면이 느려도 시뮬 시각이 배속만큼 가게 — 한 프레임 최대 0.25초(전엔 0.1초라 7fps 에서 120배속이 84배속이 됨, 사용자 §6-11)
+    sim.advance(Math.min(dt, 0.25));
     acc.current += dt;
     if (acc.current > 0.25) {
       acc.current = 0;

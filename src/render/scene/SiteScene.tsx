@@ -1,10 +1,10 @@
 // 3D 가상 현장 — 한 번에 한 층을 그린다(층 버튼으로 전환, 설계 §9). MFC 시뮬레이터 render/scene/SiteScene.tsx 와 같은 틀.
 // 매 프레임 바뀌는 값은 useFrame 안에서 three 객체를 직접 바꾼다(CLAUDE.md).
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef , lazy, Suspense } from 'react';
 import * as THREE from 'three';
 import { AppContext, useApp, useTick, useView, type AppCtx } from '../../app/context';
-import { OUTBOUND, RACK, SHELF, TMS, BUILDING } from '../../config';
+import { OUTBOUND, RACK, SHELF, TMS, BUILDING, MFCS } from '../../config';
 import { TEMP_KO } from '../../sim/simulation';
 import { B1 } from '../../sim/site';
 import type { FloorLayout, Location } from '../../domain/layout';
@@ -26,6 +26,11 @@ export function SiteScene({ app }: { app: AppCtx }) {
         <FloorContent />
         <Agents />
         <SimDriver />
+        {PerfProbe && (
+          <Suspense fallback={null}>
+            <PerfProbe />
+          </Suspense>
+        )}
         <CameraRig />
         <Picker />
         <CellLabels />
@@ -64,6 +69,9 @@ function FloorContent() {
     </group>
   );
 }
+
+// 성능 측정(npm run dev 에서만, MFC 와 같음)
+const PerfProbe = import.meta.env.DEV ? lazy(() => import('../../dev/perf').then((m) => ({ default: m.PerfProbe }))) : null;
 
 const tmp = new THREE.Object3D();
 
@@ -148,14 +156,14 @@ function Racks({ f }: { f: FloorLayout }) {
  * 칸마다 인스턴스 하나(빈 칸은 크기 0). 원장 거래(ledger.version)가 바뀌면 다시 그린다 — 보충으로 팔레트가 줄어드는 게 보인다.
  */
 function Loads({ f }: { f: FloorLayout }) {
-  const { backend } = useApp();
+  const { backend, sim } = useApp();
   const decks = useRef<THREE.InstancedMesh>(null);
   const loads = useRef<THREE.InstancedMesh>(null);
   const seen = useRef(-1);
   useFrame(() => {
     if (seen.current === backend.ledger.version) return;
     seen.current = backend.ledger.version;
-    const stock = backend.ledger.onHandByLocation();
+    const stock = sim.live('stock', 500, () => backend.ledger.onHandByLocation());
     const color = new THREE.Color();
     const { w, d, deckH } = RACK.pallet;
     f.locations.forEach((l, i) => {
@@ -234,7 +242,9 @@ function Lifts({ f }: { f: FloorLayout }) {
  */
 function Staging({ f }: { f: FloorLayout }) {
   const { sim } = useApp();
+  const view = useView();
   useTick();
+  const pick = view.mfcFilter ? MFCS.find((m) => m.id === view.mfcFilter)?.staging : null;
   return (
     <>
       {f.staging.map((s) => {
@@ -243,7 +253,13 @@ function Staging({ f }: { f: FloorLayout }) {
         const boxes = sim.staged.get(s.code)?.length ?? 0;
         const rolls = Math.min(4, Math.ceil(boxes / OUTBOUND.boxesPerRt));
         return (
-          <group key={s.code} position={[s.pos.x, 0, s.pos.z]}>
+          <group key={s.code} position={[s.pos.x, 0, s.pos.z]} visible={!pick || s.bay === pick}>
+            {pick === s.bay && (
+              <mesh rotation-x={-Math.PI / 2} position={[0, 0.03, 0]}>
+                <ringGeometry args={[1.0, 1.25, 32]} />
+                <meshBasicMaterial color={0xffb020} />
+              </mesh>
+            )}
             <mesh rotation-x={-Math.PI / 2} position={[0, 0.01, 0]}>
               <planeGeometry args={[1.2, 1.9]} />
               <meshBasicMaterial color={SCENE.hazard} transparent opacity={0.35} />
