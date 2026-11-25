@@ -2,7 +2,8 @@
 //   북쪽 통로(승강기·출고대기 앞) · 보관 방 북쪽 벽 앞 통로 · 선반 통로(남북) · 랙 앞 가로 통로 · 랙 통로(남북) · 서쪽 벽 연결 통로.
 // React·three 에 의존하지 않는다.
 
-import { MFCS } from '../config';
+import { AUTOSTORE, MFCS, SHELF, VEG_LANES } from '../config';
+const SHELF_BASE = SHELF.aisleBase;
 import type { EquipKind } from '../domain/sites/chilgok';
 import type { FloorLayout, Layout, Location, Rect } from '../domain/layout';
 import type { FloorNo } from '../domain/sites/chilgok';
@@ -38,14 +39,15 @@ export class FloorSite {
       const e = this.f.equipment.find((x) => x.kind === 'AUTOSTORE');
       if (e) {
         const ports = autostorePorts(e.rect);
-        return { x: ports[loc.bay % ports.length], z: this.f.walk.northZ, lane: 'N' };
+        return { x: ports[(loc.binNo ?? loc.bay) % ports.length], z: this.f.walk.roomZ, lane: 'S' };
       }
     }
-    if (loc.type === 'PICK_FACE') {
+    if (loc.lane) return { x: loc.pos.x + (VEG_LANES.laneW + VEG_LANES.gap) / 2, z: loc.pos.z, lane: 'R' };
+    if (loc.type === 'PICK_FACE' && loc.aisle >= SHELF_BASE) {
       const x = this.shelfAisleX.get(`${loc.zone}${loc.aisle}`) ?? loc.pos.x;
       return { x, z: loc.pos.z, lane: 'S' };
     }
-    if (loc.type === 'RESERVE') {
+    if (loc.aisle < SHELF_BASE && loc.aisle < 90) {
       const x = this.rackAisleX.get(`${loc.zone}${loc.aisle}`) ?? loc.pos.x;
       return { x, z: loc.pos.z, lane: 'R' };
     }
@@ -58,8 +60,30 @@ export class FloorSite {
     const pref = this.floor === 6 ? 'DAS' : this.floor === 5 ? 'WHEEL_SORTER' : 'AUTOSTORE';
     const e = this.f.equipment.find((x) => x.kind === pref) ?? this.f.equipment[0];
     if (!e) return this.home();
-    if (e.rect.z0 >= this.layout.bandDepth) return { x: e.rect.x0 + 2, z: this.f.walk.rackZ, lane: 'R' };
-    return { x: (e.rect.x0 + e.rect.x1) / 2, z: this.f.walk.northZ, lane: 'N' };
+    if (e.rect.z0 >= this.layout.bandDepth) return { x: e.rect.x0 + 2, z: this.f.walk.roomZ, lane: 'S' };
+    return { x: (e.rect.x0 + e.rect.x1) / 2, z: this.f.walk.roomZ, lane: 'S' };
+  }
+
+  /** DPS 피커가 닫은 박스를 컨베이어에 올리는 곳(냉동 전실 안, 첫 선반 통로 북쪽 끝) */
+  dpsLoad(): WalkPoint {
+    const e = this.f.equipment.find((x) => x.kind === 'DPS');
+    const a = this.f.shelfAisles.filter((x) => x.zone === 'A').sort((p, q) => p.cx - q.cx)[0];
+    if (!e || !a) return this.home();
+    return { x: a.cx, z: e.rect.z1 + 0.6, lane: 'S' };
+  }
+
+  /** 오토스토어 포트 p 의 MFC m 박스 자리(PPC-01~05 다섯 개가 포트 앞에 나란히) */
+  portBox(p: number, m: number) {
+    const e = this.f.equipment.find((x) => x.kind === 'AUTOSTORE')!;
+    const px = autostorePorts(e.rect)[p];
+    return { x: px + (m - (MFCS.length - 1) / 2) * 0.42, y: 1.05, z: e.rect.z1 - 0.3 };
+  }
+
+  /** 오토스토어 입고 포트(보충 — 통에 채우기): 오토스토어 동쪽 */
+  autostoreRefill(): WalkPoint {
+    const e = this.f.equipment.find((x) => x.kind === 'AUTOSTORE');
+    if (!e) return this.home();
+    return { x: e.rect.x1 + 0.6, z: this.f.walk.roomZ, lane: 'S' };
   }
 
   /** 라인(DAS)·분배 작업자 k 의 자리 — 줄 하나를 맡는다. stand = 줄 서쪽 끝 작업대 앞, slot(m) = MFC m 칸 앞, light(m) = 그 칸 위 표시등 */
@@ -80,20 +104,22 @@ export class FloorSite {
   dropAt(kind: EquipKind): WalkPoint {
     const e = this.f.equipment.find((x) => x.kind === kind);
     if (!e) return this.home();
-    if (e.rect.z0 >= this.layout.bandDepth) return { x: e.rect.x0 + 2, z: this.f.walk.rackZ, lane: 'R' };
-    return { x: (e.rect.x0 + e.rect.x1) / 2, z: this.f.walk.northZ, lane: 'N' };
+    if (kind === 'DPS') return { x: e.rect.x0 + 0.8, z: e.rect.z1 + 1.0, lane: 'N' };
+    return { x: e.rect.x0 + 2, z: this.f.walk.roomZ, lane: 'S' };
   }
 
   /** 선반 통로 입구(북쪽 통로 위) — 지게차는 여기까지만 [사용자 2026-11-25] */
   shelfEntrance(loc: Location): WalkPoint {
     const x = this.shelfAisleX.get(`${loc.zone}${loc.aisle}`) ?? loc.pos.x;
-    return { x, z: this.f.walk.northZ, lane: 'N' };
+    return { x, z: this.f.walk.roomZ, lane: 'S' };
   }
 
   /** 라인 공급대 — FC 가 라인용 상품 박스를 내려놓는 곳(선반 동쪽 끝, 북쪽 통로). 자키가 여기서 라인으로 */
   lineBuffer(): WalkPoint {
+    const e = this.f.equipment.find((x) => x.kind === 'DAS');
+    if (e) return { x: e.rect.x0 - 0.8, z: this.f.walk.roomZ, lane: 'S' };
     const xs = this.f.shelfAisles.map((a) => a.cx);
-    return { x: (xs.length ? Math.max(...xs) : 10) + 3, z: this.f.walk.northZ, lane: 'N' };
+    return { x: (xs.length ? Math.max(...xs) : 10) + 3, z: this.f.walk.roomZ, lane: 'S' };
   }
 
   /** 휠소터 투입구(북쪽 통로)·MFC m 갈래 끝 */
@@ -113,27 +139,26 @@ export class FloorSite {
     return { x: (l.rect.x0 + l.rect.x1) / 2, z: this.f.walk.northZ, lane: 'N' };
   }
 
-  /** 길: from → to 를 지나는 점들(from 제외) */
+  /**
+   * 길: from → to 를 지나는 점들(from 제외). 북쪽 통로(N, 승강기·출고대기 앞)와 안쪽(선반·랙·설비 — 작업장 남쪽 통로 roomZ)은
+   * 남북 연결 통로(walk.links — 온도 방 문 자리)로만 오간다 [시뮬].
+   */
   route(from: WalkPoint, to: WalkPoint): P[] {
-    const { northZ, rackZ, westX } = this.f.walk;
-    const corr = (p: WalkPoint) => (p.lane === 'N' ? [northZ] : p.lane === 'R' ? [rackZ] : [northZ, rackZ]);
-    const cf = corr(from);
-    const ct = corr(to);
-    const common = cf.filter((c) => ct.includes(c));
+    const { northZ, roomZ, links } = this.f.walk;
+    const cz = (p: WalkPoint) => (p.lane === 'N' ? northZ : roomZ);
     const pts: P[] = [];
-    if (from.x === to.x && from.lane === to.lane && from.lane !== 'N' && common.length) {
-      // 같은 통로 안 — 바로 간다
+    const a = cz(from);
+    const b = cz(to);
+    if (from.x === to.x && from.lane === to.lane && from.lane !== 'N') {
       pts.push({ x: to.x, z: to.z });
-      return pts;
-    }
-    if (common.length) {
-      const c = common.reduce((best, z) => (Math.abs(from.z - z) + Math.abs(to.z - z) < Math.abs(from.z - best) + Math.abs(to.z - best) ? z : best));
-      pts.push({ x: from.x, z: c }, { x: to.x, z: c }, { x: to.x, z: to.z });
+    } else if (a === b) {
+      pts.push({ x: from.x, z: a }, { x: to.x, z: a }, { x: to.x, z: to.z });
     } else {
-      // 북쪽 ↔ 랙: 서쪽 벽 연결 통로로
-      pts.push({ x: from.x, z: cf[0] }, { x: westX, z: cf[0] }, { x: westX, z: ct[0] }, { x: to.x, z: ct[0] }, { x: to.x, z: to.z });
+      // 가까운 연결 통로로
+      const L = links.reduce((best, x) => (Math.abs(from.x - x) + Math.abs(to.x - x) < Math.abs(from.x - best) + Math.abs(to.x - best) ? x : best), links[0]);
+      pts.push({ x: from.x, z: a }, { x: L, z: a }, { x: L, z: b }, { x: to.x, z: b }, { x: to.x, z: to.z });
     }
-    return pts.filter((p, i) => i === 0 || p.x !== pts[i - 1].x || p.z !== pts[i - 1].z);
+    return pts.filter((p, i) => (i === 0 ? p.x !== from.x || p.z !== from.z : p.x !== pts[i - 1].x || p.z !== pts[i - 1].z));
   }
 }
 
@@ -217,10 +242,8 @@ export function mfcSlotIndex(m: number, n: number): number {
 
 /** 오토스토어 포트 x 들 — 북쪽(통로 쪽) 면에 둘. 화면(AutoStore)과 같은 계산 */
 export function autostorePorts(r: Rect): number[] {
-  const nx = Math.floor((r.x1 - r.x0 - 1) / 0.7);
-  const x0 = r.x0 + 0.5;
-  const gw = nx * 0.7;
-  return [x0 + gw * 0.3, x0 + gw * 0.7];
+  const n = AUTOSTORE.ports;
+  return Array.from({ length: n }, (_, i) => r.x0 + ((i + 0.5) * (r.x1 - r.x0)) / n);
 }
 
 /** 휠소터 MFC 갈래 — 갈래 끝 롤테이너 자리(x, z). 화면(WheelSorter)과 같은 계산 */

@@ -6,7 +6,7 @@
 //   시작 H 합 = 지금 H 합 + 출발 합,  Transit = 출발 합 − 확인 수령 합 − 승인 손실
 // 할당 후보는 랙 칸(통로 01~89)의 적격 재고다. 출고대기(91)·접안(90)·승강기(92) 칸은 후보가 아니다.
 
-import { SHELF } from '../../config';
+import { SHELF, SKU_PLACE, VEG_LANES } from '../../config';
 import type { Allocation, AllocationLot, Availability, Bucket, Commit, PostingKind, Transit } from '../../domain/contract';
 
 export class LedgerError extends Error {
@@ -44,12 +44,16 @@ export interface LedgerOptions {
 
 const key = (sku: string, lot: string, loc: string) => `${sku}|${lot}|${loc}`;
 const aisleOf = (code: string) => Number(code.split('-')[3]);
-/** 보관·피킹 칸(팔레트 랙 01~ · 피킹 선반 61~) — 할당 후보. 90 접안·91 출고대기·92 승강기는 아니다 */
-export const isRackLocation = (code: string) => aisleOf(code) < 90;
-/** 피킹 선반 칸(통로 SHELF.aisleBase~89) [시뮬 R-13] */
-export const isShelfLocation = (code: string) => aisleOf(code) >= SHELF.aisleBase && aisleOf(code) < 90;
-/** 팔레트 랙 보관 칸 */
-export const isPalletLocation = (code: string) => aisleOf(code) < SHELF.aisleBase;
+/** 보관·피킹 칸 — 팔레트 랙 01~ · 피킹 선반·오토스토어 61~89 · 야채 바닥 레인(VEG_LANES.aisle). 할당 후보. 90 접안·91 출고대기·92 승강기는 아니다 */
+export const isRackLocation = (code: string) => aisleOf(code) < 90 || aisleOf(code) === VEG_LANES.aisle;
+/** 피킹 칸(PICK_FACE) — 선반·오토스토어 61~89 · 야채 레인 · 피킹면 구역(SKU_PLACE.faceZones) 랙 1단 [사용자 2026-11-25 §4] */
+export const isShelfLocation = (code: string) => {
+  const [, zone, , aisle, , level] = code.split('-');
+  const a = Number(aisle);
+  return (a >= SHELF.aisleBase && a < 90) || a === VEG_LANES.aisle || (a < SHELF.aisleBase && level === '1' && SKU_PLACE.faceZones.includes(zone));
+};
+/** 팔레트 랙 보관 칸(RESERVE) */
+export const isPalletLocation = (code: string) => aisleOf(code) < SHELF.aisleBase && !isShelfLocation(code);
 
 function daysBetween(from: string, to: string): number {
   return Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000);

@@ -656,7 +656,7 @@ function AutoStore({ e }: { e: Equip }) {
   const nx = Math.floor((r.x1 - r.x0 - 1) / cell);
   const nz = Math.floor((r.z1 - r.z0 - 2.8) / cell);
   const x0 = r.x0 + 0.5;
-  const z0 = r.z0 + 2.3;
+  const z0 = r.z0 + 0.5;
   const gw = nx * cell;
   const gd = nz * cell;
   const bars = useRef<THREE.InstancedMesh>(null!);
@@ -724,7 +724,7 @@ function AutoStore({ e }: { e: Equip }) {
       </instancedMesh>
       {/* 포트(작업자가 빈에서 꺼내 MFC 박스에 담는 자리) */}
       {autostorePorts(r).map((px) => (
-        <group key={px} position={[px, 0, r.z0 + 0.9]}>
+        <group key={px} position={[px, 0, r.z1 - 0.9]}>
           <mesh position={[0, 0.5, 0]}>
             <boxGeometry args={[1.4, 1.0, 1.2]} />
             <meshStandardMaterial color={0x3a3f4a} />

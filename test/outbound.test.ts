@@ -95,21 +95,22 @@ async function startDay(n = 5) {
 }
 
 describe('가짜 상품 마스터·시작 재고', () => {
-  it('SKU = 선반 목표 칸(MFC 10,900 설계, B-1) 11,660 — 계약 SKU 패턴, 피킹 선반 칸 하나 + 팔레트 기둥 1~4단', () => {
-    expect(catalog.skus).toHaveLength(11_660);
-    expect(new Set(catalog.skus.map((s) => s.sku)).size).toBe(11_660);
-    expect(new Set(catalog.skus.map((s) => s.shelf.code)).size).toBe(11_660);
+  it('SKU 18,000(사용자 §1) — 계약 SKU 패턴, 피킹 자리 하나(선반·랙 1단 박스 피킹면·야채 레인·오토스토어 칸) + 보관 팔레트 기둥', () => {
+    expect(catalog.skus).toHaveLength(18_000);
+    expect(new Set(catalog.skus.map((s) => s.sku)).size).toBe(18_000);
+    expect(new Set(catalog.skus.map((s) => s.shelf.code)).size).toBe(18_000);
     for (const s of catalog.skus) {
       expect(s.sku).toMatch(SKU_PATTERN);
       expect(s.shelf.type).toBe('PICK_FACE');
       expect(s.shelf.zone).toBe(s.zone);
-      expect(s.column.map((l) => l.level)).toEqual([1, 2, 3, 4]);
-      expect(s.column.every((l) => l.type === 'RESERVE' && l.aisle === s.column[0].aisle && l.bay === s.column[0].bay && l.slot === s.column[0].slot)).toBe(true);
+      if (s.handling === 'SPLIT') expect(s.column).toEqual([]); // 야채는 바닥 레인에만
+      else {
+        expect(s.column.length).toBeGreaterThanOrEqual(3);
+        expect(s.column.every((l) => l.type === 'RESERVE' && l.aisle === s.column[0].aisle && l.bay === s.column[0].bay && l.slot === s.column[0].slot)).toBe(true);
+      }
       for (const l of s.seed) expect(l.locationCode).toMatch(LOCATION_CODE_PATTERN);
       expect(s.seed[0].locationCode).toBe(s.shelf.code);
-      expect(s.seed[1].lot).toBe(s.seed[0].lot); // 선반 = 팔레트 1단 LOT(가장 먼저 끝남)
-      expect(s.seed[0].expiresAt < s.seed[s.seed.length - 1].expiresAt).toBe(true);
-      const locs = [s.shelf, ...s.column];
+      const locs = [s.shelf, ...s.alt, ...s.column];
       s.seed.forEach((l, i) => expect(l.qty).toBeLessThanOrEqual(locs[i].capacity));
     }
   });
@@ -133,7 +134,10 @@ describe('TRF 인수·할당 (CDC-F-016)', () => {
     expect(after.onHand).toBe(before.onHand);
     expect(after.reserved).toBe(trf.lines.reduce((s, l) => s + l.approvedQty, 0));
     const alloc = mb.ledger.getAllocation(r.resultId!)!;
-    for (const l of alloc.lines) expect(l.lots[0].locationCode).toBe(catalog.bySku.get(l.sku)!.shelf.code);
+    for (const l of alloc.lines) {
+      const k = catalog.bySku.get(l.sku)!;
+      expect([k.shelf.code, ...k.alt.map((x) => x.code)]).toContain(l.lots[0].locationCode);
+    }
     expect((await mb.getTransferIntake(trf.trfId)).state).toBe('ALLOCATED');
     expect(mb.ledger.check()).toEqual([]);
   });

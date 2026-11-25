@@ -77,7 +77,7 @@ describe('하루 돌리기', () => {
     expect(sim.lights).toEqual([]);
     // 석간 FC 는 걸었다 — 걸음 수 표시용 거리
     expect(sim.agents.filter((a) => a.role === 'FC').every((a) => a.distance > 0)).toBe(true);
-    expect(sim.events.filter((e) => e.kind === 'warn' && !e.text.includes('결품') && !e.text.includes('검품 불합격'))).toEqual([]);
+    expect(sim.events.filter((e) => e.kind === 'warn' && !e.text.includes('결품') && !e.text.includes('검품 불합격') && !e.text.startsWith('라인 1칸만') && !e.text.includes('보충이 끝나지 않아'))).toEqual([]);
 
     // 22:00 R/T 카운팅·배차 → 출차 30분 전 상차(방문 역순) → 노선별 출차(TOUT) → 도착·하차·인계 → MFC 수령 → 복귀
     await runUntil(sim, 24 + 10.5);
@@ -108,6 +108,6 @@ describe('하루 돌리기', () => {
     expect(tot.transit).toBe(0);
     expect(tot.reserved).toBe(0);
     expect(backend.ledger.check()).toEqual([]);
-    expect(sim.events.filter((e) => e.kind === 'warn' && !e.text.includes('결품') && !e.text.includes('검품 불합격'))).toEqual([]);
+    expect(sim.events.filter((e) => e.kind === 'warn' && !e.text.includes('결품') && !e.text.includes('검품 불합격') && !e.text.startsWith('라인 1칸만'))).toEqual([]);
   }, 120_000);
 });

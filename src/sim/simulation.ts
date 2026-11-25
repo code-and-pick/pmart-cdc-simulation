@@ -6,7 +6,7 @@
 // 운송(§12 ⑦): 22:00 배차(고정 노선 × 온도대, MockTms) → 출차 30분 전 상차(방문 역순) → 노선별 출차 → 주행 → MFC 도착·하차(동시 3대)·인계 → 복귀.
 // React·three 에 의존하지 않는다(시험이 화면 없이 하루를 돌린다).
 
-import { CENTER_ID, MFCS, OUTBOUND, SHIFT, SIM_START, SUPPLY, TMS, WORK, WORKFORCE } from '../config';
+import { AUTOSTORE, CENTER_ID, MFCS, SHELF, OUTBOUND, SHIFT, SIM_START, SUPPLY, TMS, WORK, WORKFORCE } from '../config';
 // 시간표 근거: 정본 CDC-8(PR #447) — 21:30 WMS 완료 · 22:00 R/T 카운팅 · 22:30 상차 · 23:00~ 출차
 import type { MockBackend } from '../backend/mock/MockBackend';
 import type { ApiCallRecord, DomainEventRecord } from '../backend/port';
@@ -17,8 +17,14 @@ import { stagingCodeFor, type FloorLayout, type Layout, type Location } from '..
 import type { FloorKey, FloorNo } from '../domain/sites/chilgok';
 import { newId, Rng } from '../util/rng';
 import { Agent, ROLE_KO, type DutyClock, type Role, type Shift } from './agent';
-import { B1Site, FloorSite, liftDoor, type P, type WalkPoint } from './site';
-import { makeTransfers } from './supply';
+import { B1Site, dasRows, FloorSite, liftDoor, type P, type WalkPoint } from './site';
+
+/** 설비 줄 수(라인·분배) */
+const dasRowsOf = (f: FloorLayout, kind: 'DAS' | 'SPLIT') => {
+  const e = f.equipment.find((x) => x.kind === kind);
+  return e ? dasRows(e.rect).length : 1;
+};
+import { makeTransfers, trfTemp } from './supply';
 
 export interface SimEvent {
   at: number;
@@ -47,7 +53,7 @@ interface Cart {
 /** 켜진 표시등 — DPS 선반 칸·라인 칸, 작업자 색과 숫자 [현장] */
 export interface WorkLight {
   floor: FloorNo;
-  kind: 'DPS' | 'LINE';
+  kind: 'DPS' | 'LINE' | 'PORT';
   x: number;
   y: number;
   z: number;
@@ -66,7 +72,7 @@ const WORKER_COLORS = [
   { hex: '#64d2ff', name: '하늘' },
   { hex: '#ff375f', name: '분홍' },
 ];
-const HANDLING_TITLE: Record<Handling, string> = { DPS: 'DPS 피킹 (냉동)', BOX: '박스 피킹 (→ 휠소터)', FC: 'FC 피킹', SPLIT: 'FC 피킹 (야채 → 분배)', LINE: 'FC 피킹 (라인 상품 → 공급대)', PORT: '오토스토어 포트 피킹' };
+const HANDLING_TITLE: Record<Handling, string> = { DPS: 'DPS 피킹 (냉동 전실)', BOX: '박스 피킹 (→ 휠소터)', FC: 'FC 피킹', SPLIT: '분배 (야채 바닥 레인 → MFC 크레이트)', LINE: 'FC 피킹 (라인 상품 → 공급대)', PORT: '오토스토어 포트 피킹' };
 
 interface JockeyJob {
   trfId: string;
@@ -145,7 +151,7 @@ export class Simulation implements DutyClock {
   readonly apiLog: ApiCallRecord[] = [];
   readonly domainEvents: DomainEventRecord[] = [];
   /** 피킹 기록(시각·개수) — 최근 1시간 피킹 */
-  readonly pickLog: { at: number; qty: number }[] = [];
+  readonly pickLog: { at: number; qty: number; handling?: Handling; floor?: FloorNo }[] = [];
   /** 결품 보고 개수 */
   shortUnits = 0;
   /** 라인(DAS)에 들어온 상품 박스 · 분배대에 들어온 지역 카트 */
@@ -165,6 +171,13 @@ export class Simulation implements DutyClock {
   /** 켜진 표시등(DPS·라인) — 화면이 그린다 */
   readonly lights: WorkLight[] = [];
   private lpnSeq = 0;
+  private splitRow = 0;
+  /** 라인: 스캔 1회당 켜진 칸 수 분포(인덱스 = 칸 수) [사용자 §7] */
+  readonly lineLitHist: number[] = [];
+  /** 오토스토어 — 로봇·포트 상태와 집계(§5) */
+  readonly auto = { robotFree: [] as number[], portFree: [] as number[], portLast: [] as number[], portBusy: [] as number[], portHeld: [] as number[], waiting: 0, waits: 0, waitSec: 0, bins: 0, counts: 0, refills: 0, firstAt: 0 };
+  /** 층별 마지막 피킹 시각 */
+  readonly lastPickAt = new Map<FloorNo, number>();
   /** 방식별 닫은 박스 수(DPS·박스·FC 바로 출고대기·라인·분배) — 시험·지표용 */
   readonly sealedBy: Record<'DPS' | 'DIRECT' | 'LINE' | 'SPLIT' | 'SORTER' | 'PORT', number> = { DPS: 0, DIRECT: 0, LINE: 0, SPLIT: 0, SORTER: 0, PORT: 0 };
   /** 분배 수량 실수(다시 셈) 횟수 · 통로 막힘 기다림 횟수 */
@@ -193,7 +206,7 @@ export class Simulation implements DutyClock {
   private readonly loading = new Map<string, number>();
   private readonly locs = new Map<string, Location>();
   private readonly rng: Rng;
-  private day = { intake: false, creating: false, waveId: '', released: false, lastTry: 0, warned: false, rtCounted: false, planned: false, lastDepartCheck: 0 };
+  private day = { intake: false, creating: false, waveId: '', released: false, lastTry: 0, warned: false, rtCounted: false, planned: false, lastDepartCheck: 0, reported: false, waves: [] as { waveId: string; temp: TemperatureZone; released: boolean; warned: boolean }[] };
 
   constructor(
     readonly layout: Layout,
@@ -324,30 +337,33 @@ export class Simulation implements DutyClock {
         this.log('warn', '편성할 TRF 없음');
         return;
       }
-      this.backend
-        .createWave({ cdcId: CENTER_ID, trfIds: ids }, newId('wave'))
-        .then((w) => {
-          this.day.waveId = w.waveId;
-          this.log('flow', `13:00 석간 — Wave ${w.waveId} 편성 (TRF ${ids.length}건)`);
-        })
-        .catch((e) => this.log('warn', `Wave 편성 실패: ${e instanceof Error ? e.message : e}`));
+      // 온도대마다 Wave 하나 — 보충이 끝난 온도대부터 배포한다(사용자 §7 "보충이 끝난 구역부터 부분 배포", 계약 그대로 Wave 여럿)
+      const groups = new Map<TemperatureZone, string[]>();
+      for (const t of this.backend.listTransfers().filter((x) => ids.includes(x.trfId))) groups.set(trfTemp(t), [...(groups.get(trfTemp(t)) ?? []), t.trfId]);
+      for (const [temp, tids] of groups)
+        this.backend
+          .createWave({ cdcId: CENTER_ID, trfIds: tids, temperatureZone: temp }, newId('wave'))
+          .then((w) => {
+            this.day.waves.push({ waveId: w.waveId, temp, released: false, warned: false });
+            if (!this.day.waveId) this.day.waveId = w.waveId;
+            this.log('flow', `13:00 석간 — Wave ${w.waveId} 편성 (${TEMP_KO[temp]} TRF ${tids.length}건)`);
+          })
+          .catch((e) => this.log('warn', `Wave 편성 실패: ${e instanceof Error ? e.message : e}`));
     }
-    if (this.day.waveId && !this.day.released && this.time - this.day.lastTry >= 60) {
+    if (this.day.waves.length && !this.day.released && this.time - this.day.lastTry >= 60) {
       this.day.lastTry = this.time;
-      const needs = this.backend.replenishmentNeeds();
-      if (needs.length) {
-        if (!this.day.warned) this.log('warn', `선반 보충이 끝나지 않아 Wave 배포를 기다림 (${needs.length}칸)`);
-        this.day.warned = true;
-        return;
+      for (const w of this.day.waves.filter((x) => !x.released)) {
+        w.released = true;
+        this.backend
+          .releaseWave(w.waveId, newId('release'))
+          .then(() => this.log('flow', `${hm(this.time)} ${TEMP_KO[w.temp]} Wave 배포 — 피커가 PDA 로 다음 작업을 받는다`))
+          .catch((e) => {
+            w.released = false;
+            if (!w.warned) this.log('warn', `${TEMP_KO[w.temp]} 선반 보충이 끝나지 않아 Wave 배포를 기다림 — ${e instanceof ApiProblem ? e.problem.detail : e}`);
+            w.warned = true;
+          });
       }
-      this.day.released = true;
-      this.backend
-        .releaseWave(this.day.waveId, newId('release'))
-        .then(() => this.log('flow', `${hm(this.time)} Wave 배포 — FC 가 PDA 로 다음 작업을 받는다`))
-        .catch((e) => {
-          this.day.released = false;
-          this.log('warn', `Wave 배포 실패: ${e instanceof Error ? e.message : e}`);
-        });
+      this.day.released = this.day.waves.every((x) => x.released);
     }
     if (!this.day.rtCounted && m >= OUTBOUND.rtCountAt) {
       // 22:00 PDA R/T 카운팅 — 박스 스캔 → R/T, 온도대별 [CDC-8]
@@ -359,6 +375,10 @@ export class Simulation implements DutyClock {
         const rt = [...byTemp.entries()].map(([k, n]) => `${TEMP_KO[k]} ${Math.ceil(n / OUTBOUND.boxesPerRt)}`).join(' · ');
         this.log('flow', `22:00 R/T 카운팅 ${mf.name}: 박스 ${boxes.length} → R/T ${rt || '없음'}`);
       }
+    }
+    if (!this.day.reported && m >= OUTBOUND.rtCountAt) {
+      this.day.reported = true;
+      this.dayReport();
     }
     if (!this.day.planned && m >= OUTBOUND.rtCountAt) {
       // 22:00~22:30 TMS 배차 — 고정 노선 × 온도대 운송지시서, 계획완료 [TMS §4.3·§7]
@@ -626,10 +646,15 @@ export class Simulation implements DutyClock {
       const now = this.backend.replenishmentNeeds().find((n) => `${n.sku}|${n.lot}|${n.from}` === k);
       const qty = now?.qty ?? 0;
       if (to.bin) {
-        // 오토스토어 빈 채우기 — 포트까지 지게차
-        await this.go(a, site.front(to), WORK.forklift, '오토스토어 포트로');
-        a.pda.step = '빈(통)에 채우기';
-        await a.wait(WORK.portBin + WORK.replShelf + qty * WORK.replPerUnit, '오토스토어 빈에 채우기');
+        // 오토스토어 보충 — 지게차가 팔레트를 입고 포트로, 작업자가 통에 채우고 스캔(통당 N초 + 낱개당 M초) [사용자 §5]
+        await this.go(a, site.autostoreRefill(), WORK.forklift, '오토스토어 입고 포트로');
+        a.pda.step = '통에 채우고 스캔';
+        await a.wait(AUTOSTORE.refillBinSec + qty * AUTOSTORE.refillPerUnitSec, '오토스토어 통에 채우기');
+        this.auto.refills++;
+      } else if (to.aisle < SHELF.aisleBase) {
+        // 랙 1단 박스 피킹면 — 같은 기둥 위 단 팔레트를 1단으로 내림
+        a.pda.step = '위 단 팔레트를 1단 피킹면으로';
+        await a.wait(WORK.replPallet, '팔레트를 1단 피킹면으로 내림');
       } else {
         // 지게차는 선반 통로 입구까지 — 세워 두고 걸어서 진열 [사용자 2026-11-25]
         const gate = site.shelfEntrance(to);
@@ -710,9 +735,10 @@ export class Simulation implements DutyClock {
       state: (l.pickedQty + l.shortQty >= l.plannedQty ? 'DONE' : 'TODO') as 'TODO' | 'NOW' | 'DONE' | 'SHORT',
     }));
     a.carrying = handling === 'LINE' ? 'PALLET' : 'CART';
+    const mi = Math.max(0, MFCS.findIndex((m) => m.id === trf.mfcId));
     a.pda = {
       title: HANDLING_TITLE[handling],
-      step: handling === 'DPS' ? `빈 박스 받기 — 내 불 ${color.name}` : '지역 바코드 스캔',
+      step: handling === 'DPS' ? `빈 박스 받기 — 내 불 ${color.name}` : handling === 'SPLIT' ? '야채 바닥 레인으로' : handling === 'PORT' ? '포트에서 통 받기' : '지역 바코드 스캔',
       rows: [
         ['작업', task.taskId],
         ['지역', `${region} → ${mfc?.name ?? trf.mfcId}`],
@@ -733,11 +759,17 @@ export class Simulation implements DutyClock {
       const dest = site.front(loc);
       await this.aisleClear(a, dest);
       await this.go(a, dest, WORK.cart, handling === 'PORT' ? '오토스토어 포트로' : `선반으로 (${loc.short})`);
-      if (handling === 'PORT') await a.wait(WORK.portBin, '로봇이 통(빈)을 포트로');
+      const port = handling === 'PORT' ? await this.portFetch(a, loc, mi) : null;
       const short = this.rng.next() < WORK.shortRate ? Math.min(remaining, 1 + Math.floor(this.rng.next() * 3)) : 0;
       const take = remaining - short;
       let light: WorkLight | null = null;
-      if (handling === 'DPS' && take > 0) {
+      if (port !== null && take > 0) {
+        // 오토스토어 포트: 통이 오면 그 SKU 를 받는 MFC 박스(PPC-01~05)에 불과 숫자 [사용자 §5]
+        light = { floor: a.floor as FloorNo, kind: 'PORT', ...site.portBox(port, mi), color: color.hex, qty: take, who: a.id };
+        this.lights.push(light!);
+        this.litCount++;
+        a.pda.step = `${MFCS[mi].name} 박스 불 ${take} → 넣기`;
+      } else if (handling === 'DPS' && take > 0) {
         // DPS: 그 칸에 내 색 불과 숫자 [현장 DPS "진열 칸에 불과 수량"]
         light = { floor: a.floor as FloorNo, kind: 'DPS', x: loc.pos.x + (loc.face ?? 1) * 0.3, y: loc.pos.y + 0.32, z: loc.pos.z, color: color.hex, qty: take, who: a.id };
         this.lights.push(light);
@@ -746,12 +778,14 @@ export class Simulation implements DutyClock {
       } else a.pda.step = `${basket[i].name} ${take}개 ${handling === 'LINE' ? '박스째 싣기' : '카트에 담기'}`;
       await a.wait((WORK.pickScan + take * WORK.pickPerUnit * (handling === 'BOX' ? WORK.heavyFactor : 1)) / this.pace(a), handling === 'DPS' ? '불 보고 집기' : handling === 'BOX' ? '무거운 상자 싣기' : '상품 스캔 → 담기');
       if (light) this.lights.splice(this.lights.indexOf(light), 1);
+      if (port !== null) await this.portRelease(a, port);
       await this.backend.reportPickResult(
         task.taskId,
         { workerId: a.id, lines: [{ sku: l.sku, lot: l.lot, locationCode: l.locationCode, pickedQty: take, ...(short ? { shortQty: short, shortReason: 'NOT_FOUND' as const } : {}) }] },
         newId('pick'),
       );
-      if (take > 0) this.pickLog.push({ at: this.time, qty: take });
+      if (take > 0) this.lastPickAt.set(a.floor as FloorNo, this.time);
+      if (take > 0) this.pickLog.push({ at: this.time, qty: take, handling, floor: a.floor as FloorNo });
       this.shortUnits += short;
       if (take > 0) took.set(`${l.sku}|${l.lot}`, (took.get(`${l.sku}|${l.lot}`) ?? 0) + take);
       basket[i].picked += take;
@@ -771,7 +805,77 @@ export class Simulation implements DutyClock {
         stagingCode: stagingCodeFor(task.lines[0].locationCode, mfc?.staging ?? 1),
       });
     a.done += 1;
-    if (handling === 'DPS' || handling === 'LINE') await this.deliver(a, cart);
+    if (handling === 'DPS' || handling === 'LINE' || handling === 'SPLIT') await this.deliver(a, cart);
+  }
+
+  /** 오토스토어 포트 잡기 → 로봇이 통을 가져옴(로봇 수·포트 처리 상한) → 포트 번호 */
+  private async portFetch(a: Agent, loc: Location, _m: number): Promise<number> {
+    const A = AUTOSTORE;
+    const st = this.auto;
+    if (!st.robotFree.length) {
+      st.robotFree = Array(A.robots).fill(0);
+      st.portFree = Array(A.ports).fill(0);
+      st.portLast = Array(A.ports).fill(-1e9);
+      st.portBusy = Array(A.ports).fill(0);
+      st.portHeld = Array(A.ports).fill(0);
+      st.firstAt = this.time;
+    }
+    const p = (loc.binNo ?? loc.bay) % A.ports;
+    while (st.portFree[p] > this.time) {
+      const w = Math.min(60, st.portFree[p] - this.time);
+      st.waits++;
+      st.waitSec += w;
+      await a.wait(w, '포트 대기 — 다른 작업자가 쓰는 중');
+    }
+    st.portFree[p] = Infinity;
+    st.portHeld[p] = this.time;
+    // 가장 먼저 비는 로봇
+    let r = 0;
+    for (let i = 1; i < st.robotFree.length; i++) if (st.robotFree[i] < st.robotFree[r]) r = i;
+    const start = Math.max(this.time, st.robotFree[r]);
+    st.robotFree[r] = start + A.fetchSec;
+    const ready = Math.max(start + A.fetchSec, st.portLast[p] + 3600 / A.portBinsPerHour);
+    st.waiting++;
+    await a.wait(ready - this.time, '로봇이 통을 포트로');
+    st.waiting--;
+    st.portLast[p] = this.time;
+    st.bins++;
+    return p;
+  }
+
+  /** 포트 놓기 — 순환 실사(일정 확률로 통 수량 세기) 뒤 통은 돌아간다 */
+  private async portRelease(a: Agent, p: number) {
+    const st = this.auto;
+    if (this.rng.next() < AUTOSTORE.cycleCountRate) {
+      st.counts++;
+      await a.wait(AUTOSTORE.cycleCountSec, '순환 실사 — 통 수량 세기');
+    }
+    st.portBusy[p] += this.time - st.portHeld[p];
+    st.portFree[p] = this.time;
+  }
+
+  /** 포트 가동률(0~1) — 처음 통이 온 뒤 경과 시간 대비 */
+  portUtil(): number[] {
+    const st = this.auto;
+    const el = Math.max(1, this.time - st.firstAt);
+    return st.portBusy.map((b, i) => Math.min(1, (b + (st.portFree[i] === Infinity ? this.time - st.portHeld[i] : 0)) / el));
+  }
+
+  /** 하루 끝 보고 — 라인 스캔당 켜진 칸 분포 · 7F 출고 끝 · 포트 병목 [사용자 §5·§7] */
+  private dayReport() {
+    const h = this.lineLitHist;
+    const scans = h.reduce((x, n) => x + (n ?? 0), 0);
+    if (scans) {
+      const one = (h[1] ?? 0) / scans;
+      this.log('flow', `라인 DAS 스캔 ${scans}회 — 켜진 칸 수 분포 ${h.map((n, i) => (n ? `${i}칸 ${n}` : '')).filter(Boolean).join(' · ')}, 1칸만 ${Math.round(one * 100)}%`);
+      if (one > 0.4) this.log('warn', `라인 1칸만 켜지는 비율이 높음(${Math.round(one * 100)}%) — 같은 상품을 받는 MFC 가 적거나(요청 겹침), 같은 상품 몫이 라인에 함께 모이지 않음`);
+    }
+    const st = this.auto;
+    if (st.bins) {
+      const u = this.portUtil();
+      const end7 = this.lastPickAt.get(7);
+      this.log(end7 !== undefined && end7 > 22 * 3600 ? 'warn' : 'flow', `오토스토어: 통 ${st.bins}회 · 포트 ${AUTOSTORE.ports}개 가동률 ${u.map((x) => Math.round(x * 100) + '%').join('/')} · 로봇 ${AUTOSTORE.robots}대 · 포트 대기 ${st.waits}회 평균 ${st.waits ? Math.round(st.waitSec / st.waits) : 0}초 · 순환 실사 ${st.counts}회 · 7F 마지막 피킹 ${end7 !== undefined ? hm(end7) : '-'}${Math.max(...u) > 0.85 ? ' — 포트가 병목' : ''}`);
+    }
   }
 
   /** 박스 닫기 — OUTBOUND.boxMaxUnits 개씩 나눠 LPN(한 LPN = 한 TRF) → 분류 결과(BOX SEALED) */
@@ -809,10 +913,23 @@ export class Simulation implements DutyClock {
         await a.wait(WORK.cartDrop, '상품 박스 내려놓기');
         this.lineBuffer.get(fl)!.push(...cart.drops.map((drop) => ({ at: this.time, drop })));
       } else if (cart.handling === 'SPLIT') {
-        a.pda = { title: HANDLING_TITLE.SPLIT, step: '분배대로 지역 카트 가져가기', rows: [['지역', cart.region], ['MFC', [...new Set(cart.drops.map((d) => mfcName(d.mfcId)))].join(' · ')]] };
-        await this.go(a, site.dropAt('SPLIT'), WORK.cart, '분배대로');
-        await a.wait(WORK.cartDrop, '지역 카트 내려놓기');
-        this.splitQueue.get(fl)!.push({ region: cart.region, drops: cart.drops });
+        // 야채: 바닥 레인 → 분배대 MFC 크레이트(출고 용기) → R/T [사용자 §3 6F — 팔레트 랙·선반·지역 카트를 거치지 않음]
+        for (const d of cart.drops) {
+          const m = Math.max(0, MFCS.findIndex((x) => x.id === d.mfcId));
+          const k = this.splitRow++ % Math.max(1, dasRowsOf(this.floorOf(a), 'SPLIT'));
+          const spot = site.lineSpot('SPLIT', k).slot(m);
+          a.pda = { title: HANDLING_TITLE.SPLIT, step: `${mfcName(d.mfcId)} 크레이트에 담기`, rows: [['MFC', mfcName(d.mfcId)]] };
+          await this.go(a, spot, WORK.cart, '분배대 크레이트로');
+          await a.wait(WORK.cartDrop + d.contents.reduce((x, c) => x + c.qty, 0) * WORK.splitPerUnit * 0.3, 'MFC 크레이트에 담기');
+          if (this.rng.next() < WORK.splitMistake) {
+            this.splitMistakes++;
+            this.log('flow', `${a.name} 분배 수량 실수 → 다시 셈 (${mfcName(d.mfcId)})`);
+            await a.wait(WORK.recount, '수량 다시 세기');
+          }
+          const lpns = await this.seal(a, d);
+          this.sealedBy.SPLIT += lpns.length;
+          for (const l of lpns) this.jockeyQueue.get(fl)!.push({ trfId: d.trfId, mfcId: d.mfcId, lpn: l.lpn, units: l.contents.reduce((x, c) => x + c.qty, 0), temp: d.temp, stagingCode: d.stagingCode, contents: l.contents, from: spot });
+        }
       } else if (cart.handling === 'BOX') {
         // 무거운 상자 → 1차 고속분류기(휠소터): 박스를 올리면 바퀴가 MFC 갈래로 보낸다 → 자키가 갈래 끝 롤테이너를 출고대기로
         a.pda = { title: HANDLING_TITLE.BOX, step: '휠소터 투입구에 박스 올리기', rows: [['지역', cart.region], ['MFC', [...new Set(cart.drops.map((d) => mfcName(d.mfcId)))].join(' · ')]] };
@@ -831,12 +948,12 @@ export class Simulation implements DutyClock {
       } else if (cart.handling === 'DPS') {
         const at = site.dropAt('DPS');
         a.pda = { title: HANDLING_TITLE.DPS, step: '박스 닫아 컨베이어에', rows: [['MFC', mfcName(cart.drops[0].mfcId)]] };
-        await this.go(a, at, WORK.cart, 'DPS 컨베이어로');
+        await this.go(a, site.dpsLoad(), WORK.cart, 'DPS 컨베이어로');
         await a.wait(WORK.cartDrop, '박스 닫아 컨베이어에');
         for (const d of cart.drops) {
           const lpns = await this.seal(a, d);
           this.sealedBy.DPS += lpns.length;
-          for (const l of lpns) this.jockeyQueue.get(fl)!.push({ trfId: d.trfId, mfcId: d.mfcId, lpn: l.lpn, units: l.contents.reduce((x, c) => x + c.qty, 0), temp: d.temp, stagingCode: d.stagingCode, contents: l.contents, from: at });
+          for (const l of lpns) this.jockeyQueue.get(fl)!.push({ trfId: d.trfId, mfcId: d.mfcId, lpn: l.lpn, units: l.contents.reduce((x, c) => x + c.qty, 0), temp: d.temp, stagingCode: d.stagingCode, contents: l.contents, from: at, readyAt: this.time + WORK.sorterTravel / 2 });
         }
       } else {
         // 박스·FC: 피킹 = 분류 — 출고대기 MFC 롤테이너로 바로 [현장 "DPS·박스 피킹 → 바로 출고대기"]
@@ -871,7 +988,7 @@ export class Simulation implements DutyClock {
     }
     if (k <= WORK.lineWorkers) await this.lineOnce(a, Math.floor((k - 1) / WORK.perLine));
     // (줄 하나에 WORK.perLine 명 — 같은 칸에 서로 다른 색 불)
-    else await this.splitOnce(a, k - WORK.lineWorkers - 1);
+    else await this.pickOnce(a);
   }
 
   /**
@@ -932,6 +1049,7 @@ export class Simulation implements DutyClock {
     this.lights.push(...lit);
     this.litCount += lit.length;
     this.lineLitMax = Math.max(this.lineLitMax, lit.length);
+    this.lineLitHist[lit.length] = (this.lineLitHist[lit.length] ?? 0) + 1;
     for (let i = 0; i < targets.length; i++) {
       const t = targets[i];
       const m = mIdx(t.d.mfcId);
@@ -966,96 +1084,6 @@ export class Simulation implements DutyClock {
       const lpns = await this.seal(a, { trfId: box.trfId, waveId: box.waveId, contents: box.contents, temp: box.temp });
       this.sealedBy.LINE += lpns.length;
       for (const l of lpns) this.jockeyQueue.get(fl)!.push({ trfId: box.trfId, mfcId: box.mfcId, lpn: l.lpn, units: l.contents.reduce((x, c) => x + c.qty, 0), temp: box.temp, stagingCode: box.stagingCode, contents: l.contents, from: box.from });
-    }
-  }
-
-  /**
-   * 분배(야채) — FC 가 가져온 **지역 카트**(알티, 지역명 종이)를 PDA 로 스캔 → 지역·MFC 별 수량 → MFC 별 크레이트에 담고 **지역 바코드**로 확인 [현장 분배].
-   * 크레이트 하나 = MFC 하나(LPN = TRF) [사용자 2026-11-25].
-   */
-  private async splitOnce(a: Agent, k: number) {
-    const site = this.floorSite(a);
-    const fl = a.floor as FloorNo;
-    const spot = site.lineSpot('SPLIT', k);
-    const q = this.splitQueue.get(fl)!;
-    const cart = q.shift();
-    if (!cart) {
-      if (a.at.x !== spot.stand.x || a.at.z !== spot.stand.z) await this.go(a, spot.stand, WORK.walk, '분배대로');
-      a.pda = null;
-      await a.wait(WORK.idlePoll / 3, '지역 카트 대기');
-      return;
-    }
-    for (const d of cart.drops) this.busy.set(d.trfId, (this.busy.get(d.trfId) ?? 0) + 1);
-    if (a.at.x !== spot.stand.x || a.at.z !== spot.stand.z) await this.go(a, spot.stand, WORK.walk, '분배대로');
-    await this.distribute(a, cart.drops, {
-      title: `분배 (야채) — ${cart.region} 카트`,
-      scan: WORK.splitScan,
-      perUnit: WORK.splitPerUnit,
-      slot: (m) => spot.slot(m),
-      light: null,
-      put: 'MFC 크레이트에 담기',
-    });
-    a.pda!.step = `${cart.region} 지역 바코드 스캔`;
-    await a.wait(WORK.regionScan, '지역 바코드 스캔');
-    await a.walk(spot.stand, [spot.stand], WORK.walk, '분배대로');
-    for (const d of cart.drops) this.busy.set(d.trfId, (this.busy.get(d.trfId) ?? 1) - 1);
-  }
-
-  /** 나눠 담기(라인·분배 공통) — 상품별로 스캔 → MFC 칸마다 숫자만큼 → 다 끝나면 MFC(TRF) 별 박스 닫기 → 자키 줄 */
-  private async distribute(
-    a: Agent,
-    drops: Drop[],
-    o: { title: string; scan: number; perUnit: number; slot: (m: number) => WalkPoint; light: ((m: number, qty: number) => WorkLight) | null; put: string },
-  ) {
-    const fl = a.floor as FloorNo;
-    const mIdx = (id: string) => Math.max(0, MFCS.findIndex((m) => m.id === id));
-    const bySku = new Map<string, { sku: string; lot: string; per: Map<string, number> }>();
-    for (const d of drops)
-      for (const c of d.contents) {
-        const key = `${c.sku}|${c.lot}`;
-        const g = bySku.get(key) ?? { sku: c.sku, lot: c.lot, per: new Map() };
-        g.per.set(d.trfId, (g.per.get(d.trfId) ?? 0) + c.qty);
-        bySku.set(key, g);
-      }
-    const trfInfo = new Map(drops.map((d) => [d.trfId, d]));
-    const into = new Map<string, Contents>();
-    a.pda = { title: o.title, step: '상품 스캔', rows: [] };
-    for (const g of bySku.values()) {
-      const name = this.catalog.bySku.get(g.sku)?.name ?? g.sku;
-      const targets = [...g.per].sort((x, y) => mIdx(trfInfo.get(x[0])!.mfcId) - mIdx(trfInfo.get(y[0])!.mfcId));
-      a.pda.step = `${name} 스캔`;
-      a.pda.rows = [['상품', name], ...targets.map(([t, qty]) => [MFCS[mIdx(trfInfo.get(t)!.mfcId)].name, `${qty}개`] as [string, string])];
-      await a.wait(o.scan, '상품 스캔');
-      const lit = o.light ? targets.map(([t, qty]) => o.light!(mIdx(trfInfo.get(t)!.mfcId), qty)) : [];
-      this.lights.push(...lit);
-      this.lineLitMax = Math.max(this.lineLitMax, lit.length);
-      this.litCount += lit.length;
-      for (let i = 0; i < targets.length; i++) {
-        const [t, qty] = targets[i];
-        const m = mIdx(trfInfo.get(t)!.mfcId);
-        a.pda.step = `${MFCS[m].name} 칸에 ${qty}개 — ${o.put}`;
-        const p = o.slot(m);
-        await a.walk(p, [p], WORK.walk * this.pace(a), o.put);
-        await a.wait((qty * o.perUnit) / this.pace(a), o.put);
-        if (!o.light && this.rng.next() < WORK.splitMistake) {
-          // 분배 수량 실수 → 지역 바코드 확인 전에 다시 셈 [현장 "자잘한 야채가 많아 수량 실수가 잦다"]
-          this.splitMistakes++;
-          a.pda.step = `수량이 안 맞음 — ${MFCS[m].name} 크레이트 다시 세기`;
-          this.log('flow', `${a.name} 분배 수량 실수 → 다시 셈 (${MFCS[m].name} ${qty}개)`);
-          await a.wait(WORK.recount, '수량 다시 세기');
-        }
-        if (lit[i]) this.lights.splice(this.lights.indexOf(lit[i]), 1);
-        const arr = into.get(t) ?? [];
-        arr.push({ sku: g.sku, lot: g.lot, qty });
-        into.set(t, arr);
-      }
-    }
-    a.pda.step = 'MFC 박스 닫기';
-    for (const [t, contents] of into) {
-      const d = trfInfo.get(t)!;
-      const lpns = await this.seal(a, { trfId: t, waveId: d.waveId, contents, temp: d.temp });
-      this.sealedBy[o.light ? 'LINE' : 'SPLIT'] += lpns.length;
-      for (const l of lpns) this.jockeyQueue.get(fl)!.push({ trfId: t, mfcId: d.mfcId, lpn: l.lpn, units: l.contents.reduce((x, c) => x + c.qty, 0), temp: d.temp, stagingCode: d.stagingCode, contents: l.contents, from: o.slot(mIdx(d.mfcId)) });
     }
   }
 

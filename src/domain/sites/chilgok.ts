@@ -23,7 +23,7 @@ export interface RackZoneSpec {
 }
 
 /** 랙이 아닌 설비 자리(3D 표현용) — 백엔드와 주고받지 않는다(WMS 0.6, 설계 §5.3) */
-export type EquipKind = 'WHEEL_SORTER' | 'DPS' | 'DAS' | 'SPLIT' | 'AUTOSTORE' | 'INBOUND' | 'OFFICE';
+export type EquipKind = 'WHEEL_SORTER' | 'DPS' | 'DAS' | 'SPLIT' | 'AUTOSTORE' | 'INBOUND' | 'OFFICE' | 'VEG_LANES';
 
 export interface FloorSpec {
   floor: FloorNo;

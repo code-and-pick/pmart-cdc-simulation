@@ -77,12 +77,89 @@ export const STAGING_SLOTS = 30;
  * 오토스토어 빈(bin) 몫을 먼저 떼고, 나머지를 팔레트 칸에 무게(상온 1.2 · 저온 1.0)로 나눈다.
  */
 export const CAPACITY = {
-  /** 오토스토어 빈 수 [가정] — 7F G·H 생활용품(비식재) */
-  autostoreBins: 20_000,
-  /** 빈 하나 유닛 [가정] */
-  unitsPerBin: 30,
-  /** 팔레트 칸 무게 [가정] — 상온 박스가 더 많이 들어간다 */
-  weight: { AMBIENT: 1.2, CHILLED: 1.0, FROZEN: 1.0 },
+  /** 팔레트 칸 하나 평균 유닛 [가정] — 저온은 짐 높이 1.7m(상온 2.0m)라 덜 들어간다. 총 용량은 이 값으로 계산한다(사용자 2026-11-25 "총 용량을 계산값으로") */
+  palletUnits: { AMBIENT: 240, CHILLED: 180, FROZEN: 180 },
+  /** 야채 바닥 적치 자리 하나 유닛 [가정] */
+  vegLaneUnits: 120,
+} as const;
+
+/**
+ * 건물·온도 방 기준값 (사용자 2026-11-25 지시문 §1).
+ * 천장 8.5~9m → 상온 랙 6m 4단(단 2m·짐 2m) 유지, 5단은 천장 때문에 불가. 냉동·냉장 방은 천장 단열·냉각기로 유효 높이 −0.8m [가정] → 4단 유지, 짐 1.7m [가정].
+ */
+export const BUILDING = {
+  /** 천장 높이(m) [사용자 8.5~9m — 가운데 값] */
+  ceilingH: 8.75,
+  /** 냉동·냉장 방 유효 높이 감소(m) [가정] */
+  coldCeilingLoss: 0.8,
+  /** 냉동·냉장 팔레트 짐 높이(m) [가정] — 상온은 RACK.pallet.h 2.0 */
+  coldPalletH: 1.7,
+  /** 바닥 허용 하중(kg/㎡) [확인 필요] — 층마다 */
+  floorLoadKgM2: { 5: 2500, 6: 2500, 7: 2500 } as Record<5 | 6 | 7, number>,
+  /** 온도 방 단열 패널 벽 높이(m) [가정 3~4m] · 방 온도 표시 */
+  coldWallH: 3.5,
+  roomTempLabel: { FROZEN: '냉동 -20°C', CHILLED: '냉장 3°C' },
+} as const;
+
+/**
+ * SKU 목표 [사용자 2026-11-25 §1] — 총 18,000, 온도대 비율은 MFC 설계 칸 비율 냉동 22 : 냉장 31 : 상온 47(상온에 생활용품 포함).
+ * 옛 SHELF.targetSlots(2,180/3,270/5,450 = 10,900)는 근거가 달라 이것으로 바꿈.
+ */
+export const SKU_TARGET = { total: 18_000, FROZEN: 4_000, CHILLED: 5_500, AMBIENT: 8_500 } as const;
+
+/**
+ * SKU 를 어디에 두나 [가정] — 위치 수가 곧 SKU 자리 수(칸 하나 = SKU 하나).
+ * 냉장 5,500 = 피킹 선반(라인 상품) + 야채 바닥 레인. 상온 8,500 = 5F C·D 랙 1단 박스 피킹면 + 5F E·F 선반 + 7F G·H 랙 1단(대용량) + 7F G 선반 + 7F H 오토스토어.
+ * 랙 1단 박스 피킹면 SKU 수는 그 구역 1단 칸 수에서 나오고, 7F G 선반 = 상온 목표 − 나머지.
+ */
+export const SKU_PLACE = {
+  /** 6F 야채(바닥 적치 → 분배) SKU [가정] */
+  veg: 300,
+  /** 5F E·F 선반 SKU(구역마다) [가정] — 5F 띠 공간에 들어가는 만큼 */
+  efShelf: 840,
+  /** 7F H 오토스토어 SKU [가정] — 작고 가벼운 비식재 일부만(사용자 §5) */
+  autostore: 1_500,
+  /** 랙 1단이 박스 피킹면(PICK_FACE)인 구역 [가정] — 5F C·D 무거운 상자, 7F G·H 대용량 */
+  faceZones: ['C', 'D', 'G', 'H'] as readonly string[],
+};
+
+/** 6F 냉장 바닥 적치 레인 위치 코드 통로 [가정 — 백엔드 확인 필요] · 레인 모양 */
+export const VEG_LANES = { aisle: 93, laneW: 1.2, gap: 1.0, posLen: 1.3 } as const;
+
+/** 6F 가공품 팔레트 랙 통로 출발점(사용자 "출발점은 10통로") — 전체 팔레트 칸 하한(백엔드 R-17 회신, 사용자 결정)을 지키도록 늘린다 */
+export const CHILLED_RACK = { startAisles: 10, palletMin: 18_000 } as const;
+
+/**
+ * 오토스토어(7F H) [사용자 2026-11-25 §5 — 현실적인 범위]. 설치비는 통·로봇·포트 수에 비례 → 셋 다 설정값.
+ * 위치 코드: H-7-{61~}-{베이=통 번호}-{단=쌓은 높이 1~16}-{슬롯=칸 1~compartments} — 칸 하나 = PICK_FACE(백엔드 회신: 유형 따로 안 둠).
+ */
+export const AUTOSTORE = {
+  /** 대상 기준 [사용자] — 통 최대 무게(kg), 통 높이(mm), 하루 출고량 중간 이하 */
+  maxBinKg: 30,
+  binHeightsMm: [220, 330, 425] as const,
+  /** SKU 하나가 쓰는 칸 수(재고 깊이) [가정] · 통 하나 칸 수 [가정 1~4] · 쌓는 단 [사용자 16] */
+  compartmentsPerSku: 2,
+  compartmentsPerBin: 2,
+  stack: 16,
+  /** 격자 칸(m) [가정] — 통 약 0.65 × 0.45 */
+  cell: { x: 0.7, z: 0.5 },
+  /** 칸 하나 유닛 [가정] · 최소 수량(보충 기준) [가정] */
+  unitsPerCompartment: 40,
+  minQty: 8,
+  /** 로봇·포트 [가정 — 설치비 비례] · 포트당 시간당 통 교환 상한 [가정] */
+  robots: 10,
+  ports: 2,
+  portBinsPerHour: 300,
+  /** 로봇이 통 하나 가져오는 시간(s) [가정] */
+  fetchSec: 40,
+  /** 순환 실사 확률 · 세는 시간(s) [가정] */
+  cycleCountRate: 0.03,
+  cycleCountSec: 20,
+  /** 보충: 통당 N초 + 낱개당 M초 [가정] */
+  refillBinSec: 25,
+  refillPerUnitSec: 0.4,
+  /** 16단 쌓았을 때 바닥 하중(kg/㎡) [사용자 약 2,000] */
+  floorLoadKgM2: 2000,
 } as const;
 
 /** [정본 CDC-6] 공급 대상 MFC 와 지역(PDA 지역 바코드 단위). 출고대기 91 기본 자리. */
