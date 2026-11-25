@@ -9,7 +9,7 @@ import { useApp, useView } from '../../app/context';
 import { SHELF } from '../../config';
 import type { FloorLayout } from '../../domain/layout';
 import { SCENE, zoneBoxColor } from '../colors';
-import { plateTexture } from '../sprites';
+import { plateTexture, boxTexture } from '../sprites';
 
 const tmp = new THREE.Object3D();
 const BOARD = 0.03;
@@ -101,7 +101,7 @@ function ShelfStock({ f }: { f: FloorLayout }) {
   return (
     <instancedMesh ref={ref} args={[undefined, undefined, f.shelves.length]} frustumCulled={false}>
       <boxGeometry />
-      <meshStandardMaterial roughness={0.6} />
+      <meshStandardMaterial roughness={0.7} map={boxTexture()} />
     </instancedMesh>
   );
 }

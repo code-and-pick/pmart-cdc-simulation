@@ -12,7 +12,8 @@ import { useApp } from '../../app/context';
 import { MFCS } from '../../config';
 import type { Equip } from '../../domain/layout';
 import type { FloorNo } from '../../domain/sites/chilgok';
-import { plateTexture } from '../sprites';
+import { boxTexture, plateTexture } from '../sprites';
+import { StaticMerge } from './StaticMerge';
 
 const BLUE = 0x1f63d0;
 const STEEL = 0xc9ced6;
@@ -102,85 +103,193 @@ function TowerLight({ x, z, busy }: { x: number; z: number; busy: () => boolean 
   );
 }
 
-/** 롤테이너(이동형 운반 카트) — 파란 철망, cold 면 은색 보냉 커버 + 앞 파란 창 */
+/**
+ * 롤테이너 — MFC 시뮬레이터 RollContainer.tsx 와 같은 모양(사용자 2026-11-25 "MFC 모형 UI 랑 동일하게"):
+ * 바퀴 달린 파란 철망 짐수레 0.8 × 0.6 × 1.7m, 바닥판·바퀴 4·기둥 4·옆 3면 가로 살·뒤판 세로 살, 앞은 열림.
+ * CDC 만 더한 것: 저온(cold)은 사진처럼 은색 보냉 커버를 씌움, 실린 상자는 fill(0~1) 만큼 MFC 상자 무늬로 쌓음.
+ */
 export function RollContainer({ x, z, cold = false, rot = 0, fill = 0.6 }: { x: number; z: number; cold?: boolean; rot?: number; fill?: number }) {
   const W = 0.8;
-  const D = 0.7;
+  const D = 0.6;
   const H = 1.7;
-  if (cold)
-    return (
-      <group position={[x, 0, z]} rotation={[0, rot, 0]}>
-        <mesh position={[0, H / 2 + 0.12, 0]}>
-          <boxGeometry args={[W + 0.04, H, D + 0.04]} />
-          <meshStandardMaterial color={0xdde1e6} metalness={0.15} roughness={0.35} />
-        </mesh>
-        <mesh position={[0, H * 0.62, D / 2 + 0.03]}>
-          <planeGeometry args={[0.32, 0.36]} />
-          <meshStandardMaterial color={0x2f7fd6} />
-        </mesh>
-        <Wheels W={W} D={D} />
-      </group>
-    );
+  const frame = 0x2f6fd6; // MFC 파랑
+  const bar = { color: frame, metalness: 0.5, roughness: 0.35 };
+  const layers = Math.round(Math.max(0, Math.min(1, fill)) * 4); // 상자 층 0~4(층마다 2개)
   return (
     <group position={[x, 0, z]} rotation={[0, rot, 0]}>
-      {/* 바닥판 + 네 기둥 + 옆 철망 세 면(앞은 열림) */}
-      <mesh position={[0, 0.14, 0]}>
-        <boxGeometry args={[W, 0.04, D]} />
-        <meshStandardMaterial color={BLUE} />
-      </mesh>
-      {[
-        [-1, -1],
-        [1, -1],
-        [-1, 1],
-        [1, 1],
-      ].map(([sx, sz], i) => (
-        <mesh key={i} position={[(sx * W) / 2, H / 2 + 0.12, (sz * D) / 2]}>
-          <boxGeometry args={[0.035, H, 0.035]} />
-          <meshStandardMaterial color={BLUE} />
+      <StaticMerge>
+        <mesh position={[0, 0.16, 0]}>
+          <boxGeometry args={[W, 0.04, D]} />
+          <meshStandardMaterial color={0x24569f} metalness={0.3} roughness={0.5} />
         </mesh>
-      ))}
-      {[
-        { p: [0, H / 2 + 0.12, -D / 2] as const, s: [W, H, 0.01] as const },
-        { p: [-W / 2, H / 2 + 0.12, 0] as const, s: [0.01, H, D] as const },
-        { p: [W / 2, H / 2 + 0.12, 0] as const, s: [0.01, H, D] as const },
-      ].map((m, i) => (
-        <mesh key={i} position={[...m.p]}>
-          <boxGeometry args={[...m.s]} />
-          <meshStandardMaterial color={BLUE} transparent opacity={0.28} />
-        </mesh>
-      ))}
-      {/* 안에 실린 박스 */}
-      {fill > 0 && (
-        <mesh position={[0, 0.16 + (H * fill * 0.9) / 2, 0]}>
-          <boxGeometry args={[W * 0.86, H * fill * 0.9, D * 0.82]} />
-          <meshStandardMaterial color={0xd7b07c} />
-        </mesh>
+        {[-1, 1].flatMap((sx) =>
+          [-1, 1].map((sz) => (
+            <mesh key={`w${sx}${sz}`} position={[sx * (W / 2 - 0.07), 0.06, sz * (D / 2 - 0.07)]} rotation={[0, 0, Math.PI / 2]}>
+              <cylinderGeometry args={[0.06, 0.06, 0.04, 12]} />
+              <meshStandardMaterial color={0x1f2229} />
+            </mesh>
+          )),
+        )}
+        {[-1, 1].flatMap((sx) =>
+          [-1, 1].map((sz) => (
+            <mesh key={`p${sx}${sz}`} position={[sx * (W / 2 - 0.015), 0.18 + (H - 0.18) / 2, sz * (D / 2 - 0.015)]}>
+              <boxGeometry args={[0.03, H - 0.18, 0.03]} />
+              <meshStandardMaterial {...bar} />
+            </mesh>
+          )),
+        )}
+        {[0.45, 0.75, 1.05, 1.35, 1.65].flatMap((y) => [
+          <mesh key={`b${y}`} position={[0, y, -D / 2 + 0.015]}>
+            <boxGeometry args={[W, 0.02, 0.015]} />
+            <meshStandardMaterial {...bar} />
+          </mesh>,
+          ...[-1, 1].map((sx) => (
+            <mesh key={`s${y}${sx}`} position={[sx * (W / 2 - 0.015), y, 0]}>
+              <boxGeometry args={[0.015, 0.02, D]} />
+              <meshStandardMaterial {...bar} />
+            </mesh>
+          )),
+        ])}
+        {[-0.25, -0.08, 0.08, 0.25].map((dx) => (
+          <mesh key={`v${dx}`} position={[dx, 0.18 + (H - 0.18) / 2, -D / 2 + 0.015]}>
+            <boxGeometry args={[0.012, H - 0.18, 0.012]} />
+            <meshStandardMaterial {...bar} />
+          </mesh>
+        ))}
+        {Array.from({ length: layers }, (_, k) =>
+          [-1, 1].map((sx) => (
+            <mesh key={`c${k}${sx}`} position={[sx * 0.18, 0.18 + 0.18 + k * 0.37, 0]}>
+              <boxGeometry args={[0.34, 0.35, 0.5]} />
+              <meshStandardMaterial color={(k + (sx > 0 ? 1 : 0)) % 2 ? 0xc99a6b : 0xd2a679} roughness={0.85} map={boxTexture()} />
+            </mesh>
+          )),
+        )}
+      </StaticMerge>
+      {cold && (
+        // 보냉 커버(사진: 은색 덮개, 앞에 파란 창) — 철망 위에 씌움
+        <>
+          <mesh position={[0, 0.18 + (H - 0.18) / 2, 0]}>
+            <boxGeometry args={[W + 0.05, H - 0.12, D + 0.05]} />
+            <meshStandardMaterial color={0xdde1e6} metalness={0.15} roughness={0.35} />
+          </mesh>
+          <mesh position={[0, H * 0.62, D / 2 + 0.03]}>
+            <planeGeometry args={[0.32, 0.36]} />
+            <meshStandardMaterial color={0x2f7fd6} />
+          </mesh>
+        </>
       )}
-      <Wheels W={W} D={D} />
     </group>
   );
 }
 
-function Wheels({ W, D }: { W: number; D: number }) {
+/**
+ * 화물 승강기 — MFC 시뮬레이터 FreightLifts 와 같은 모양: 닫힌 밝은 콘크리트 코어 + 지붕 테두리, 스테인리스 문틀·문 두 짝(가운데서 열림)·
+ * 층 표시등·호출 버튼, 문 앞 노랑/검정 안전 띠, 위에 "화물 승강기" 이름표. 문은 앞(+z)을 본다. open() 이 1 이면 문이 열린다.
+ */
+export function FreightLift({ cx, w, zBack, zFront, label, open }: { cx: number; w: number; zBack: number; zFront: number; label: string; open: () => number }) {
+  const doors = useRef<THREE.Group[]>([]);
+  const lamp = useRef<THREE.MeshStandardMaterial>(null!);
+  const o = useRef(0);
+  useFrame((_, dt) => {
+    const want = open();
+    o.current += Math.sign(want - o.current) * Math.min(Math.abs(want - o.current), dt * 0.8);
+    doors.current.forEach((g, i) => {
+      if (g) g.position.x = (i === 0 ? -1 : 1) * o.current * (dw / 2 + 0.02);
+    });
+    if (lamp.current) lamp.current.emissiveIntensity = 0.6 + o.current * 1.4;
+  });
+  const H = 3.4;
+  const DH = 2.4;
+  const d = zFront - zBack;
+  const dw = Math.min(2.6, w - 0.9);
+  const steel = { color: 0xe3e7ed, metalness: 0.55, roughness: 0.3 };
+  const zc = (zBack + zFront) / 2;
   return (
-    <>
-      {[
-        [-1, -1],
-        [1, -1],
-        [-1, 1],
-        [1, 1],
-      ].map(([sx, sz], i) => (
-        <mesh key={i} position={[(sx * W) / 2.4, 0.06, (sz * D) / 2.4]} rotation={[0, 0, Math.PI / 2]}>
-          <cylinderGeometry args={[0.06, 0.06, 0.04, 10]} />
-          <meshStandardMaterial color={0xe0712c} />
+    <group>
+      <mesh position={[cx, H / 2, zc - 0.05]}>
+        <boxGeometry args={[w - 0.04, H, d - 0.1]} />
+        <meshStandardMaterial color={0xf1f3f6} roughness={0.85} />
+      </mesh>
+      <mesh position={[cx, H + 0.04, zc - 0.05]}>
+        <boxGeometry args={[w + 0.06, 0.08, d]} />
+        <meshStandardMaterial color={0xd5dae2} roughness={0.6} />
+      </mesh>
+      {[cx - dw / 2 - 0.07, cx + dw / 2 + 0.07].map((x) => (
+        <mesh key={x} position={[x, DH / 2 + 0.05, zFront + 0.04]}>
+          <boxGeometry args={[0.14, DH + 0.1, 0.1]} />
+          <meshStandardMaterial {...steel} />
         </mesh>
       ))}
-    </>
+      <mesh position={[cx, DH + 0.2, zFront + 0.04]}>
+        <boxGeometry args={[dw + 0.28, 0.3, 0.1]} />
+        <meshStandardMaterial {...steel} />
+      </mesh>
+      <mesh position={[cx, DH + 0.2, zFront + 0.1]}>
+        <boxGeometry args={[0.34, 0.14, 0.02]} />
+        <meshStandardMaterial ref={lamp} color={0x0b1a2a} emissive={0x22c3ee} emissiveIntensity={0.6} />
+      </mesh>
+      {[0, 1].map((k) => (
+        <group
+          key={k}
+          ref={(g) => {
+            if (g) doors.current[k] = g;
+          }}
+        >
+          <mesh position={[cx + (k === 0 ? -dw / 4 : dw / 4), DH / 2, zFront + 0.02]}>
+            <boxGeometry args={[dw / 2 - 0.01, DH, 0.05]} />
+            <meshStandardMaterial color={0xe0e4ea} metalness={0.55} roughness={0.25} />
+          </mesh>
+          <mesh position={[cx + (k === 0 ? -dw / 4 : dw / 4), DH / 2, zFront + 0.05]}>
+            <boxGeometry args={[0.02, DH * 0.9, 0.01]} />
+            <meshStandardMaterial color={0xbcc3ce} metalness={0.5} roughness={0.3} />
+          </mesh>
+        </group>
+      ))}
+      <mesh position={[cx + dw / 2 + 0.32, 1.15, zFront + 0.06]}>
+        <boxGeometry args={[0.12, 0.26, 0.03]} />
+        <meshStandardMaterial {...steel} />
+      </mesh>
+      <mesh position={[cx + dw / 2 + 0.32, 1.15, zFront + 0.08]}>
+        <circleGeometry args={[0.035, 16]} />
+        <meshStandardMaterial color={0x16a34a} emissive={0x22c55e} emissiveIntensity={0.8} />
+      </mesh>
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[cx, 0.012, zFront + 0.32]} raycast={() => null}>
+        <planeGeometry args={[dw + 0.4, 0.4]} />
+        <meshStandardMaterial map={stripeTexture()} roughness={0.8} />
+      </mesh>
+      <sprite position={[cx, H + 0.7, zc]} scale={[3.0, 0.75, 1]}>
+        <spriteMaterial map={plateTexture(label, { bg: '#1f2a44', fg: '#ffffff', w: 384, h: 96 })} depthWrite={false} />
+      </sprite>
+    </group>
   );
 }
 
+let stripeTex: THREE.CanvasTexture | null = null;
+/** 노랑/검정 안전 띠 — MFC FreightLifts 와 같은 그림 */
+function stripeTexture(): THREE.CanvasTexture {
+  if (stripeTex) return stripeTex;
+  const c = document.createElement('canvas');
+  c.width = 256;
+  c.height = 32;
+  const ctx = c.getContext('2d')!;
+  ctx.fillStyle = '#1f2229';
+  ctx.fillRect(0, 0, 256, 32);
+  ctx.fillStyle = '#f5c518';
+  for (let x = -32; x < 256 + 32; x += 32) {
+    ctx.beginPath();
+    ctx.moveTo(x, 32);
+    ctx.lineTo(x + 16, 32);
+    ctx.lineTo(x + 32, 0);
+    ctx.lineTo(x + 16, 0);
+    ctx.fill();
+  }
+  stripeTex = new THREE.CanvasTexture(c);
+  stripeTex.colorSpace = THREE.SRGBColorSpace;
+  return stripeTex;
+}
+
 /** 흐르는 박스(컨베이어 위) — 경로 점들을 따라 n 개가 돈다. busy 일 때만 움직이고 보인다 */
-function FlowBoxes({ path, n, busy, color = 0xffffff, size = [0.5, 0.32, 0.38] }: { path: THREE.Vector3[]; n: number; busy: () => boolean; color?: number; size?: [number, number, number] }) {
+function FlowBoxes({ path, n, busy, color = 0xd2a679, size = [0.5, 0.32, 0.38] }: { path: THREE.Vector3[]; n: number; busy: () => boolean; color?: number; size?: [number, number, number] }) {
   const ref = useRef<THREE.InstancedMesh>(null!);
   const t = useRef(0);
   const { lens, total } = useMemo(() => {
@@ -206,7 +315,7 @@ function FlowBoxes({ path, n, busy, color = 0xffffff, size = [0.5, 0.32, 0.38] }
   return (
     <instancedMesh ref={ref} args={[undefined, undefined, n]} frustumCulled={false}>
       <boxGeometry args={size} />
-      <meshStandardMaterial color={color} />
+      <meshStandardMaterial color={color} roughness={0.8} map={boxTexture()} />
     </instancedMesh>
   );
 }
@@ -379,7 +488,7 @@ function Dps({ e, floor }: { e: Equip; floor: FloorNo }) {
           <LightStrip x={cx + s * 1.35} y={1.0} z={cz} len={len} dir="z" busy={busy} />
         </group>
       ))}
-      <FlowBoxes path={[new THREE.Vector3(cx, 0.86, r.z1 - 1.2), new THREE.Vector3(cx, 0.86, r.z0 + 1.2)]} n={Math.max(3, Math.floor(len / 3))} busy={busy} color={0xffffff} size={[0.42, 0.28, 0.32]} />
+      <FlowBoxes path={[new THREE.Vector3(cx, 0.86, r.z1 - 1.2), new THREE.Vector3(cx, 0.86, r.z0 + 1.2)]} n={Math.max(3, Math.floor(len / 3))} busy={busy} color={0xd2a679} size={[0.42, 0.28, 0.32]} />
     </group>
   );
 }

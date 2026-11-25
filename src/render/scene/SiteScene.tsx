@@ -9,10 +9,10 @@ import { TEMP_KO } from '../../sim/simulation';
 import { B1 } from '../../sim/site';
 import type { FloorLayout, Location } from '../../domain/layout';
 import { SCENE, ZONE_COLOR, zoneBoxColor } from '../colors';
-import { plateTexture } from '../sprites';
+import { boxTexture, palletTexture, plateTexture } from '../sprites';
 import { Agents, SimDriver } from './Agents';
 import { Facility, Lights } from './Facility';
-import { EquipmentModel, RollContainer } from './Equipment3D';
+import { EquipmentModel, FreightLift, RollContainer } from './Equipment3D';
 import { CameraRig, CellLabels, Picker } from './Core';
 import { Shelves } from './Shelves';
 import { BEAM_H, beamY, LOAD_MAX } from '../rackGeom';
@@ -183,11 +183,11 @@ function Loads({ f }: { f: FloorLayout }) {
     <>
       <instancedMesh ref={decks} args={[undefined, undefined, f.locations.length]} frustumCulled={false}>
         <boxGeometry />
-        <meshStandardMaterial color={SCENE.pallet} />
+        <meshStandardMaterial color={0xd9b98a} roughness={0.85} map={palletTexture()} />
       </instancedMesh>
       <instancedMesh ref={loads} args={[undefined, undefined, f.locations.length]} frustumCulled={false}>
         <boxGeometry />
-        <meshStandardMaterial roughness={0.45} />
+        <meshStandardMaterial roughness={0.8} map={boxTexture()} />
       </instancedMesh>
     </>
   );
@@ -211,25 +211,16 @@ function Plates({ f }: { f: FloorLayout }) {
   );
 }
 
-/** 화물 승강기 — 문(92)으로 롤테이너를 지하 B1 로 내린다 */
+/** 화물 승강기 — 문(92)으로 롤테이너를 지하 B1 로 내린다. 모양은 MFC 화물 승강기와 같음, 문 앞에 사람이 오면 열린다 */
 function Lifts({ f }: { f: FloorLayout }) {
+  const { sim } = useApp();
   return (
     <>
-      {f.lifts.map((l) => (
-        <group key={l.code}>
-          <mesh position={[(l.rect.x0 + l.rect.x1) / 2, 2, (l.rect.z0 + l.rect.z1) / 2]}>
-            <boxGeometry args={[l.rect.x1 - l.rect.x0, 4, l.rect.z1 - l.rect.z0]} />
-            <meshStandardMaterial color={SCENE.lift} />
-          </mesh>
-          <mesh position={[(l.rect.x0 + l.rect.x1) / 2, 1.4, l.rect.z1 + 0.02]}>
-            <planeGeometry args={[(l.rect.x1 - l.rect.x0) * 0.7, 2.8]} />
-            <meshStandardMaterial color={SCENE.liftDoor} />
-          </mesh>
-          <sprite position={[(l.rect.x0 + l.rect.x1) / 2, 5, (l.rect.z0 + l.rect.z1) / 2]} scale={[2.6, 1.3, 1]}>
-            <spriteMaterial map={plateTexture(`${f.floor}-${String(l.no).padStart(2, '0')}`)} />
-          </sprite>
-        </group>
-      ))}
+      {f.lifts.map((l) => {
+        const cx = (l.rect.x0 + l.rect.x1) / 2;
+        const near = () => (sim.agents.some((a) => a.floor === f.floor && Math.abs(a.pos.x - cx) < 2 && a.pos.z > l.rect.z1 - 0.5 && a.pos.z < l.rect.z1 + 3) ? 1 : 0);
+        return <FreightLift key={l.code} cx={cx} w={l.rect.x1 - l.rect.x0} zBack={l.rect.z0} zFront={l.rect.z1} label={`화물 승강기 ${f.floor}-${String(l.no).padStart(2, '0')}`} open={near} />;
+      })}
     </>
   );
 }
@@ -314,15 +305,15 @@ function Basement() {
         <meshBasicMaterial color={SCENE.hazard} transparent opacity={0.25} />
       </mesh>
       {layout.floors[0].lifts.map((l) => (
-        <group key={l.no}>
-          <mesh position={[(l.rect.x0 + l.rect.x1) / 2, 2, B1.liftZ]}>
-            <boxGeometry args={[l.rect.x1 - l.rect.x0, 4, 3.5]} />
-            <meshStandardMaterial color={SCENE.lift} />
-          </mesh>
-          <sprite position={[(l.rect.x0 + l.rect.x1) / 2, 5, B1.liftZ]} scale={[2.6, 1.3, 1]}>
-            <spriteMaterial map={plateTexture(`승강기 ${l.no}`)} />
-          </sprite>
-        </group>
+        <FreightLift
+          key={l.no}
+          cx={(l.rect.x0 + l.rect.x1) / 2}
+          w={l.rect.x1 - l.rect.x0}
+          zBack={B1.liftZ - 1.75}
+          zFront={B1.liftZ + 1.75}
+          label={`화물 승강기 ${l.no}`}
+          open={() => (sim.agents.some((a) => a.floor === 'B1' && Math.abs(a.pos.x - (l.rect.x0 + l.rect.x1) / 2) < 2 && a.pos.z > B1.liftZ + 1 && a.pos.z < B1.liftZ + 5) ? 1 : 0)}
+        />
       ))}
       {layout.docks.map((d) => (
         <group key={d.code} position={[d.pos.x, 0, 0]}>
