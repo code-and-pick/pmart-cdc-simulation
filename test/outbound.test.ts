@@ -95,10 +95,10 @@ async function startDay(n = 5) {
 }
 
 describe('가짜 상품 마스터·시작 재고', () => {
-  it('고회전 2,000 SKU — 계약 SKU 패턴, 피킹 선반 칸 하나 + 팔레트 기둥 1~4단', () => {
-    expect(catalog.skus).toHaveLength(2000);
-    expect(new Set(catalog.skus.map((s) => s.sku)).size).toBe(2000);
-    expect(new Set(catalog.skus.map((s) => s.shelf.code)).size).toBe(2000);
+  it('SKU = 선반 목표 칸(MFC 10,900 설계, B-1) 11,660 — 계약 SKU 패턴, 피킹 선반 칸 하나 + 팔레트 기둥 1~4단', () => {
+    expect(catalog.skus).toHaveLength(11_660);
+    expect(new Set(catalog.skus.map((s) => s.sku)).size).toBe(11_660);
+    expect(new Set(catalog.skus.map((s) => s.shelf.code)).size).toBe(11_660);
     for (const s of catalog.skus) {
       expect(s.sku).toMatch(SKU_PATTERN);
       expect(s.shelf.type).toBe('PICK_FACE');

@@ -132,6 +132,14 @@ function ShelfStock({ f }: { f: FloorLayout }) {
     const stock = backend.ledger.onHandByLocation();
     const color = new THREE.Color();
     f.shelves.forEach((l, i) => {
+      if (l.bin) {
+        // 오토스토어 빈 — 선반에 그리지 않음
+        tmp.scale.set(0, 0, 0);
+        tmp.position.set(0, -10, 0);
+        tmp.updateMatrix();
+        ref.current!.setMatrixAt(i, tmp.matrix);
+        return;
+      }
       const q = stock.get(l.code) ?? 0;
       const h = q ? maxH * (0.25 + 0.75 * Math.min(1, q / l.capacity)) : 0;
       tmp.position.set(l.pos.x, l.pos.y + BOARD / 2 + h / 2, l.pos.z);

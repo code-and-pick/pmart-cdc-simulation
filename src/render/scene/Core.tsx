@@ -141,7 +141,7 @@ export function Picker() {
       const f = controller.floorLayout();
       if (!f) return;
       // 2) 칸 — 통로 쪽 앞면이 카메라를 보는 칸 먼저, 없으면(위에서 내려다볼 때 등) 앞뒤 가리지 않고
-      const cells = [...f.shelves, ...f.locations];
+      const cells = [...f.shelves.filter((l) => !l.bin), ...f.locations];
       let best: { loc: Location; d: number } | null = null;
       for (const anyFace of [false, true]) {
         if (best) break;
@@ -253,7 +253,7 @@ export function CellLabels() {
     const cam = camera.position;
     const pt = new THREE.Vector3();
     const cand: { loc: Location; d: number }[] = [];
-    for (const l of [...f!.shelves, ...f!.locations]) {
+    for (const l of [...f!.shelves.filter((x) => !x.bin), ...f!.locations]) {
       const y = l.type === 'PICK_FACE' ? l.pos.y : beamY(l.level);
       if (!frustum.containsPoint(pt.set(l.pos.x, y, l.pos.z))) continue;
       if ((cam.x - l.pos.x) * (l.face ?? 1) <= 0) continue; // 카메라가 칸 앞(통로) 쪽일 때만

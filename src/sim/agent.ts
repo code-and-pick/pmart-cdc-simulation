@@ -37,6 +37,8 @@ export class Agent {
   done = 0;
   activity = '근무 전';
   carrying: 'CART' | 'PALLET' | 'ROLL' | null = null;
+  /** 지게차를 세워 두고 걸어서 선반에 갔을 때 — 지게차 자리 [사용자 2026-11-25 "지게차는 선반 입구까지만"] */
+  parked: { x: number; z: number; heading: number } | null = null;
   /** 실은 짐이 보냉 커버(저온)인지 — 화면 색 */
   cold = false;
   pda: PdaView | null = null;

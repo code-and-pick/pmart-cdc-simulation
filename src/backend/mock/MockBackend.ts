@@ -526,13 +526,14 @@ export class MockBackend implements CdcOutboundPort {
   }
 
   /**
-   * 피킹 Task — 같은 TRF·층·구역 줄을 작업 방식(DPS·박스·FC·분배·라인)으로 나누고, 동선 순(통로 → 베이 → 단)으로 놓아 카트 한 대 분량(TASK.maxLines)씩 자른다 [시뮬].
+   * 피킹 Task — 같은 TRF·층·구역 줄을 작업 방식(DPS·박스·FC·분배·라인)과 선반 통로로 나누고, 동선 순(통로 → 베이 → 단)으로 놓아 카트 한 대 분량(TASK.maxLines)씩 자른다 [시뮬].
    * 작업 방식으로 나누는 것은 시뮬레이터가 정한 값(R-18) — 6F 야채(분배)와 상자 상품(라인)이 한 작업에 섞이지 않게.
    */
   private newPickTask(waveId: string, trfId: string, holds: { sku: string; lot: string; locationCode: string; qty: number }[]): Task[] {
+    // 작업 방식 × 선반 통로로 묶는다 — 같은 통로 작업이 MFC 끼리 같은 범위가 되어, 내주는 순서(첫 칸 순)대로 MFC 몫이 함께 나간다 [시뮬]
     const groups = new Map<string, typeof holds>();
     for (const h of holds) {
-      const k = this.opt.catalog.bySku.get(h.sku)?.handling ?? 'FC';
+      const k = `${this.opt.catalog.bySku.get(h.sku)?.handling ?? 'FC'}|${h.locationCode.split('-').slice(0, 4).join('-')}`;
       groups.set(k, [...(groups.get(k) ?? []), h]);
     }
     const out: Task[] = [];
@@ -601,6 +602,10 @@ export class MockBackend implements CdcOutboundPort {
           const da = this.trfs.get(a.trfId)!.intake.dueAt;
           const db = this.trfs.get(b.trfId)!.intake.dueAt;
           if (da !== db) return da < db ? -1 : 1;
+          // 같은 상품 자리 작업을 MFC 끼리 이어서 — 라인(DAS)에서 한 상품을 여러 MFC 칸으로 나누게 [시뮬, R-18 2단계 묶음 피킹 대신]
+          const la = a.lines[0]?.locationCode ?? '';
+          const lb = b.lines[0]?.locationCode ?? '';
+          if (la !== lb) return la < lb ? -1 : 1;
           if (a.createdAt !== b.createdAt) return a.createdAt < b.createdAt ? -1 : 1;
           return a.taskId < b.taskId ? -1 : 1;
         });

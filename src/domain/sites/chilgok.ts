@@ -16,12 +16,14 @@ export interface RackZoneSpec {
   share: number;
   /** 피킹 선반 목표 칸(SHELF.targetSlots)을 같은 온도대끼리 나눌 몫 — 없으면 통로 수. 0 이면 SKU 수만큼만 [시뮬] */
   shelfShare?: number;
+  /** 피킹 칸이 오토스토어 빈(bin) — 선반을 세우지 않고 작업자 앞 포트로 통이 온다 [사용자 2026-11-25 "7F 비식재만 실제 사용"] */
+  bins?: boolean;
   /** 단 수 — 모든 구역 4(1 피킹·2 보충 대기·3~4 리저브) [사용자 2026-11-25 랙 규격] */
   levels: number;
 }
 
 /** 랙이 아닌 설비 자리(3D 표현용) — 백엔드와 주고받지 않는다(WMS 0.6, 설계 §5.3) */
-export type EquipKind = 'WHEEL_SORTER' | 'DPS' | 'DAS' | 'SPLIT' | 'AUTOSTORE';
+export type EquipKind = 'WHEEL_SORTER' | 'DPS' | 'DAS' | 'SPLIT' | 'AUTOSTORE' | 'INBOUND' | 'OFFICE';
 
 export interface FloorSpec {
   floor: FloorNo;
@@ -34,7 +36,7 @@ export interface FloorSpec {
   stagingLetters: ('A' | 'B' | 'C' | 'G')[];
   liftLetter: 'B' | 'C' | 'G';
   /** 설비 자리(모두 DT) — band 북쪽 띠(선반 동쪽), east 보관 방 동쪽 [사용자 2026-11-25 2안] */
-  equipment: { kind: EquipKind; label: string; where: 'band' | 'east' }[];
+  equipment: { kind: EquipKind; label: string; where: 'band' | 'east'; temp?: Temp; weight?: number; maxW?: number; len?: number }[];
 }
 
 const amb = (letter: RackZoneSpec['letter'], label: string, shelfShare?: number): RackZoneSpec => ({ letter, temp: 'AMBIENT', label, share: 1, shelfShare, levels: RACK.levels });
@@ -54,10 +56,12 @@ export const CHILGOK_FLOORS: FloorSpec[] = [
     stagingLetters: ['C', 'A'],
     liftLetter: 'C',
     equipment: [
-      { kind: 'WHEEL_SORTER', label: '1차 고속분류기(휠소터)', where: 'band' },
-      { kind: 'DPS', label: 'DPS (냉동)', where: 'band' },
-      // 백엔드 R-10 회신: E·F 각 01~03 은 오토스토어(R-09 그대로)
-      { kind: 'AUTOSTORE', label: '오토스토어 (E·F)', where: 'band' },
+      { kind: 'WHEEL_SORTER', label: '1차 고속분류기(휠소터) (C·D 박스 → MFC 롤테이너)', where: 'band', weight: 1.3 },
+      // DPS 피킹은 냉동 선반에서 — 여기는 MFC 빈 박스가 오가는 컨베이어만(사용자 2026-11-25)
+      { kind: 'DPS', label: 'DPS 박스 컨베이어 (냉동)', where: 'band', weight: 0.55 },
+      // 오토스토어는 7F 비식재만(사용자 2026-11-25) — 5F E·F 는 FC 선반 피킹
+      { kind: 'INBOUND', label: '입고 검수 (상온)', where: 'band', temp: 'AMBIENT', maxW: 14 },
+      { kind: 'INBOUND', label: '입고 검수 (냉동)', where: 'band', temp: 'FROZEN', maxW: 14 },
     ],
   },
   {
@@ -68,6 +72,7 @@ export const CHILGOK_FLOORS: FloorSpec[] = [
     stagingLetters: ['B'],
     liftLetter: 'B',
     equipment: [
+      { kind: 'INBOUND', label: '입고 검수 (냉장)', where: 'band', temp: 'CHILLED', maxW: 14 },
       { kind: 'DAS', label: '라인 (DAS)', where: 'east' },
       { kind: 'SPLIT', label: '분배 (야채 크레이트)', where: 'east' },
     ],
@@ -75,10 +80,15 @@ export const CHILGOK_FLOORS: FloorSpec[] = [
   {
     floor: 7,
     label: '7F 생활용품',
-    zones: [amb('G', '생활용품 G'), amb('H', '생활용품 H')],
+    zones: [amb('G', '생활용품 G'), { ...amb('H', '생활용품 H (비식재 소형)'), bins: true }],
     docPyeong: { storage: { 상온: 2067 }, dt: 800 },
     stagingLetters: ['G'],
     liftLetter: 'G',
-    equipment: [{ kind: 'AUTOSTORE', label: '오토스토어 (비식재)', where: 'band' }],
+    equipment: [
+      { kind: 'AUTOSTORE', label: '오토스토어 (비식재 H)', where: 'band', weight: 2.2 },
+      { kind: 'INBOUND', label: '입고 검수 (상온)', where: 'band', temp: 'AMBIENT', maxW: 14 },
+      // DC 관리자 사무실(사용자 2026-11-25 "7층에 dc 관리자 사무실") — 보관 방 동쪽 DT
+      { kind: 'OFFICE', label: 'DC 관리자 사무실', where: 'east', len: 18 },
+    ],
   },
 ];

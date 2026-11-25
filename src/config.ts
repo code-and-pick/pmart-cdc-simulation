@@ -115,8 +115,8 @@ export const SPEEDS = [0, 1, 5, 15, 30, 60, 120] as const;
  */
 export const CATALOG = {
   seed: 20261125,
-  /** [개념도 CDC-03] 고회전 SKU 수 */
-  skus: 2000,
+  /** 5F 상온 C~F 구역 SKU 수 [시뮬] — 다른 구역은 선반 목표 칸(MFC 10,900 SKU 설계, B-1)만큼 SKU(사용자 2026-11-25 냉동 선반 채움률 9% 지적) */
+  minZoneSkus: 190,
   /** 피킹면 채움률 [시뮬] — 칸 용량 대비 */
   pickFill: [0.45, 0.85] as const,
   /** 2단 보충 대기·3단~ 리저브 팔레트 채움률 [시뮬] */
@@ -135,6 +135,9 @@ export const ALLOCATION = {
 
 /** MFC 보충 요청(TRF) 만들기 — MOCK 에서 시뮬레이터가 replenishment 역할 [가정] (설계 §5.1 #1) */
 export const SUPPLY = {
+  /** MFC 요청 줄 중 잘 나가는 상품 묶음(모든 MFC 가 같이 요청)에서 고르는 몫·그 묶음 크기(SKU 비율) [시뮬 — 라인(DAS)에서 한 상품이 여러 MFC 칸으로 나뉘게] */
+  popularShare: 0.35,
+  popularPool: 0.02,
   /** MFC 한 곳의 하루 TRF 품목 수 [가정] — 고회전 2,000 SKU 의 30%, 석간 FC 16명이 저녁 내내 집는 양으로 맞춤 */
   linesPerMfc: 600,
   /** 품목당 승인 수량 [가정] */
@@ -179,9 +182,10 @@ export const SHELF = {
  */
 export const WORKFORCE: Record<5 | 6 | 7, { fc: number; sort: number; jockey: number; replDay: number; replEve: number }> = {
   // sort = 6F 라인(DAS)·분배 작업자(번호 홀수 라인 · 짝수 분배). 5F·7F 는 피킹 = 분류라 분류대 사람 없이 FC·DPS 로 [사용자 2026-11-25 설계 §5.4]
-  5: { fc: 8, sort: 0, jockey: 2, replDay: 3, replEve: 1 },
-  6: { fc: 5, sort: 2, jockey: 2, replDay: 3, replEve: 1 },
-  7: { fc: 7, sort: 0, jockey: 2, replDay: 3, replEve: 1 },
+  5: { fc: 8, sort: 0, jockey: 2, replDay: 5, replEve: 1 },
+  // 6F: 라인 6명(줄 3개에 2명씩 — 한 줄에서 색으로 내 몫 구분) + 분배 2명, 자키 3명(라인에 상품 박스 공급) [사용자 2026-11-25 "라인 2~3명·분배 2명", "라인 줄 수에 맞게"]
+  6: { fc: 5, sort: 8, jockey: 3, replDay: 5, replEve: 1 },
+  7: { fc: 7, sort: 0, jockey: 2, replDay: 5, replEve: 1 },
 };
 
 /** 작업 시간·속도 [가정] — 라인 1인 하루 약 2만 걸음 [현장] 을 보정 목표로 */
@@ -208,6 +212,27 @@ export const WORK = {
   regionScan: 4,
   /** 지역 카트에 MFC 작업을 몇 개까지 모으나 [가정] */
   cartMaxTasks: 3,
+  /** 6F 라인 작업자 수(나머지 분류 인원은 분배), 한 줄에 몇 명 [가정] */
+  lineWorkers: 6,
+  perLine: 2,
+  /** 무거운 상자(5F C·D) 피킹 시간 배수 [가정 — 현장 "무거운 상자 존"] */
+  heavyFactor: 1.8,
+  /** 분배 수량 실수 확률 · 다시 세는 시간(s) [가정 — 현장 "자잘한 야채가 많아 수량 실수가 잦다"] */
+  splitMistake: 0.04,
+  recount: 25,
+  /** 작업자 속도 차이(배수 범위) [가정] */
+  pace: [0.85, 1.15] as const,
+  /** 좁은 선반 통로에 다른 사람이 있으면 기다리는 시간(s) [가정] */
+  aisleBlockWait: 6,
+  /** 휠소터: 투입 → MFC 롤테이너까지(s) [가정] */
+  sorterTravel: 45,
+  /** 오토스토어 포트: 로봇이 통을 가져오는 시간(s, 줄마다) [가정] */
+  portBin: 12,
+  /** 라인 공급: 자키가 모아 가는 기준 — 상품 박스 수 또는 기다린 시간(s) [가정] */
+  lineBatch: 10,
+  lineWaitMax: 300,
+  /** 지하 상차 전 박스 스캔 대조(s/박스) [현장 "박스 작업자들이 확인하고 트럭에 싣고"] */
+  loadScan: 3,
   sortStart: 10,
   sortPerUnit: 1.2,
   /** 자키: 롤테이너 싣고 내리기(초), 한 번에 옮기는 박스 수 */

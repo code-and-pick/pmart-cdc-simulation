@@ -23,7 +23,12 @@ export function makeTransfers(catalog: Catalog, baseDate: string, seed: number, 
   const day = baseDate.replace(/-/g, '').slice(2);
   return MFCS.flatMap((m) => {
     const picked = new Set<number>();
-    while (picked.size < Math.min(linesPerMfc, catalog.skus.length)) picked.add(rng.int(0, catalog.skus.length - 1));
+    const want = Math.min(linesPerMfc, catalog.skus.length);
+    // 잘 나가는 상품(모든 MFC 가 같이 요청) — 카탈로그 33번째마다(약 3%)
+    const step = Math.max(1, Math.round(1 / SUPPLY.popularPool));
+    const pool = catalog.skus.map((_, i) => i).filter((i) => i % step === 0);
+    while (picked.size < Math.min(Math.round(want * SUPPLY.popularShare), pool.length)) picked.add(pool[rng.int(0, pool.length - 1)]);
+    while (picked.size < want) picked.add(rng.int(0, catalog.skus.length - 1));
     const lines = [...picked].sort((a, b) => a - b).map((i) => ({ sku: catalog.skus[i].sku, temp: catalog.skus[i].temp, approvedQty: rng.int(SUPPLY.qty[0], SUPPLY.qty[1]) }));
     return TEMPS.map((temp) => ({ temp, ls: lines.filter((l) => l.temp === temp) }))
       .filter((g) => g.ls.length > 0)

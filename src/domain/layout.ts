@@ -36,6 +36,8 @@ export interface Location {
   face?: 1 | -1;
   /** 칸 중심(표시용) */
   pos: { x: number; y: number; z: number };
+  /** 오토스토어 빈 — 선반을 그리지 않고, 집는 곳은 오토스토어 포트 */
+  bin?: true;
 }
 
 export interface RackRow {
@@ -71,6 +73,8 @@ export interface Equip {
   kind: EquipKind;
   label: string;
   rect: Rect;
+  /** 입고 검수 온도대 */
+  temp?: Temp;
 }
 
 export interface Lift {
@@ -234,6 +238,11 @@ export function zoneAisles(): Map<string, number> {
   return out;
 }
 
+/** 설비 구역 id — 입고 검수는 온도대마다 하나라 온도를 붙인다 */
+export function equipZoneId(floor: FloorNo, e: { kind: EquipKind; temp?: Temp }): string {
+  return `${floor}-${e.kind}${e.temp ? `-${e.temp}` : ''}`;
+}
+
 export function buildLayout(): Layout {
   const plan = sitePlan();
   const { width, depth, bandDepth } = plan;
@@ -354,13 +363,15 @@ export function buildLayout(): Layout {
         const need = Math.max(quota.get(z.letter) ?? 0, shelfTarget.get(z.letter) ?? 0);
         const nAisles = Math.max(1, Math.ceil(need / perAisle));
         const zx0 = shx - 0.3;
+        const bins = !!z.bins;
+        const shx0 = shx;
         for (let k = 0; k < nAisles; k++) {
           const no = SHELF.aisleBase + k;
           const cx = shx + shelfPitch / 2;
-          shelfAisles.push({ zone: z.letter, temp: z.temp, no, cx, plate: `${z.letter}${no}` });
+          if (!bins) shelfAisles.push({ zone: z.letter, temp: z.temp, no, cx, plate: `${z.letter}${no}` });
           for (const side of ['E', 'W'] as const) {
             const rx = cx + (side === 'E' ? 1 : -1) * (SHELF.aisleW / 2 + SHELF.depth / 2);
-            shelfRows.push({ zone: z.letter, temp: z.temp, aisle: no, side, cx: rx, z0: uz0, z1: uz0 + unitsPerSide * SHELF.unitLen, units: unitsPerSide });
+            if (!bins) shelfRows.push({ zone: z.letter, temp: z.temp, aisle: no, side, cx: rx, z0: uz0, z1: uz0 + unitsPerSide * SHELF.unitLen, units: unitsPerSide });
             for (let j = 0; j < unitsPerSide; j++) {
               const bay = side === 'E' ? 2 * j + 1 : 2 * j + 2;
               for (let level = 1; level <= SHELF.levels; level++) {
@@ -379,12 +390,17 @@ export function buildLayout(): Layout {
                     capacity: SHELF.slotUnits,
                     face: side === 'E' ? -1 : 1,
                     pos: { x: rx, y: 0.15 + ((level - 1) * (SHELF.height - 0.25)) / SHELF.levels, z: uz0 + j * SHELF.unitLen + ((slot - 0.5) * SHELF.unitLen) / SHELF.slots },
+                    ...(bins ? { bin: true as const } : {}),
                   });
                 }
               }
             }
           }
           shx += shelfPitch;
+        }
+        if (bins) {
+          shx = shx0;
+          continue;
         }
         zones.push({ id: `${spec.floor}-${z.letter}-SHELF`, label: `${z.label} 피킹 선반`, temp: z.temp, kind: 'SHELF', rect: { x0: zx0, z0: sz0, x1: shx - 0.3, z1: sz1 } });
         shx += 0.6;
@@ -394,18 +410,34 @@ export function buildLayout(): Layout {
     // 띠 설비(휠소터·DPS·오토스토어) — 선반 동쪽, 선반과 같은 줄
     const band = spec.equipment.filter((e) => e.where === 'band');
     const bandX0 = shx + 1.5;
-    const bandW = (width - bandX0 - 1) / Math.max(1, band.length);
-    if (band.length && bandW < 9) throw new Error(`${spec.floor}F 띠 설비 자리 부족(${bandW.toFixed(1)}m)`);
-    band.forEach((e, i) => equipment.push({ kind: e.kind, label: e.label, rect: { x0: bandX0 + i * bandW, z0: sz0, x1: bandX0 + (i + 1) * bandW - 1, z1: sz1 } }));
-    const east = spec.equipment.filter((e) => e.where === 'east');
-    if (east.length) {
-      if (width - storageEast < 6) throw new Error(`${spec.floor}F 동쪽 작업장 폭 부족`);
-      const h = (depth - bandDepth - 2) / east.length;
-      east.forEach((e, i) => equipment.push({ kind: e.kind, label: e.label, rect: { x0: storageEast + 1, z0: bandDepth + 1 + i * h, x1: width - 1, z1: bandDepth + (i + 1) * h } }));
-    } else if (width - storageEast > 2) {
-      zones.push({ id: `${spec.floor}-DT`, label: '작업장 (DT)', temp: null, kind: 'BAND', rect: { x0: storageEast, z0: bandDepth, x1: width, z1: depth } });
+    const wsum = band.reduce((a, e) => a + (e.weight ?? 1), 0);
+    const unit = (width - bandX0 - 1) / Math.max(1, wsum);
+    let bx = bandX0;
+    for (const e of band) {
+      const w = Math.min(unit * (e.weight ?? 1), e.maxW ?? Infinity);
+      if (w < 5) throw new Error(`${spec.floor}F 띠 설비 자리 부족(${e.label} ${w.toFixed(1)}m)`);
+      equipment.push({ kind: e.kind, label: e.label, temp: e.temp, rect: { x0: bx, z0: sz0, x1: bx + w - 1, z1: sz1 } });
+      bx += w;
     }
-    for (const e of equipment) zones.push({ id: `${spec.floor}-${e.kind}`, label: e.label, temp: null, kind: 'EQUIP', rect: e.rect });
+    // 오토스토어 빈 칸 — 자리는 오토스토어 안(그리지 않음)
+    const auto = equipment.find((e) => e.kind === 'AUTOSTORE');
+    for (const l of shelves) if (l.bin && auto) l.pos = { x: (auto.rect.x0 + auto.rect.x1) / 2, y: 1, z: (auto.rect.z0 + auto.rect.z1) / 2 };
+    const east = spec.equipment.filter((e) => e.where === 'east');
+    // 동쪽 DT: len 이 있으면 그 길이만, 없으면 남은 길이를 나눠 갖는다. 남는 곳은 작업장(DT)
+    let ez = bandDepth + 1;
+    if (east.length) {
+      if (width - storageEast < 5) throw new Error(`${spec.floor}F 동쪽 작업장 폭 부족`);
+      const fixed = east.reduce((a, e) => a + (e.len ?? 0), 0);
+      const free = east.filter((e) => e.len === undefined).length;
+      const h = free ? (depth - bandDepth - 2 - fixed) / free : 0;
+      for (const e of east) {
+        const len = e.len ?? h;
+        equipment.push({ kind: e.kind, label: e.label, rect: { x0: storageEast + 1, z0: ez, x1: width - 1, z1: ez + len - 1 } });
+        ez += len;
+      }
+    }
+    if (width - storageEast > 2 && ez < depth - 3) zones.push({ id: `${spec.floor}-DT`, label: '작업장 (DT)', temp: null, kind: 'BAND', rect: { x0: storageEast, z0: ez, x1: width, z1: depth } });
+    for (const e of equipment) zones.push({ id: equipZoneId(spec.floor, e), label: e.label, temp: e.temp ?? null, kind: 'EQUIP', rect: e.rect });
 
     const m2 = (r: Rect) => (r.x1 - r.x0) * (r.z1 - r.z0);
     const storageM2 = rooms.reduce((s, r) => s + m2(r.rect), 0);
@@ -474,21 +506,13 @@ export function shelfTargets(): Map<string, number> {
 }
 
 /**
- * 구역별 SKU 수 [시뮬] — 팔레트 통로 수에 비례, 최대 나머지 방식으로 합이 정확히 CATALOG.skus.
+ * 구역별 SKU 수 [시뮬] — 선반 목표 칸(칸 하나 = SKU 하나, MFC 10,900 SKU 설계 B-1) 그대로. 5F 상온 C~F 는 CATALOG.minZoneSkus.
  * 선반 칸 수와 가짜 상품 마스터(catalog.ts)가 함께 쓴다.
  */
 export function skuQuota(): Map<string, number> {
   const zs = CHILGOK_FLOORS.flatMap((f) => f.zones);
-  const na = zoneAisles();
-  const total = zs.reduce((s, z) => s + na.get(z.letter)!, 0);
-  const q = zs.map((z) => ({ z: z.letter, exact: (na.get(z.letter)! / total) * CATALOG.skus }));
-  const out = new Map(q.map((x) => [x.z, Math.floor(x.exact)]));
-  let left = CATALOG.skus - [...out.values()].reduce((a, b) => a + b, 0);
-  for (const x of [...q].sort((a, b) => (b.exact % 1) - (a.exact % 1))) {
-    if (left-- <= 0) break;
-    out.set(x.z, out.get(x.z)! + 1);
-  }
-  return out;
+  const t = shelfTargets();
+  return new Map(zs.map((z) => [z.letter, z.shelfShare === 0 ? CATALOG.minZoneSkus : t.get(z.letter)!]));
 }
 
 /** 칸 용량 배분 — 무게대로 나누고 나머지는 큰 소수부부터 1씩(합이 정확히 total) [가정] */

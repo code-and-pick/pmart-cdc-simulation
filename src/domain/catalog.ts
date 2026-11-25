@@ -19,13 +19,15 @@ export interface SeedLot {
  * 상품 작업 방식 [사용자 2026-11-25, 설계 §5.4] — DPS(5F 냉동, 불 켜지는 선반) · BOX(5F 무거운 상자 박스 피킹) · FC(PDA 피킹, 지역 카트) ·
  * SPLIT(6F 야채 분배) · LINE(6F 그 밖 냉장 — 라인(DAS), 자키가 박스를 라인에 가져다줌)
  */
-export type Handling = 'DPS' | 'BOX' | 'FC' | 'SPLIT' | 'LINE';
+export type Handling = 'DPS' | 'BOX' | 'FC' | 'SPLIT' | 'LINE' | 'PORT';
 /** 6F 야채(분배로 가는 것) [사용자 "야채는 분배, 나머지는 라인"] */
 const VEG = new Set(['샐러드', '콩나물', '버섯', '양배추']);
 export function handlingOf(zone: string, word: string): Handling {
   if (zone === 'A') return 'DPS';
   if (zone === 'C' || zone === 'D') return 'BOX';
   if (zone === 'B') return VEG.has(word) ? 'SPLIT' : 'LINE';
+  // 7F H 비식재 소형 — 오토스토어 포트 [사용자 2026-11-25]
+  if (zone === 'H') return 'PORT';
   return 'FC';
 }
 
@@ -98,6 +100,7 @@ export function buildCatalog(layout: Layout, baseDate: string): Catalog {
       for (let i = 0; i < n; i++) {
         const shelf = zShelves[i];
         const base = bases[Math.floor((i * bases.length) / n)];
+        const share = Math.max(1, Math.ceil(n / Math.max(1, bases.length)));
         const column: Location[] = [];
         for (let lv = 1; ; lv++) {
           const loc = byCode.get(base.code.replace(/-1-(\d)$/, `-${lv}-$1`));
@@ -130,7 +133,7 @@ export function buildCatalog(layout: Layout, baseDate: string): Catalog {
               lot: loc.level <= 2 ? lot1 : lot2,
               expiresAt: loc.level <= 2 ? e1 : e2,
               locationCode: loc.code,
-              qty: Math.max(1, Math.round(loc.capacity * fill(CATALOG.reserveFill))),
+              qty: Math.max(1, Math.round((loc.capacity * fill(CATALOG.reserveFill)) / share)),
             })),
           ],
         });

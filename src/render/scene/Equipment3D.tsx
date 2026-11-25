@@ -12,8 +12,8 @@ import { useApp } from '../../app/context';
 import { MFCS } from '../../config';
 import type { Equip } from '../../domain/layout';
 import type { FloorNo } from '../../domain/sites/chilgok';
-import { dasRows, mfcSlotIndex } from '../../sim/site';
-import { boxTexture, plateTexture } from '../sprites';
+import { autostorePorts, dasRows, mfcSlotIndex } from '../../sim/site';
+import { boxTexture, palletTexture, plateTexture } from '../sprites';
 import { StaticMerge } from './StaticMerge';
 
 const BLUE = 0x1f63d0;
@@ -325,8 +325,10 @@ function FlowBoxes({ path, n, busy, color = 0xd2a679, size = [0.5, 0.32, 0.38] }
  * 1차 고속분류기(휠소터) — 남북 본선(투입은 남쪽: FC 카트가 오는 북쪽 통로 반대편이 아니라 띠 남쪽 끝), 갈래 5개(MFC 별)를 동서로 번갈아,
  * 갈래 끝에 그 MFC 롤테이너. 분류 작업자가 일하면 박스가 본선 → 갈래로 흐른다.
  */
-function WheelSorter({ e, floor }: { e: Equip; floor: FloorNo }) {
-  const busy = useBusy(floor);
+function WheelSorter({ e }: { e: Equip; floor: FloorNo }) {
+  const { sim } = useApp();
+  // 박스는 실제로 투입된 때만(최근 90초) 흐른다 — 장식 흐름 없앰(사용자 2026-11-25)
+  const busy = () => sim.speed > 0 && sim.sorterIn.length > 0 && sim.time - sim.sorterIn[sim.sorterIn.length - 1] < 90;
   const r = e.rect;
   const cx = (r.x0 + r.x1) / 2;
   const z0 = r.z0 + 1.2;
@@ -515,29 +517,132 @@ function qtyTexture(qty: number, color: string): THREE.CanvasTexture {
   return t;
 }
 
-/** DPS(냉동) — 흐름 선반 두 줄(표시등) + 사이 빈 박스 컨베이어 */
-function Dps({ e, floor }: { e: Equip; floor: FloorNo }) {
-  const busy = useBusy(floor);
+/** DPS 박스 컨베이어 — DPS 피킹은 냉동 선반에서, 여기는 MFC 빈 박스가 들어오고 닫은 박스가 나가는 컨베이어만(사용자 2026-11-25) */
+function DpsConveyor({ e, floor }: { e: Equip; floor: FloorNo }) {
+  const { sim } = useApp();
+  const busy = () => sim.speed > 0 && sim.lights.some((l) => l.floor === floor && l.kind === 'DPS');
   const r = e.rect;
-  const cx = (r.x0 + r.x1) / 2;
-  const len = r.z1 - r.z0 - 2.4;
+  const len = r.z1 - r.z0 - 1.2;
   const cz = (r.z0 + r.z1) / 2;
+  const xs = [(r.x0 + r.x1) / 2 - 0.9, (r.x0 + r.x1) / 2 + 0.9];
   return (
     <group>
-      <Conveyor x={cx} z={cz} len={len} dir="z" w={0.7} h={0.8} />
-      {[-1, 1].map((s) => (
-        <group key={s}>
-          <BlueFrame x={cx + s * 2.0} z={cz} len={len} depth={1.2} h={2.0} dir="z" levels={4} />
-          {[0.5, 1.0, 1.5, 2.0].map((y) => (
-            <mesh key={y} position={[cx + s * 2.0, y - 0.05, cz]}>
-              <boxGeometry args={[1.1, 0.03, len]} />
-              <meshStandardMaterial color={0xcfe0f5} />
-            </mesh>
-          ))}
-          <LightStrip x={cx + s * 1.35} y={1.0} z={cz} len={len} dir="z" busy={() => false} />
+      {xs.map((x) => (
+        <Conveyor key={x} x={x} z={cz} len={len} dir="z" w={0.7} h={0.8} />
+      ))}
+      {/* 빈 박스 들어옴(남 → 북) · 닫은 박스 나감(북 → 남) */}
+      <FlowBoxes path={[new THREE.Vector3(xs[0], 0.86, r.z1 - 0.6), new THREE.Vector3(xs[0], 0.86, r.z0 + 0.6)]} n={4} busy={busy} color={0xe6e9ee} size={[0.42, 0.28, 0.32]} />
+      <FlowBoxes path={[new THREE.Vector3(xs[1], 0.86, r.z0 + 0.6), new THREE.Vector3(xs[1], 0.86, r.z1 - 0.6)]} n={4} busy={busy} color={0xd2a679} size={[0.42, 0.3, 0.32]} />
+    </group>
+  );
+}
+
+/**
+ * 입고 검수 — 온도대마다(사용자 2026-11-25 "입고 검수 구역 … 온도별로 각각"). 승강기로 올라온 입고 팔레트를 내려놓고 수량·기한·온도를 확인하는 자리.
+ * 입고 업무 자체는 시뮬레이션 범위 밖(scope S-3) — 자리·모형만. 저온은 랩 위 은색 보냉 덮개.
+ */
+function Inbound({ e }: { e: Equip }) {
+  const r = e.rect;
+  const cold = e.temp && e.temp !== 'AMBIENT';
+  const cols = Math.max(2, Math.floor((r.x1 - r.x0 - 3) / 1.6));
+  return (
+    <group>
+      {/* 바닥 노란 칸선(팔레트 자리) */}
+      {Array.from({ length: cols }, (_, i) => (
+        <group key={i} position={[r.x0 + 1.2 + i * 1.6, 0, r.z0 + 2.2]}>
+          <mesh rotation-x={-Math.PI / 2} position={[0, 0.012, 0]}>
+            <ringGeometry args={[0.72, 0.78, 4, 1, Math.PI / 4]} />
+            <meshBasicMaterial color={0xf2c94c} />
+          </mesh>
+          {i % 3 !== 2 && (
+            <>
+              <mesh position={[0, 0.07, 0]}>
+                <boxGeometry args={[1.1, 0.14, 1.1]} />
+                <meshStandardMaterial color={0xd9b98a} roughness={0.85} map={palletTexture()} />
+              </mesh>
+              <mesh position={[0, 0.14 + 0.55, 0]}>
+                <boxGeometry args={[1.0, 1.1, 1.0]} />
+                <meshStandardMaterial color={cold ? 0xdde2e8 : 0xd2a679} roughness={cold ? 0.35 : 0.85} map={cold ? null : boxTexture()} />
+              </mesh>
+            </>
+          )}
         </group>
       ))}
-      <FlowBoxes path={[new THREE.Vector3(cx, 0.86, r.z1 - 1.2), new THREE.Vector3(cx, 0.86, r.z0 + 1.2)]} n={Math.max(3, Math.floor(len / 3))} busy={busy} color={0xd2a679} size={[0.42, 0.28, 0.32]} />
+      {/* 검수대(스캐너·모니터) */}
+      <group position={[(r.x0 + r.x1) / 2, 0, r.z1 - 1.6]}>
+        <mesh position={[0, 0.45, 0]}>
+          <boxGeometry args={[2.4, 0.9, 0.8]} />
+          <meshStandardMaterial color={0xf3f4f6} roughness={0.6} />
+        </mesh>
+        <mesh position={[0.6, 1.15, -0.2]}>
+          <boxGeometry args={[0.5, 0.36, 0.04]} />
+          <meshStandardMaterial color={0x1f2430} emissive={0x274b7a} emissiveIntensity={0.5} />
+        </mesh>
+        <mesh position={[-0.5, 0.95, 0.1]}>
+          <boxGeometry args={[0.12, 0.1, 0.2]} />
+          <meshStandardMaterial color={0xf2c94c} />
+        </mesh>
+      </group>
+    </group>
+  );
+}
+
+/** DC 관리자 사무실 — 유리 칸막이·책상·의자·모니터·화이트보드(사용자 2026-11-25 "7층에 dc 관리자 사무실") */
+function Office({ e }: { e: Equip }) {
+  const r = e.rect;
+  const w = r.x1 - r.x0;
+  const d = r.z1 - r.z0;
+  const cx = (r.x0 + r.x1) / 2;
+  const desks = Math.max(2, Math.floor((d - 3) / 2.4));
+  return (
+    <group>
+      {/* 유리 칸막이(서쪽·북쪽·남쪽) — 서쪽 가운데 문 */}
+      {[
+        [r.x0, r.z0 + (d / 2 - 0.8) / 2, 0.06, d / 2 - 0.8],
+        [r.x0, r.z1 - (d / 2 - 0.8) / 2, 0.06, d / 2 - 0.8],
+        [cx, r.z0, w, 0.06],
+        [cx, r.z1, w, 0.06],
+      ].map(([x, z, sx, sz], i) => (
+        <mesh key={i} position={[x, 1.25, z]} raycast={() => null}>
+          <boxGeometry args={[sx, 2.5, sz]} />
+          <meshStandardMaterial color={0xcfe3f7} transparent opacity={0.35} depthWrite={false} />
+        </mesh>
+      ))}
+      {Array.from({ length: desks }, (_, i) => {
+        const z = r.z0 + 2 + i * 2.4;
+        return (
+          <group key={i} position={[cx + 0.3, 0, z]}>
+            <mesh position={[0, 0.74, 0]}>
+              <boxGeometry args={[1.4, 0.05, 0.75]} />
+              <meshStandardMaterial color={0xe8e2d6} />
+            </mesh>
+            {[-0.62, 0.62].map((dx) => (
+              <mesh key={dx} position={[dx, 0.37, 0]}>
+                <boxGeometry args={[0.05, 0.74, 0.7]} />
+                <meshStandardMaterial color={0x9aa1ab} />
+              </mesh>
+            ))}
+            <mesh position={[0.35, 1.02, 0]} rotation-y={-Math.PI / 2}>
+              <boxGeometry args={[0.55, 0.34, 0.03]} />
+              <meshStandardMaterial color={0x1f2430} emissive={0x2a5a9a} emissiveIntensity={0.45} />
+            </mesh>
+            {/* 의자 */}
+            <mesh position={[-0.75, 0.45, 0]}>
+              <boxGeometry args={[0.45, 0.08, 0.45]} />
+              <meshStandardMaterial color={0x2f3542} />
+            </mesh>
+            <mesh position={[-0.97, 0.75, 0]}>
+              <boxGeometry args={[0.06, 0.55, 0.45]} />
+              <meshStandardMaterial color={0x2f3542} />
+            </mesh>
+          </group>
+        );
+      })}
+      {/* 화이트보드(동쪽 벽) */}
+      <mesh position={[r.x1 - 0.08, 1.4, r.z1 - 2]} rotation-y={-Math.PI / 2}>
+        <planeGeometry args={[2.2, 1.1]} />
+        <meshStandardMaterial color={0xffffff} />
+      </mesh>
     </group>
   );
 }
@@ -549,9 +654,9 @@ function AutoStore({ e }: { e: Equip }) {
   const H = 4.4;
   const cell = 0.7;
   const nx = Math.floor((r.x1 - r.x0 - 1) / cell);
-  const nz = Math.floor((r.z1 - r.z0 - 3) / cell);
+  const nz = Math.floor((r.z1 - r.z0 - 2.8) / cell);
   const x0 = r.x0 + 0.5;
-  const z0 = r.z0 + 0.5;
+  const z0 = r.z0 + 2.3;
   const gw = nx * cell;
   const gd = nz * cell;
   const bars = useRef<THREE.InstancedMesh>(null!);
@@ -618,8 +723,8 @@ function AutoStore({ e }: { e: Equip }) {
         <meshStandardMaterial color={0xe5322d} />
       </instancedMesh>
       {/* 포트(작업자가 빈에서 꺼내 MFC 박스에 담는 자리) */}
-      {[0.3, 0.7].map((k) => (
-        <group key={k} position={[x0 + gw * k, 0, z0 + gd + 1.0]}>
+      {autostorePorts(r).map((px) => (
+        <group key={px} position={[px, 0, r.z0 + 0.9]}>
           <mesh position={[0, 0.5, 0]}>
             <boxGeometry args={[1.4, 1.0, 1.2]} />
             <meshStandardMaterial color={0x3a3f4a} />
@@ -639,6 +744,8 @@ export function EquipmentModel({ e, floor }: { e: Equip; floor: FloorNo }) {
   if (e.kind === 'WHEEL_SORTER') return <WheelSorter e={e} floor={floor} />;
   if (e.kind === 'DAS') return <DasLines e={e} floor={floor} split={false} />;
   if (e.kind === 'SPLIT') return <DasLines e={e} floor={floor} split />;
-  if (e.kind === 'DPS') return <Dps e={e} floor={floor} />;
+  if (e.kind === 'DPS') return <DpsConveyor e={e} floor={floor} />;
+  if (e.kind === 'INBOUND') return <Inbound e={e} />;
+  if (e.kind === 'OFFICE') return <Office e={e} />;
   return <AutoStore e={e} />;
 }

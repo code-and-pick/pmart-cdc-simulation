@@ -33,6 +33,14 @@ export class FloorSite {
 
   /** 칸 앞 서는 자리 — 선반은 선반 통로 가운데, 팔레트는 랙 통로 가운데(지게차) */
   front(loc: Location): WalkPoint {
+    if (loc.bin) {
+      // 오토스토어 빈: 작업자는 포트 앞에 서고 로봇이 통을 가져온다
+      const e = this.f.equipment.find((x) => x.kind === 'AUTOSTORE');
+      if (e) {
+        const ports = autostorePorts(e.rect);
+        return { x: ports[loc.bay % ports.length], z: this.f.walk.northZ, lane: 'N' };
+      }
+    }
     if (loc.type === 'PICK_FACE') {
       const x = this.shelfAisleX.get(`${loc.zone}${loc.aisle}`) ?? loc.pos.x;
       return { x, z: loc.pos.z, lane: 'S' };
@@ -74,6 +82,29 @@ export class FloorSite {
     if (!e) return this.home();
     if (e.rect.z0 >= this.layout.bandDepth) return { x: e.rect.x0 + 2, z: this.f.walk.rackZ, lane: 'R' };
     return { x: (e.rect.x0 + e.rect.x1) / 2, z: this.f.walk.northZ, lane: 'N' };
+  }
+
+  /** 선반 통로 입구(북쪽 통로 위) — 지게차는 여기까지만 [사용자 2026-11-25] */
+  shelfEntrance(loc: Location): WalkPoint {
+    const x = this.shelfAisleX.get(`${loc.zone}${loc.aisle}`) ?? loc.pos.x;
+    return { x, z: this.f.walk.northZ, lane: 'N' };
+  }
+
+  /** 라인 공급대 — FC 가 라인용 상품 박스를 내려놓는 곳(선반 동쪽 끝, 북쪽 통로). 자키가 여기서 라인으로 */
+  lineBuffer(): WalkPoint {
+    const xs = this.f.shelfAisles.map((a) => a.cx);
+    return { x: (xs.length ? Math.max(...xs) : 10) + 3, z: this.f.walk.northZ, lane: 'N' };
+  }
+
+  /** 휠소터 투입구(북쪽 통로)·MFC m 갈래 끝 */
+  sorterIn(): WalkPoint {
+    return this.dropAt('WHEEL_SORTER');
+  }
+  sorterOut(m: number): WalkPoint {
+    const e = this.f.equipment.find((x) => x.kind === 'WHEEL_SORTER');
+    if (!e) return this.home();
+    const l = sorterLanes(e.rect)[m % MFCS.length];
+    return { x: l.x, z: l.z, lane: 'N' };
   }
 
   /** 대기 자리 — 첫 승강기 앞 */
@@ -182,4 +213,24 @@ export function dasRows(r: Rect): DasRow[] {
 /** MFC m(0~)이 쓰는 칸 번호 — 줄 앞쪽부터 띄엄띄엄 */
 export function mfcSlotIndex(m: number, n: number): number {
   return Math.min(n - 1, 2 + m * Math.max(1, Math.floor((n - 4) / MFCS.length)));
+}
+
+/** 오토스토어 포트 x 들 — 북쪽(통로 쪽) 면에 둘. 화면(AutoStore)과 같은 계산 */
+export function autostorePorts(r: Rect): number[] {
+  const nx = Math.floor((r.x1 - r.x0 - 1) / 0.7);
+  const x0 = r.x0 + 0.5;
+  const gw = nx * 0.7;
+  return [x0 + gw * 0.3, x0 + gw * 0.7];
+}
+
+/** 휠소터 MFC 갈래 — 갈래 끝 롤테이너 자리(x, z). 화면(WheelSorter)과 같은 계산 */
+export function sorterLanes(r: Rect): { x: number; z: number; side: number }[] {
+  const cx = (r.x0 + r.x1) / 2;
+  const z0 = r.z0 + 1.2;
+  const z1 = r.z1 - 1.2;
+  const laneLen = Math.min(4.2, (r.x1 - r.x0) / 2 - 1.4);
+  return MFCS.map((_, i) => {
+    const side = i % 2 ? 1 : -1;
+    return { x: cx + side * (laneLen + 1.1), z: z0 + ((i + 0.7) * (z1 - z0)) / (MFCS.length + 0.4), side };
+  });
 }

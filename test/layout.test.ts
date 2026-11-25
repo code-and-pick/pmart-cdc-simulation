@@ -56,7 +56,7 @@ describe('층·구역 배치 [정본 CDC-2, R-10]', () => {
     const shelves = L.floors.flatMap((f) => f.shelves);
     expect(shelves.every((l) => l.type === 'PICK_FACE' && l.aisle >= 61 && l.aisle < 90 && l.level <= 5 && l.slot <= 3)).toBe(true);
     for (const [z, n] of skuQuota()) expect(shelves.filter((l) => l.zone === z).length).toBeGreaterThanOrEqual(n);
-    expect([...skuQuota().values()].reduce((a, b) => a + b, 0)).toBe(2000);
+    expect([...skuQuota().values()].reduce((a, b) => a + b, 0)).toBeGreaterThanOrEqual(10_900); // MFC 10,900 SKU 설계(B-1)
   });
 
   it('피킹 선반 칸 — MFC 10,900 SKU 설계에 맞춤: 냉동 ≥ 2,180 · 냉장 ≥ 3,270 · 상온 ≥ 5,450, 통로 61~89 [사용자 2026-11-25, 백엔드 B-1]', () => {

@@ -61,6 +61,8 @@ function Person({ a, selected }: { a: Agent; selected: boolean }) {
   const jack = useRef<THREE.Group>(null);
   const load = useRef<THREE.Group>(null);
   const last = useRef<{ x: number; z: number } | null>(null);
+  const truckG = useRef<THREE.Group>(null);
+  const figG = useRef<THREE.Group>(null);
   const look = useMemo(() => lookOf(a), [a]);
   const truck = a.role === 'REPL';
   // 클릭 판정(Core.Picker)이 사람을 먼저 잡도록 등록
@@ -79,8 +81,16 @@ function Person({ a, selected }: { a: Agent; selected: boolean }) {
     const p = last.current;
     const moved = p ? Math.hypot(a.pos.x - p.x, a.pos.z - p.z) : 0;
     last.current = { x: a.pos.x, z: a.pos.z };
+    // 지게차: 타고 있으면 운전석에 서고, 세워 두면(선반 입구) 지게차는 그 자리에 두고 사람만 걷는다
+    const riding = truck && !a.parked;
+    if (truckG.current) {
+      const pk = a.parked;
+      truckG.current.position.set(pk ? pk.x : a.pos.x, 0, pk ? pk.z : a.pos.z);
+      truckG.current.rotation.y = pk ? pk.heading : a.heading;
+    }
+    figG.current?.position.set(0, riding ? 0.22 : 0, riding ? -0.55 : 0);
     const pushing = !truck && a.carrying !== null;
-    fig.current?.animate(truck || moved > 0.5 ? 0 : moved, dt, pushing ? 'push' : 'walk');
+    fig.current?.animate(riding || moved > 0.5 ? 0 : moved, dt, pushing ? 'push' : 'walk');
     fig.current?.highlight(selected);
     cart.current!.visible = a.carrying === 'CART';
     roll.current!.visible = a.carrying === 'ROLL' && !a.cold;
@@ -89,23 +99,22 @@ function Person({ a, selected }: { a: Agent; selected: boolean }) {
     if (load.current) load.current.visible = a.carrying === 'PALLET';
   });
   return (
+    <>
+    {truck && (
+      <group ref={truckG}>
+        <ReachTruck load={load} />
+      </group>
+    )}
     <group ref={g}>
       {/* 클릭 판정(보이지 않음) */}
       <mesh position-y={0.9}>
         <boxGeometry args={[0.6, 1.8, 0.5]} />
         <meshBasicMaterial visible={false} />
       </mesh>
-      {truck ? (
-        <>
-          <ReachTruck load={load} />
-          {/* 운전자: 뒤 운전석에 서서(사진 — 입식 리치 지게차) */}
-          <group position={[0, 0.22, -0.55]}>
-            <Humanoid ref={fig} look={look} />
-          </group>
-        </>
-      ) : (
+      {/* 사람(지게차를 타면 운전석 자리로 올림 — useFrame) */}
+      <group ref={figG}>
         <Humanoid ref={fig} look={look} />
-      )}
+      </group>
       {/* FC 피킹 카트(MFC 카트 모양) — 안에 MFC 상자 무늬 상자 */}
       <group ref={cart} position={[0, 0, 0.66]} visible={false}>
         <PickCart />
@@ -127,6 +136,7 @@ function Person({ a, selected }: { a: Agent; selected: boolean }) {
         </mesh>
       )}
     </group>
+    </>
   );
 }
 

@@ -4,6 +4,7 @@ import { checkReadiness, READINESS_KO, type ProbeResult } from '../backend/http/
 import { useApp, useTick, useView } from '../app/context';
 import { CDC_FACTS, MFCS, OUTBOUND, SHIFT, WORK, WORKFORCE, RACK } from '../config';
 import { ROLE_KO, type Role } from '../sim/agent';
+import { equipZoneId } from '../domain/layout';
 
 function Sec({ title, aside, children }: { title: string; aside?: ReactNode; children: ReactNode }) {
   return (
@@ -242,7 +243,7 @@ function ZoneBody({ zoneId }: { zoneId: string }) {
     );
   }
   // 설비
-  const e = f.equipment.find((x) => `${f.floor}-${x.kind}` === zone.id);
+  const e = f.equipment.find((x) => equipZoneId(f.floor, x) === zone.id);
   const q = sim.queues();
   const lit = sim.lights.filter((l) => l.floor === f.floor);
   const rows: [ReactNode, string][] =

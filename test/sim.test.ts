@@ -70,6 +70,9 @@ describe('하루 돌리기', () => {
     expect(sim.sealedBy.DIRECT).toBeGreaterThan(0);
     expect(sim.sealedBy.LINE).toBeGreaterThan(0);
     expect(sim.sealedBy.SPLIT).toBeGreaterThan(0);
+    expect(sim.sealedBy.SORTER).toBeGreaterThan(0); // C·D 박스는 휠소터
+    expect(sim.sealedBy.PORT).toBeGreaterThan(0); // 7F H 는 오토스토어 포트
+    expect(sim.lineLitMax).toBeGreaterThanOrEqual(2); // 라인: 스캔 한 번에 여러 MFC 칸 불(시험은 MFC 당 30줄이라 겹침이 적다)
     expect(sim.litCount).toBeGreaterThan(0);
     expect(sim.lights).toEqual([]);
     // 석간 FC 는 걸었다 — 걸음 수 표시용 거리

@@ -316,7 +316,7 @@ export function zoneCards(f: FloorLayout): Card[] {
     const x1 = Math.max(...shelves.map((z) => z.rect.x1));
     const letters = [...new Set(f.shelfAisles.map((a) => a.zone))].join('·');
     const cold = shelves.every((z) => z.temp === shelves[0].temp) ? zoneStyle(shelves[0]) : 'AMBIENT';
-    out.push(card(`${f.floor}-SHELVES`, '피킹 선반', `${letters} · ${f.shelves.length.toLocaleString()}칸`, cold, (x0 + x1) / 2, SHELF.height + 0.3, shelves[0].rect.z0 + 0.2, 2.2, Math.max(x1 - x0, 14)));
+    out.push(card(`${f.floor}-SHELVES`, '피킹 선반', `${letters} · ${f.shelves.filter((l) => !l.bin).length.toLocaleString()}칸`, cold, (x0 + x1) / 2, SHELF.height + 0.3, shelves[0].rect.z0 + 0.2, 2.2, Math.max(x1 - x0, 14)));
   }
   // 승강기·출고대기 — 북쪽 벽 위, 승강기·출고대기 줄 가운데
   const band = f.zones.find((z) => z.kind === 'BAND');
