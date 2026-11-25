@@ -503,7 +503,7 @@ function DasLines({ e, floor, split }: { e: Equip; floor: FloorNo; split: boolea
             {/* MFC 칸 이름(PPC 번호·MFC) */}
             {[...mfcAt].map(([i, m]) => (
               <sprite key={m.id} position={[slots[i], split ? 1.7 : 3.0, z + (split ? 1.0 : 1.35)]} scale={[1.5, 0.56, 1]}>
-                <spriteMaterial map={plateTexture(`PPC-${String(m.staging).padStart(2, '0')}\n${m.name.replace(/^\d호점 /, '')}`, { w: 256, h: 96 })} depthWrite={false} />
+                <spriteMaterial map={plateTexture(`MFC-${String(m.staging).padStart(2, '0')}\n${m.name.replace(/^\d호점 /, '')}`, { w: 256, h: 96 })} depthWrite={false} />
               </sprite>
             ))}
             <FlowBoxes path={[new THREE.Vector3(cx - len / 2, 0.84, z), new THREE.Vector3(cx + len / 2, 0.84, z)]} n={Math.max(3, Math.floor(len / 5))} busy={busy} color={split ? 0x3aa35a : 0xd7b07c} />

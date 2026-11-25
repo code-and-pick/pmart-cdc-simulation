@@ -320,16 +320,35 @@ export function StockSearch() {
   );
 }
 
-const KIND_KO: Record<string, string> = { INITIAL_BALANCE: '시작 재고', ALLOCATION: '할당(예약)', RELEASE: '예약 해제', MOVE: '위치 이동(피킹·보충)', TOUT: '출발 (CDC −q · Transit +q)', RECEIPT_ACK: 'MFC 수령 (Transit −r)' };
+const KIND_KO: Record<string, string> = { INITIAL_BALANCE: '시작 재고', ALLOCATION: '할당', RELEASE: '예약 해제', MOVE: '이동', TOUT: '출발', RECEIPT_ACK: 'MFC 수령' };
+/** 무엇이 바뀌나 — 한 줄 설명 */
+const KIND_HINT: Record<string, string> = {
+  ALLOCATION: '예약만 — 현물 그대로',
+  RELEASE: '예약 풀림',
+  MOVE: '칸만 바뀜 — 총현물 그대로',
+  TOUT: 'CDC −q · Transit +q',
+  RECEIPT_ACK: 'Transit −r',
+  INITIAL_BALANCE: '시드',
+};
+const REASON_KO: Record<string, string> = { TRANSFER_CHANGED: 'TRF 바뀜', RESIDUAL_CLOSED: '출발 뒤 남은 예약', PICK_SHORTAGE: '피킹 부족', PRE_DEPARTURE_CANCEL: '미출발 취소' };
+const KIND_ORDER = ['ALLOCATION', 'MOVE', 'RELEASE', 'TOUT', 'RECEIPT_ACK', 'INITIAL_BALANCE'] as const;
 
-/** 재고 변동 — 원장 커밋(할당·보충 이동·피킹·출발·MFC 수령), 종류 필터와 "위치 이동도" (사용자 §6-7) */
+/**
+ * 재고 변동 — 원장 커밋(할당·보충/피킹 이동·예약 해제·출발·MFC 수령). 사용자 2026-11-26 "변동탭이 보기 어려움":
+ * 위 종류 칩 = 건수 + 고르기, 줄마다 두 줄(무엇 · 수량 / 어디서 → 어디로), 시스템 ID 대신 화면 번호·MFC 이름·칸 짧은 이름.
+ */
 export function MovesBoard() {
-  const { backend } = useApp();
+  const { backend, sim, layout } = useApp();
   const [kinds, setKinds] = useState<Set<string>>(new Set(['ALLOCATION', 'RELEASE', 'TOUT', 'RECEIPT_ACK']));
-  const [moves, setMoves] = useState(false);
-  const list = backend.ledger
-    .commitList()
-    .filter((c) => kinds.has(c.postingKind) || (moves && c.postingKind === 'MOVE'))
+  const [picks, setPicks] = useState(false);
+  const locShort = useMemo(() => new Map(layout.floors.flatMap((f) => [...f.locations, ...f.shelves, ...f.staging, ...f.docks]).map((l) => [l.code, l.short] as [string, string])), [layout]);
+  const trfMfc = new Map(backend.listTransfers().map((t) => [t.trfId, t.mfcId] as [string, string]));
+  const all = backend.ledger.commitList();
+  const count = new Map<string, number>();
+  for (const c of all) count.set(c.postingKind, (count.get(c.postingKind) ?? 0) + 1);
+  const isPick = (c: (typeof all)[number]) => c.postingKind === 'MOVE' && !(c.sourceRef ?? '').startsWith('REPL:');
+  const list = all
+    .filter((c) => kinds.has(c.postingKind) && (picks || !isPick(c)))
     .slice(-200)
     .reverse();
   const toggle = (k: string) => {
@@ -338,32 +357,59 @@ export function MovesBoard() {
     else n.add(k);
     setKinds(n);
   };
+  const short = (code: string) => locShort.get(code) ?? code.split('-').slice(1).join('-');
+  const who = (c: (typeof all)[number]): string => {
+    const ref = c.sourceRef ?? '';
+    if (c.postingKind === 'ALLOCATION' || c.postingKind === 'RELEASE') {
+      const [trf, reason] = ref.split(':');
+      return `${sim.no('TRF', trf)} · ${mfcName(trfMfc.get(trf) ?? '').replace(/^\d호점 /, '')}${reason ? ` · ${REASON_KO[reason] ?? reason}` : ''}`;
+    }
+    if (c.postingKind === 'MOVE') return ref.startsWith('REPL:') ? `선반 보충 · ${sim.agents.find((a) => a.id === ref.slice(5))?.name ?? ref.slice(5)}` : `피킹 · 작업 ${sim.no('TASK', ref)}`;
+    if (c.postingKind === 'TOUT') return '노선 출발';
+    if (c.postingKind === 'RECEIPT_ACK') return 'MFC 수령 확인';
+    return '시작 재고';
+  };
   return (
     <div>
-      <div className="chips" style={{ marginBottom: 6 }}>
-        {['ALLOCATION', 'RELEASE', 'TOUT', 'RECEIPT_ACK', 'INITIAL_BALANCE'].map((k) => (
-          <button key={k} className={kinds.has(k) ? 'on' : ''} onClick={() => toggle(k)}>
-            {KIND_KO[k].split(' ')[0]}
+      <div className="mv-kinds">
+        {KIND_ORDER.map((k) => (
+          <button key={k} className={`mv-k k-${k} ${kinds.has(k) ? 'on' : ''}`} onClick={() => toggle(k)} title={KIND_HINT[k]}>
+            <b>{(count.get(k) ?? 0).toLocaleString()}</b>
+            <span>{KIND_KO[k]}</span>
           </button>
         ))}
-        <label style={{ fontSize: 12, marginLeft: 6 }}>
-          <input type="checkbox" checked={moves} onChange={(e) => setMoves(e.target.checked)} /> 위치 이동도
-        </label>
       </div>
-      {list.map((c) => {
-        const qty = c.deltas.filter((d) => d.delta > 0 && (d.bucket === 'ON_HAND' || d.bucket === 'RESERVED' || d.bucket === 'TRANSIT')).reduce((a, d) => a + d.delta, 0);
-        const locs = [...new Set(c.deltas.map((d) => d.locationCode).filter(Boolean))];
-        return (
-          <div className="row wrap" key={c.commitId} title={c.deltas.map((d) => `${d.sku} ${d.lot} ${d.locationCode} ${d.bucket} ${d.delta > 0 ? '+' : ''}${d.delta}`).join('\n')}>
-            <span className="t">{isoClock(c.appliedAt)}</span>
-            <span className="ev">{KIND_KO[c.postingKind] ?? c.postingKind}</span>
-            <span>
-              {c.sourceRef} · {qty.toLocaleString()}개 · 칸 {locs.length}
-              {locs.length <= 2 ? ` (${locs.map((l) => l.split('-').slice(1).join('-')).join(' → ')})` : ''}
-            </span>
-          </div>
-        );
-      })}
+      {kinds.has('MOVE') && (
+        <label className="mv-opt">
+          <input type="checkbox" checked={picks} onChange={(e) => setPicks(e.target.checked)} /> 피킹 이동도 보기(많음 — 기본은 선반 보충만)
+        </label>
+      )}
+      {!list.length && <div className="note">고른 종류의 변동이 아직 없습니다.</div>}
+      <ul className="mv-list">
+        {list.map((c) => {
+          const qty = c.deltas.filter((d) => d.delta > 0 && (d.bucket === 'ON_HAND' || d.bucket === 'RESERVED' || d.bucket === 'TRANSIT')).reduce((a, d) => a + d.delta, 0)
+            || c.deltas.filter((d) => d.delta < 0).reduce((a, d) => a - d.delta, 0);
+          const from = [...new Set(c.deltas.filter((d) => d.delta < 0 && d.locationCode).map((d) => d.locationCode!))];
+          const to = [...new Set(c.deltas.filter((d) => d.delta > 0 && d.locationCode).map((d) => d.locationCode!))];
+          const skus = new Set(c.deltas.map((d) => d.sku)).size;
+          const many = (xs: string[]) => (xs.length === 0 ? '' : xs.length === 1 ? short(xs[0]) : `${short(xs[0])} 외 ${xs.length - 1}칸`);
+          const place = c.postingKind === 'MOVE' ? `${many(from)} → ${many(to)}` : many(to.length ? to : from);
+          return (
+            <li key={c.commitId} className={`mv-r k-${c.postingKind}`} title={c.deltas.map((d) => `${d.sku} ${d.lot} ${d.locationCode ?? ''} ${d.bucket} ${d.delta > 0 ? '+' : ''}${d.delta}`).join('\n')}>
+              <div className="mv-h">
+                <span className="mv-t">{isoClock(c.appliedAt)}</span>
+                <span className="mv-badge">{KIND_KO[c.postingKind] ?? c.postingKind}</span>
+                <span className="mv-w">{who(c)}</span>
+                <b className="mv-q">{qty.toLocaleString()}개</b>
+              </div>
+              <div className="mv-s">
+                {place && <span>{place}</span>}
+                <span>SKU {skus}</span>
+              </div>
+            </li>
+          );
+        })}
+      </ul>
     </div>
   );
 }
