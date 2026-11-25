@@ -278,6 +278,8 @@ export const SHELF = {
 export const FLOW = {
   /** 이 수 이상의 PPC 가 같은 날 같이 주문하면 DAS [가정] */
   dasMinPpc: 2,
+  /** DAS 존 깊이(m) — R/T 한 줄(MFC 마다 1대) + 작업자 통로. MFC 가 늘어 두 줄이 필요하면 8.8 [시뮬, 사용자 2026-11-26 "한 줄 유지"] */
+  dasDepth: 4.4,
   /** 컨베이어·휠소터 속도(m/s) · 갈래 나누는 시간(s) [가정] */
   conveyorSpeed: 0.5,
   divertSec: 4,

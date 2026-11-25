@@ -647,51 +647,156 @@ function PortBoxes({ e }: { e: Equip }) {
 }
 
 /**
- * 입고 검수 — 온도대마다(사용자 2026-11-25 "입고 검수 구역 … 온도별로 각각"). 승강기로 올라온 입고 팔레트를 내려놓고 수량·기한·온도를 확인하는 자리.
- * 입고 업무 자체는 시뮬레이션 범위 밖(scope S-3) — 자리·모형만. 저온은 랩 위 은색 보냉 덮개.
+ * 입고 검수 — 온도대마다(사용자 2026-11-25 "입고 검수 구역 … 온도별로 각각"). 들어온 팔레트를 내려놓고 수량·기한·온도를 확인하는 바닥 자리.
+ * 책상·모니터 없이 현장 모양으로(사용자 2026-11-26 "사무실 같이 생겼어"): 노란 테두리 · 팔레트 칸(랩 감은 입고 팔레트, 검수 끝난 것은 초록 표) ·
+ * 바닥 팔레트 저울 · 이동식 라벨 프린터 카트 · 핸드자키. 입고 업무 자체는 범위 밖(scope S-3) — 자리·모형만. 저온은 은색 보냉 덮개.
  */
 export function Inbound({ e }: { e: Equip }) {
   const r = e.rect;
   const cold = e.temp && e.temp !== 'AMBIENT';
-  const cols = Math.max(2, Math.floor((r.x1 - r.x0 - 3) / 1.6));
+  const w = r.x1 - r.x0;
+  const d = r.z1 - r.z0;
+  // 긴 쪽을 따라 팔레트 칸 줄 — 가장자리 0.6 · 앞쪽 저울·카트 자리 2.4 · 칸 1.5 · 두 줄이면 가운데 작업 통로
+  const alongX = w >= d;
+  const len = (alongX ? w : d) - 1.2;
+  const span = (alongX ? d : w) - 1.2;
+  const n = Math.max(2, Math.floor((len - 2.4) / 1.5));
+  const lanes = span >= 1.5 * 2 + 1.8 ? 2 : 1;
+  const spots: { x: number; z: number; k: number }[] = [];
+  for (let l = 0; l < lanes; l++)
+    for (let i = 0; i < n; i++) {
+      const u = 0.6 + 2.4 + (i + 0.5) * 1.5;
+      const v = l === 0 ? 0.6 + 0.75 : span + 0.6 - 0.75;
+      spots.push(alongX ? { x: r.x0 + u, z: r.z0 + v, k: l * n + i } : { x: r.x0 + v, z: r.z0 + u, k: l * n + i });
+    }
+  const cx = (r.x0 + r.x1) / 2;
+  const cz = (r.z0 + r.z1) / 2;
+  // 들어오는 쪽(앞) — 저울·카트
+  const head = alongX ? { x: r.x0 + 1.6, z: cz } : { x: cx, z: r.z0 + 1.6 };
+  const film = cold ? 0xc9d3de : 0xe9eef3;
+  const line = (x0: number, z0: number, x1: number, z1: number) => (
+    <mesh rotation-x={-Math.PI / 2} position={[(x0 + x1) / 2, 0.011, (z0 + z1) / 2]}>
+      <planeGeometry args={[Math.max(0.06, x1 - x0), Math.max(0.06, z1 - z0)]} />
+      <meshBasicMaterial color={0xf2c94c} />
+    </mesh>
+  );
   return (
     <group>
-      {/* 바닥 노란 칸선(팔레트 자리) */}
-      {Array.from({ length: cols }, (_, i) => (
-        <group key={i} position={[r.x0 + 1.2 + i * 1.6, 0, r.z0 + 2.2]}>
-          <mesh rotation-x={-Math.PI / 2} position={[0, 0.012, 0]}>
-            <ringGeometry args={[0.72, 0.78, 4, 1, Math.PI / 4]} />
+      <StaticMerge>
+        {/* 노란 테두리선 */}
+        {line(r.x0 + 0.2, r.z0 + 0.2, r.x1 - 0.2, r.z0 + 0.32)}
+        {line(r.x0 + 0.2, r.z1 - 0.32, r.x1 - 0.2, r.z1 - 0.2)}
+        {line(r.x0 + 0.2, r.z0 + 0.2, r.x0 + 0.32, r.z1 - 0.2)}
+        {line(r.x1 - 0.32, r.z0 + 0.2, r.x1 - 0.2, r.z1 - 0.2)}
+        {spots.map((p) => {
+          const full = p.k % 4 !== 3;
+          const hgt = 0.9 + ((p.k * 37) % 5) * 0.12;
+          return (
+            <group key={p.k} position={[p.x, 0, p.z]}>
+              {/* 팔레트 칸 네 귀(ㄱ자) */}
+              {[-1, 1].flatMap((sx) =>
+                [-1, 1].map((sz) => (
+                  <group key={`${sx}${sz}`} position={[sx * 0.66, 0, sz * 0.66]}>
+                    {line(Math.min(0, -sx * 0.3), -0.03, Math.max(0, -sx * 0.3), 0.03)}
+                    {line(-0.03, Math.min(0, -sz * 0.3), 0.03, Math.max(0, -sz * 0.3))}
+                  </group>
+                )),
+              )}
+              {full && (
+                <>
+                  <mesh position={[0, 0.07, 0]}>
+                    <boxGeometry args={[1.1, 0.14, 1.1]} />
+                    <meshStandardMaterial color={0xd9b98a} roughness={0.85} map={palletTexture()} />
+                  </mesh>
+                  <mesh position={[0, 0.14 + hgt / 2, 0]}>
+                    <boxGeometry args={[1.02, hgt, 1.02]} />
+                    <meshStandardMaterial color={0xd2a679} roughness={0.85} map={boxTexture()} />
+                  </mesh>
+                </>
+              )}
+            </group>
+          );
+        })}
+        {/* 바닥 팔레트 저울(낮은 강판 + 표시기 기둥) */}
+        <group position={[head.x, 0, head.z + (alongX ? -0.9 : 0)]}>
+          <mesh position={[0, 0.04, 0]}>
+            <boxGeometry args={[1.3, 0.08, 1.3]} />
+            <meshStandardMaterial color={0x8f969f} metalness={0.4} roughness={0.5} />
+          </mesh>
+          <mesh rotation-x={-Math.PI / 2} position={[0, 0.085, 0]}>
+            <ringGeometry args={[0.6, 0.66, 4, 1, Math.PI / 4]} />
             <meshBasicMaterial color={0xf2c94c} />
           </mesh>
-          {i % 3 !== 2 && (
-            <>
-              <mesh position={[0, 0.07, 0]}>
-                <boxGeometry args={[1.1, 0.14, 1.1]} />
-                <meshStandardMaterial color={0xd9b98a} roughness={0.85} map={palletTexture()} />
-              </mesh>
-              <mesh position={[0, 0.14 + 0.55, 0]}>
-                <boxGeometry args={[1.0, 1.1, 1.0]} />
-                <meshStandardMaterial color={cold ? 0xdde2e8 : 0xd2a679} roughness={cold ? 0.35 : 0.85} map={cold ? null : boxTexture()} />
-              </mesh>
-            </>
-          )}
+          <mesh position={[0.8, 0.6, 0]}>
+            <cylinderGeometry args={[0.03, 0.03, 1.2, 8]} />
+            <meshStandardMaterial color={0x5b626b} />
+          </mesh>
+          <mesh position={[0.8, 1.25, 0]}>
+            <boxGeometry args={[0.26, 0.18, 0.08]} />
+            <meshStandardMaterial color={0x2a2f38} emissive={0x1d6b3a} emissiveIntensity={0.6} />
+          </mesh>
         </group>
-      ))}
-      {/* 검수대(스캐너·모니터) */}
-      <group position={[(r.x0 + r.x1) / 2, 0, r.z1 - 1.6]}>
-        <mesh position={[0, 0.45, 0]}>
-          <boxGeometry args={[2.4, 0.9, 0.8]} />
-          <meshStandardMaterial color={0xf3f4f6} roughness={0.6} />
-        </mesh>
-        <mesh position={[0.6, 1.15, -0.2]}>
-          <boxGeometry args={[0.5, 0.36, 0.04]} />
-          <meshStandardMaterial color={0x1f2430} emissive={0x274b7a} emissiveIntensity={0.5} />
-        </mesh>
-        <mesh position={[-0.5, 0.95, 0.1]}>
-          <boxGeometry args={[0.12, 0.1, 0.2]} />
-          <meshStandardMaterial color={0xf2c94c} />
-        </mesh>
-      </group>
+        {/* 이동식 라벨 프린터 카트(좁은 철제 카트 + 프린터 + PDA) */}
+        <group position={[head.x + (alongX ? 0 : 1.2), 0, head.z + (alongX ? 0.9 : 0)]}>
+          {[0.5, 0.9].map((y) => (
+            <mesh key={y} position={[0, y, 0]}>
+              <boxGeometry args={[0.5, 0.04, 0.4]} />
+              <meshStandardMaterial color={0x9aa3ad} metalness={0.5} roughness={0.4} />
+            </mesh>
+          ))}
+          {[-0.23, 0.23].flatMap((x) =>
+            [-0.18, 0.18].map((z) => (
+              <mesh key={`${x}${z}`} position={[x, 0.47, z]}>
+                <boxGeometry args={[0.03, 0.9, 0.03]} />
+                <meshStandardMaterial color={0x6c747e} />
+              </mesh>
+            )),
+          )}
+          <mesh position={[0, 1.02, -0.02]}>
+            <boxGeometry args={[0.24, 0.2, 0.28]} />
+            <meshStandardMaterial color={0x30353d} />
+          </mesh>
+          <mesh position={[0.17, 0.95, 0.12]}>
+            <boxGeometry args={[0.07, 0.14, 0.03]} />
+            <meshStandardMaterial color={0xf2c94c} />
+          </mesh>
+        </group>
+        {/* 핸드자키(빈 포크 + 손잡이) */}
+        <group position={alongX ? [r.x1 - 1.4, 0, cz] : [cx, 0, r.z1 - 1.4]} rotation-y={alongX ? 0 : Math.PI / 2}>
+          {[-0.18, 0.18].map((z) => (
+            <mesh key={z} position={[0, 0.05, z]}>
+              <boxGeometry args={[1.1, 0.06, 0.16]} />
+              <meshStandardMaterial color={0xd23c2c} />
+            </mesh>
+          ))}
+          <mesh position={[0.6, 0.25, 0]}>
+            <boxGeometry args={[0.16, 0.4, 0.5]} />
+            <meshStandardMaterial color={0xd23c2c} />
+          </mesh>
+          <mesh position={[0.78, 0.75, 0]} rotation-z={-0.35}>
+            <cylinderGeometry args={[0.025, 0.025, 1.1, 8]} />
+            <meshStandardMaterial color={0x2a2f38} />
+          </mesh>
+        </group>
+      </StaticMerge>
+      {/* 투명·표(합치지 않음) — 랩·보냉 덮개, 입고 표(검수 끝 = 초록, 대기 = 흰색) */}
+      {spots
+        .filter((p) => p.k % 4 !== 3)
+        .map((p) => {
+          const hgt = 0.9 + ((p.k * 37) % 5) * 0.12;
+          return (
+            <group key={p.k} position={[p.x, 0, p.z]}>
+              <mesh position={[0, 0.14 + (hgt + 0.06) / 2, 0]} raycast={() => null}>
+                <boxGeometry args={[1.06, hgt + 0.06, 1.06]} />
+                <meshStandardMaterial color={film} roughness={cold ? 0.3 : 0.15} metalness={cold ? 0.5 : 0} transparent opacity={cold ? 0.92 : 0.38} depthWrite={false} />
+              </mesh>
+              <mesh position={[0, 0.14 + hgt * 0.6, 0.545]}>
+                <boxGeometry args={[0.32, 0.22, 0.01]} />
+                <meshBasicMaterial color={p.k % 3 === 0 ? 0x2fbf71 : 0xffffff} />
+              </mesh>
+            </group>
+          );
+        })}
     </group>
   );
 }

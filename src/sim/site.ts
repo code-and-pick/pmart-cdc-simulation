@@ -260,7 +260,7 @@ export interface DasRow {
 }
 export function dasRows(r: Rect): DasRow[] {
   const pitch = 4.4;
-  const rows = Math.max(1, Math.floor((r.z1 - r.z0 - 0.4) / pitch));
+  const rows = Math.max(1, Math.floor((r.z1 - r.z0 - 0.4) / pitch + 1e-9)); // 1e-9: (9.2 − 0.4) / 4.4 = 1.999… 처럼 소수 오차로 한 줄 덜 나오던 것
   const len = r.x1 - r.x0 - 3;
   const cx = (r.x0 + r.x1) / 2;
   return Array.from({ length: rows }, (_, k) => {
