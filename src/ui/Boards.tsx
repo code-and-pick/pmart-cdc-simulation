@@ -158,7 +158,7 @@ export function AdminBoard() {
             {backend
               .allTasks()
               .filter((t) => t.state !== 'DONE' && t.state !== 'PARTIAL' && t.state !== 'CANCELLED')
-              .filter((t) => match(t.taskId) || match(t.trfId))
+              .filter((t) => match(t.taskId) || t.trfIds.some(match))
               .slice(0, 200)
               .map((t) => (
                 <tr key={t.taskId}>

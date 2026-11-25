@@ -5,6 +5,7 @@ import { buildCatalog, type Catalog } from '../src/domain/catalog';
 import { ApiProblem, SKU_PATTERN, type LpnComposition, type Task, type TransferIntakeInput } from '../src/domain/contract';
 import { buildLayout, LOCATION_CODE_PATTERN } from '../src/domain/layout';
 import { makeTransfers } from '../src/sim/supply';
+import { pickMethodOf, pickModeOf } from '../src/domain/pickMethod';
 
 const BASE = '2026-11-25';
 const layout = buildLayout();
@@ -68,13 +69,16 @@ async function pickAll(t: Task, worker: string) {
 /** TRF 하나를 실피킹 → 분류(작업마다 BOX 하나) → 검품 합격까지 */
 async function throughInspection(trfId: string, waveId: string) {
   await drain();
-  const tasks = (await mb.listTasks(waveId)).filter((x) => x.trfId === trfId);
-  const lpns: LpnComposition[] = tasks.map((t, i) => ({
-    lpn: `LPN-${trfId}-${i + 1}`,
-    unitType: 'BOX',
-    state: 'SEALED',
-    contents: t.lines.filter((l) => l.pickedQty > 0).map((l) => ({ sku: l.sku, lot: l.lot, qty: l.pickedQty })),
-  }));
+  // (0.9.0) 묶음 작업이면 줄의 그 TRF 몫(shares)만
+  const tasks = (await mb.listTasks(waveId)).filter((x) => x.trfIds.includes(trfId));
+  const lpns: LpnComposition[] = tasks
+    .map((t, i) => ({
+      lpn: `LPN-${trfId}-${i + 1}`,
+      unitType: 'BOX' as const,
+      state: 'SEALED' as const,
+      contents: t.lines.flatMap((l) => l.shares.filter((sh) => sh.trfId === trfId && sh.pickedQty > 0).map((sh) => ({ sku: l.sku, lot: l.lot, qty: sh.pickedQty }))),
+    }))
+    .filter((l) => l.contents.length);
   await mb.reportSortingResult({ waveId, trfId, workerId: 'line-01', lpns }, key());
   await mb.reportInspectionResult({ trfId, inspectorId: 'qc-01', items: lpns.map((l) => ({ lpn: l.lpn, result: 'PASSED' as const })) }, key());
   return lpns;
@@ -176,7 +180,7 @@ describe('TRF 인수·할당 (CDC-F-016)', () => {
 });
 
 describe('Wave·Task·실피킹 (CDC-F-017·018)', () => {
-  it('Wave 배포 → TRF × 층·구역 × 카트(20줄) Task. 피킹은 위치만 옮긴다(랙 → 출고대기 91), 총현물 그대로', async () => {
+  it('Wave 배포 → 방식·구역·층(+ TRF·지역) × 카트(20줄) Task. 피킹은 위치만 옮긴다(랙 → 출고대기 91), 총현물 그대로', async () => {
     const { waveId } = await startDay();
     const wave = await mb.getWave(waveId);
     expect(wave.state).toBe('RELEASED');
@@ -194,9 +198,14 @@ describe('Wave·Task·실피킹 (CDC-F-017·018)', () => {
     expect(after.onHand).toBe(before.onHand);
     expect(after.reserved).toBe(before.reserved);
     const staged = t0.lines.reduce((s, l) => s + l.plannedQty, 0);
-    const stagingCode = mb.ledger.holdingsOf((await mb.getTransferIntake(t0.trfId)).allocationId!).find((h) => h.locationCode.includes('-91-'))!.locationCode;
-    expect(stagingCode).toMatch(LOCATION_CODE_PATTERN);
-    expect(mb.ledger.onHandAt(stagingCode)).toBe(staged);
+    // (0.9.0) 묶음 작업이면 몫 TRF 마다 그 MFC 출고대기로 — 합이 피킹 수량
+    let atStaging = 0;
+    for (const id of t0.trfIds)
+      for (const h of mb.ledger.holdingsOf((await mb.getTransferIntake(id)).allocationId!).filter((x) => x.locationCode.includes('-91-'))) {
+        expect(h.locationCode).toMatch(LOCATION_CODE_PATTERN);
+        atStaging += h.qty;
+      }
+    expect(atStaging).toBe(staged);
     expect((await mb.getTask(t0.taskId)).state).toBe('DONE');
     expect((await mb.getWave(waveId)).state).toBe('IN_PROGRESS');
     expect(mb.ledger.check()).toEqual([]);
@@ -308,7 +317,8 @@ describe('다음 작업 받기·착수 (0.2.0 — 사용자 결정: PDA 자동 �
     replenishAll();
     const wave = await mb.createWave({ cdcId: 'CDC01', trfIds: trfs.map((t) => t.trfId) }, key());
     await mb.releaseWave(wave.waveId, key());
-    expect((await mb.pullNextTask('CDC01', 'fc-01', {}, key())).task.trfId).toBe(trfs[1].trfId);
+    // (0.9.0) 작업 기한 = 몫 TRF 중 가장 이른 기한 — 첫 작업에 이른 TRF 몫이 든다
+    expect((await mb.pullNextTask('CDC01', 'fc-01', {}, key())).task.trfIds).toContain(trfs[1].trfId);
     const b = await mb.pullNextTask('CDC01', 'fc-02', { floor: '7' }, key());
     expect(b.task.lines.every((l) => /^CDC01-[GH]-7-/.test(l.locationCode))).toBe(true);
     expect(await code(mb.pullNextTask('CDC01', 'fc-03', { zone: 'Z' }, key()))).toBe('NO_TASK_AVAILABLE');
@@ -444,5 +454,57 @@ describe('미출발 취소 (CDC-F-026 경계)', () => {
     await mb.reportLoadingResult({ trfId, tripId: 'T1', vehicleId: 'V1', workerId: 'j', action: 'LOADED', lpns: lpns.map((x) => ({ lpn: x.lpn })) }, key());
     mb.validateDeparture({ departureId: 'D1', tripId: 'T1', vehicleId: 'V1', departedAt: 'x', source: 'SIMULATED', trfCompositions: [{ trfId, lpns: lpns.map((x) => x.lpn) }] }, key());
     expect(await code(mb.cancelBeforeDeparture(trfId, { reason: 'TRANSFER_CANCELLED', scope: 'FULL' }, key()))).toBe('INVALID_STATE');
+  });
+});
+
+describe('묶음 피킹 (cdc-outbound 0.9.0, PR #484)', () => {
+  it('통로 방식으로 작업 모양 — DISCRETE 는 TRF 하나, REGION_BATCH 는 한 지역 MFC 만, SKU_BATCH 는 지역 없음. 줄 계획 = 몫 합', async () => {
+    const { waveId } = await startDay(5);
+    const regions = await mb.listRegions('CDC01');
+    const regionOf = new Map(regions.flatMap((r) => r.mfcIds.map((m) => [m, r.regionCode] as const)));
+    const tasks = await mb.listTasks(waveId);
+    const modes = new Set(tasks.map((t) => t.pickMode));
+    expect(modes.has('REGION_BATCH') && modes.has('SKU_BATCH') && modes.has('DISCRETE')).toBe(true);
+    for (const t of tasks) {
+      expect(new Set(t.lines.map((l) => pickMethodOf(l.locationCode))).size).toBe(1);
+      expect(t.pickMode).toBe(pickModeOf(pickMethodOf(t.lines[0].locationCode)));
+      for (const l of t.lines) expect(l.shares.reduce((s, x) => s + x.plannedQty, 0)).toBe(l.plannedQty);
+      const mfcs = new Set(t.lines.flatMap((l) => l.shares.map((x) => x.mfcId)));
+      if (t.pickMode === 'DISCRETE') {
+        expect(t.trfIds).toEqual([t.trfId]);
+        expect(t.regionCode).toBeNull();
+      } else expect(t.trfId).toBeNull();
+      if (t.pickMode === 'REGION_BATCH') for (const m of mfcs) expect(regionOf.get(m)).toBe(t.regionCode);
+      if (t.pickMode === 'SKU_BATCH') expect(t.regionCode).toBeNull();
+    }
+    const got = (await mb.pullNextTask('CDC01', 'fc-sku', { pickMode: 'SKU_BATCH' }, key())).task;
+    expect(got.pickMode).toBe('SKU_BATCH');
+  });
+
+  it('묶음 실적 — 실피킹은 기한 이른 몫부터, 부족은 기한 늦은 몫부터(같으면 trfId 순)', async () => {
+    const trfs = makeTransfers(catalog, BASE, 7, 40);
+    trfs.forEach((t, i) => (trfs[i] = { ...t, dueAt: `2026-11-25T${String(10 + (i % 10)).padStart(2, '0')}:${String(i).padStart(2, '0')}:00.000Z` }));
+    for (const t of trfs) mb.intakeTransfer(t, key());
+    replenishAll();
+    const wave = await mb.createWave({ cdcId: 'CDC01', trfIds: trfs.map((t) => t.trfId) }, key());
+    await mb.releaseWave(wave.waveId, key());
+    const t = (await mb.listTasks(wave.waveId)).find((x) => x.pickMode !== 'DISCRETE' && x.lines.some((l) => l.shares.length >= 2 && l.plannedQty >= 3))!;
+    expect(t).toBeDefined();
+    const l = t.lines.find((x) => x.shares.length >= 2 && x.plannedQty >= 3)!;
+    // 작업을 받을 때까지 다른 작업은 건너뛴다
+    let held: Task | null = null;
+    for (let i = 0; i < 5000 && !held; i++) {
+      const { task } = await mb.pullNextTask('CDC01', `w-${i}`, { pickMode: t.pickMode }, key());
+      if (task.taskId === t.taskId) held = await mb.startTask(task.taskId, `w-${i}`, key());
+    }
+    expect(held).not.toBeNull();
+    const due = (id: string) => trfs.find((x) => x.trfId === id)!.dueAt;
+    const early = [...l.shares].sort((a, b) => (due(a.trfId) < due(b.trfId) ? -1 : 1));
+    await mb.reportPickResult(t.taskId, { workerId: held!.assigneeId!, lines: [{ sku: l.sku, lot: l.lot, locationCode: l.locationCode, pickedQty: early[0].plannedQty, shortQty: 1, shortReason: 'NOT_FOUND' }] }, key());
+    const after = (await mb.getTask(t.taskId)).lines.find((x) => x.sku === l.sku && x.locationCode === l.locationCode)!;
+    const sh = (id: string) => after.shares.find((x) => x.trfId === id)!;
+    expect(sh(early[0].trfId).pickedQty).toBe(early[0].plannedQty);
+    expect(sh(early[early.length - 1].trfId).shortQty).toBe(1);
+    expect(mb.ledger.check()).toEqual([]);
   });
 });

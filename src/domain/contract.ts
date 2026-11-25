@@ -1,5 +1,5 @@
 // 계약 타입 사본 — 이름·상태값은 pmart-backend/contracts/openapi 를 그대로 따른다(CLAUDE.md "계약이 정본").
-// cdc-outbound-service.yaml 0.3.0(PR #452, 병합 전 — 0.2.0 과 스키마 같고 Task 경로만 옮김) · cdc-inventory-service.yaml(할당·출발 전기·Transit·Commit) · _common.yaml.
+// cdc-outbound-service.yaml 0.9.0(PR #484, 병합 전 — 묶음 피킹: pickMode·pickMethod·regionCode·trfIds·shares, 지역표) · cdc-inventory-service.yaml(할당·출발 전기·Transit·Commit) · _common.yaml.
 // 계약이 바뀌면 여기를 먼저 고치고 MockBackend·HttpBackend 를 맞춘다.
 
 // ── _common.yaml ─────────────────────────────────────
@@ -121,6 +121,21 @@ export interface Wave {
 export type TaskKind = 'PICK' | 'SORT' | 'INSPECT' | 'LOAD';
 export type ShortReason = 'NOT_FOUND' | 'DAMAGED' | 'EXPIRED' | 'LOCATION_BLOCKED' | 'OTHER';
 
+/** (0.9.0) DISCRETE = TRF 하나(DPS·방식 없는 위치), REGION_BATCH = 지역 묶음(박스 피킹·FC·분배), SKU_BATCH = SKU 묶음(라인 DAS — Wave 안 모든 MFC) */
+export type PickMode = 'DISCRETE' | 'REGION_BATCH' | 'SKU_BATCH';
+/** (0.9.0) 위치 통로의 피킹 방식(cdc-location 0.5.0 aisle-pick-methods) */
+export type PickMethod = 'DPS' | 'BOX_PICK' | 'FC' | 'DISTRIBUTION' | 'LINE';
+
+/** (0.9.0) 줄의 TRF 별 몫(trfId 순) — 실피킹·부족은 줄 실적을 기한 이른 TRF 부터 나눈 값 */
+export interface TaskLineShare {
+  trfId: string;
+  mfcId: string;
+  dueAt: string;
+  plannedQty: number;
+  pickedQty: number;
+  shortQty: number;
+}
+
 export interface TaskLine {
   sku: string;
   lot: string;
@@ -129,12 +144,28 @@ export interface TaskLine {
   pickedQty: number;
   shortQty: number;
   shortReason?: string;
+  shares: TaskLineShare[];
+}
+
+/** (0.9.0) 지역 ↔ MFC 대응표 — 지역 코드 = PDA 지역 바코드 값 */
+export interface Region {
+  regionCode: string;
+  regionName: string;
+  mfcIds: string[];
 }
 
 export interface Task {
   taskId: string;
   waveId: string;
-  trfId: string;
+  /** TRF 하나짜리 작업의 TRF. (0.9.0) 묶음 작업(REGION_BATCH·SKU_BATCH)이면 null — trfIds·shares 를 본다 */
+  trfId: string | null;
+  /** (0.9.0) 이 작업에 몫이 든 TRF(trfId 순) */
+  trfIds: string[];
+  pickMode: PickMode;
+  /** (0.9.0) 방식 없는 위치(팔레트 랙·설정 없음)면 비움 */
+  pickMethod?: PickMethod;
+  /** (0.9.0) REGION_BATCH 의 지역. 그 밖은 null */
+  regionCode: string | null;
   kind: TaskKind;
   state: TaskState;
   version: number;
@@ -149,6 +180,8 @@ export interface NextTaskRequest {
   kind?: TaskKind;
   zone?: string;
   floor?: string;
+  /** (0.9.0) */
+  pickMode?: PickMode;
 }
 
 export interface PickResultRequest {

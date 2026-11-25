@@ -343,7 +343,7 @@ export const WORK = {
 /** 시뮬레이션 시작 시각(초, 0시 기준) — 주간조 시작 직전 */
 export const SIM_START = 7 * 3600 + 55 * 60;
 
-/** 피킹 Task 크기 [시뮬] — 카트 한 대에 싣는 줄 수(TRF·층·구역 안에서 동선 순으로 자름) */
+/** 피킹 Task 크기 [시뮬] — 서버 설정 pmart.outbound.batch-max-lines 에 해당(서버 기본값 없음 = 자르지 않음). 목은 카트 한 대 분량으로 위치 코드 순으로 자른다 */
 export const TASK = {
   maxLines: 20,
 } as const;
@@ -422,3 +422,24 @@ export const TMS = {
   /** 기사 이름 [시뮬] — 실제 인물 아님 */
   driverNames: ['김기사', '이기사', '박기사', '최기사', '정기사', '강기사', '조기사', '윤기사', '장기사', '임기사', '한기사', '오기사', '서기사', '신기사'],
 } as const;
+
+/**
+ * 통로 피킹 방식 [시뮬 — cdc-location 0.5.0 aisle-pick-methods(통로별 설정값)를 칠곡 배치로 정함, R-19 ⑤].
+ * 방식이 작업 모양을 정한다(cdc-outbound 0.9.0): DPS·방식 없음 → DISCRETE(TRF 하나), BOX_PICK·FC·DISTRIBUTION → REGION_BATCH(지역 묶음), LINE → SKU_BATCH(Wave 안 모든 MFC).
+ * - 냉동 선반(A) = DPS · 랙 1단 박스 피킹면 = BOX_PICK · 6F 야채 바닥 레인(93) = DISTRIBUTION · 6F 냉장 선반(B) = LINE(라인 DAS) · 그 밖 선반·오토스토어 = FC.
+ */
+export const AISLE_PICK_METHOD = {
+  frozenShelfZone: 'A',
+  lineShelfZone: 'B',
+  vegLaneAisle: 93,
+} as const;
+
+/**
+ * 지역 ↔ MFC 대응표 처음 값 [확정 — cdc-outbound 0.9.0 `GET /cdcs/{cdcId}/regions` 칠곡 처음 값, chilgok-dc.md CDC-6]. 지역 코드 = PDA 지역 바코드 값.
+ */
+export const REGIONS: { regionCode: string; regionName: string; mfcIds: string[] }[] = [
+  { regionCode: 'BUSAN', regionName: '부산권', mfcIds: ['MFC-BJG-01', 'MFC-BNG-01'] },
+  { regionCode: 'CHUNGCHEONG', regionName: '충청권', mfcIds: ['MFC-SEJ-01'] },
+  { regionCode: 'GANGWON', regionName: '강원권', mfcIds: ['MFC-CHC-01'] },
+  { regionCode: 'HONAM', regionName: '호남권', mfcIds: ['MFC-MOKPO-01'] },
+];

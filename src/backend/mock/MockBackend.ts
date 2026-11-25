@@ -3,7 +3,8 @@
 // 규칙 근거: WMS-business-logic.md 0.3(원장)·§12 CDC-F-016~018·§13 CDC-F-019~022.
 // 계약에 없어 MOCK 이 정한 것은 docs/backend-requests.md "시뮬레이터가 정한 값"에 적는다.
 
-import { ALLOCATION, CENTER_ID, MFCS, TASK } from '../../config';
+import { ALLOCATION, CENTER_ID, MFCS, REGIONS, TASK } from '../../config';
+import { pickMethodOf, pickModeOf } from '../../domain/pickMethod';
 import {
   ApiProblem,
   type CommandResponse,
@@ -20,7 +21,12 @@ import {
   type PreDepartureCancelRequest,
   type ShipmentManifest,
   type SortingResultRequest,
+  type PickMethod,
+  type PickMode,
+  type Region,
   type Task,
+  type TaskLine,
+  type TaskLineShare,
   type TaskState,
   type TemperatureZone,
   type TransferIntake,
@@ -84,11 +90,15 @@ export class MockBackend implements CdcOutboundPort {
   private readonly eventListeners: EventListener[] = [];
   private seq = 0;
 
-  /** 작업 묶기 기준(시뮬레이터가 정한 값 — 오늘 출고 길, R-18·§9) */
-  private grouping: ((sku: string) => string) | null = null;
-  setTaskGrouping(f: (sku: string) => string) {
-    this.grouping = f;
+  /** 작업 자르기 — 같은 묶음 안에서 이 값이 바뀌는 곳에서 자른다(시뮬레이터가 정한 값: DPS 컨베이어 구역, R-20) */
+  private cutKey: ((locationCode: string) => string) | null = null;
+  setTaskCut(f: (locationCode: string) => string) {
+    this.cutKey = f;
   }
+  /** 지역 ↔ MFC (0.9.0 regions) */
+  private readonly regions = new Map<string, { regionCode: string; regionName: string }>(REGIONS.flatMap((r) => r.mfcIds.map((m) => [m, { regionCode: r.regionCode, regionName: r.regionName }] as const)));
+  /** 작업 기한(몫 TRF 중 가장 이른 dueAt) */
+  private readonly taskDue = new Map<string, string>();
 
   constructor(private readonly opt: MockOptions) {
     this.ledger = new CdcLedger({ cdcId: CENTER_ID, isoNow: () => this.iso(), today: () => this.today() });
@@ -397,7 +407,7 @@ export class MockBackend implements CdcOutboundPort {
   private progress(rec: TrfRec): TransferProgressLine[] {
     const alloc = rec.intake.allocationId ? this.ledger.getAllocation(rec.intake.allocationId) : undefined;
     const trfId = rec.intake.trfId;
-    const tasks = [...this.tasks.values()].filter((t) => t.trfId === trfId);
+    const tasks = this.tasksOf(trfId);
     const lpns = [...this.lpns.values()].filter((l) => l.trfId === trfId);
     return rec.intake.lines.map((l) => {
       const al = alloc?.lines.find((x) => x.sku === l.sku);
@@ -406,7 +416,7 @@ export class MockBackend implements CdcOutboundPort {
         sku: l.sku,
         approvedQty: l.approvedQty,
         allocatedQty: al ? al.allocatedQty - al.releasedQty + al.departedQty : 0,
-        pickedQty: tasks.reduce((s, t) => s + t.lines.filter((x) => x.sku === l.sku).reduce((a, x) => a + x.pickedQty, 0), 0),
+        pickedQty: tasks.reduce((s, t) => s + t.lines.filter((x) => x.sku === l.sku).reduce((a, x) => a + x.shares.filter((sh) => sh.trfId === trfId).reduce((b, sh) => b + sh.pickedQty, 0), 0), 0),
         sortedQty: sum(lpns),
         inspectedQty: sum(lpns.filter((x) => x.inspection === 'PASSED')),
         loadedQty: sum(lpns.filter((x) => x.loaded)),
@@ -420,7 +430,7 @@ export class MockBackend implements CdcOutboundPort {
     if (rec.cancelled) return 'CANCELLED';
     const base = rec.intake.state;
     if (!rec.intake.waveId) return base;
-    const tasks = [...this.tasks.values()].filter((t) => t.trfId === rec.intake.trfId);
+    const tasks = this.tasksOf(rec.intake.trfId);
     const done = tasks.length > 0 && tasks.every((t) => TASK_TERMINAL.includes(t.state));
     const tot = (f: keyof TransferProgressLine) => p.reduce((s, x) => s + (x[f] as number), 0);
     const picked = tot('pickedQty');
@@ -493,7 +503,39 @@ export class MockBackend implements CdcOutboundPort {
     return this.call('GET', `/waves/${waveId}`, 200, () => structuredClone(this.mustWave(waveId)));
   }
 
-  /** PLANNED → RELEASED, 피킹 Task 생성. Task = TRF × 층·구역 × 카트 한 대(계약 Task.trfId 가 하나라서) */
+  /** 지역 ↔ MFC 대응표 (0.9.0 listRegions) — 지역 코드 순 */
+  async listRegions(cdcId: string): Promise<Region[]> {
+    return this.call('GET', `/cdcs/${cdcId}/regions`, 200, () => this.regionTable());
+  }
+
+  /** MFC 의 지역 정하기 (0.9.0 setRegions) — 다음 Wave 릴리스부터 */
+  async setRegions(cdcId: string, items: { mfcId: string; regionCode: string; regionName: string }[], idempotencyKey: string): Promise<Region[]> {
+    return this.call('POST', `/cdcs/${cdcId}/regions`, 200, () =>
+      this.idempotent(`regions:${cdcId}`, idempotencyKey, items, () => {
+        if (cdcId !== CENTER_ID) throw problem(403, 'FORBIDDEN', `다른 센터 ${cdcId}`);
+        if (!items.length || items.length > 200) throw problem(400, 'VALIDATION_FAILED', '1~200행');
+        if (new Set(items.map((i) => i.mfcId)).size !== items.length) throw problem(400, 'VALIDATION_FAILED', '같은 MFC 두 번');
+        for (const i of items) {
+          if (!/^[A-Z][A-Z0-9_]{1,15}$/.test(i.regionCode)) throw problem(400, 'VALIDATION_FAILED', `지역 코드 ${i.regionCode}`);
+          this.regions.set(i.mfcId, { regionCode: i.regionCode, regionName: i.regionName });
+        }
+        return this.regionTable();
+      }),
+    );
+  }
+
+  private regionTable(): Region[] {
+    const by = new Map<string, Region>();
+    for (const [mfcId, r] of this.regions) (by.get(r.regionCode) ?? by.set(r.regionCode, { ...r, mfcIds: [] }).get(r.regionCode)!).mfcIds.push(mfcId);
+    return [...by.values()].sort((a, b) => (a.regionCode < b.regionCode ? -1 : 1)).map((r) => ({ ...r, mfcIds: [...r.mfcIds].sort() }));
+  }
+
+  /** MFC 의 지역 코드(대응표에 없으면 MFC 자신) */
+  regionOf(mfcId: string): string {
+    return this.regions.get(mfcId)?.regionCode ?? mfcId;
+  }
+
+  /** PLANNED → RELEASED, 피킹 Task 생성 (0.9.0 묶음 피킹 — 위치 통로 방식으로 DISCRETE·REGION_BATCH·SKU_BATCH) */
   async releaseWave(waveId: string, idempotencyKey: string, expectedVersion?: number): Promise<CommandResponse> {
     return this.call('POST', `/waves/${waveId}/releases`, 202, () =>
       this.idempotent(`release:${waveId}`, idempotencyKey, { expectedVersion }, () => {
@@ -506,21 +548,10 @@ export class MockBackend implements CdcOutboundPort {
           return r.cancelled ? [] : this.ledger.holdingsOf(r.intake.allocationId!).filter((h) => isPalletLocation(h.locationCode));
         });
         if (pending.length) throw problem(409, 'INVALID_STATE', `선반 보충 미완료 ${pending.length}칸 (${pending.reduce((a, h) => a + h.qty, 0)}개)`);
-        let n = 0;
-        for (const trfId of w.trfIds) {
-          const r = this.trfs.get(trfId)!;
-          if (r.cancelled) continue;
-          const holds = this.ledger.holdingsOf(r.intake.allocationId!).filter((h) => isShelfLocation(h.locationCode));
-          const groups = new Map<string, typeof holds>();
-          for (const h of holds) {
-            const [, zone, floor] = h.locationCode.split('-');
-            const g = `${floor}${zone}`;
-            groups.set(g, [...(groups.get(g) ?? []), h]);
-          }
-          for (const [, hs] of [...groups.entries()].sort(([a], [b]) => (a < b ? -1 : 1))) {
-            n += this.newPickTask(w.waveId, trfId, hs).length;
-          }
-        }
+        const n = this.buildTasks(
+          w.waveId,
+          w.trfIds.filter((id) => !this.trfs.get(id)!.cancelled).map((id) => ({ trfId: id, holds: this.ledger.holdingsOf(this.trfs.get(id)!.intake.allocationId!).filter((h) => isShelfLocation(h.locationCode)) })),
+        ).length;
         w.state = 'RELEASED';
         w.version += 1;
         w.releasedAt = this.iso();
@@ -532,28 +563,72 @@ export class MockBackend implements CdcOutboundPort {
   }
 
   /**
-   * 피킹 Task — 같은 TRF·층·구역 줄을 작업 방식(DPS·박스·FC·분배·라인)과 선반 통로로 나누고, 동선 순(통로 → 베이 → 단)으로 놓아 카트 한 대 분량(TASK.maxLines)씩 자른다 [시뮬].
-   * 작업 방식으로 나누는 것은 시뮬레이터가 정한 값(R-18) — 6F 야채(분배)와 상자 상품(라인)이 한 작업에 섞이지 않게.
+   * 피킹 Task 만들기 (0.9.0) — 위치마다 통로 방식(pickMethod)으로 묶는다:
+   * DISCRETE = TRF × 방식 × 구역 × 층, REGION_BATCH = 지역 × 방식 × 구역 × 층, SKU_BATCH = 방식 × 구역 × 층(Wave 안 모든 TRF).
+   * 같은 SKU·LOT·위치는 한 줄로 합치고 shares[] 에 TRF 별 몫. 줄은 위치 코드 순, TASK.maxLines 로 자른다(서버 batch-max-lines) [시뮬].
    */
-  private newPickTask(waveId: string, trfId: string, holds: { sku: string; lot: string; locationCode: string; qty: number }[]): Task[] {
-    // 작업 방식 × 선반 통로로 묶는다 — 같은 통로 작업이 MFC 끼리 같은 범위가 되어, 내주는 순서(첫 칸 순)대로 MFC 몫이 함께 나간다 [시뮬]
-    const groups = new Map<string, typeof holds>();
-    for (const h of holds) {
-      const k = `${this.grouping?.(h.sku) ?? this.opt.catalog.bySku.get(h.sku)?.handling ?? 'FC'}|${h.locationCode.split('-').slice(0, 4).join('-')}`;
-      groups.set(k, [...(groups.get(k) ?? []), h]);
+  private buildTasks(waveId: string, per: { trfId: string; holds: { sku: string; lot: string; locationCode: string; qty: number }[] }[]): Task[] {
+    type G = { mode: PickMode; method?: PickMethod; region: string | null; lines: Map<string, TaskLine> };
+    const groups = new Map<string, G>();
+    for (const { trfId, holds } of per) {
+      const rec = this.trfs.get(trfId)!;
+      const mfcId = rec.intake.mfcId;
+      const region = this.regionOf(mfcId);
+      for (const h of holds) {
+        const [, zone, floor] = h.locationCode.split('-');
+        const method = pickMethodOf(h.locationCode);
+        const mode = pickModeOf(method);
+        const k = mode === 'DISCRETE' ? `D|${trfId}|${method ?? ''}|${zone}|${floor}` : mode === 'REGION_BATCH' ? `R|${region}|${method}|${zone}|${floor}` : `S|${method}|${zone}|${floor}`;
+        const g = groups.get(k) ?? groups.set(k, { mode, method, region: mode === 'REGION_BATCH' ? region : null, lines: new Map() }).get(k)!;
+        const lk = `${h.sku}|${h.lot}|${h.locationCode}`;
+        const l = g.lines.get(lk) ?? g.lines.set(lk, { sku: h.sku, lot: h.lot, locationCode: h.locationCode, plannedQty: 0, pickedQty: 0, shortQty: 0, shares: [] }).get(lk)!;
+        l.plannedQty += h.qty;
+        const sh = l.shares.find((x) => x.trfId === trfId);
+        if (sh) sh.plannedQty += h.qty;
+        else l.shares.push({ trfId, mfcId, dueAt: rec.intake.dueAt, plannedQty: h.qty, pickedQty: 0, shortQty: 0 });
+      }
     }
     const out: Task[] = [];
-    for (const g of groups.values()) {
-      const lines = [...g]
-        .sort((a, b) => (a.locationCode < b.locationCode ? -1 : 1))
-        .map((h) => ({ sku: h.sku, lot: h.lot, locationCode: h.locationCode, plannedQty: h.qty, pickedQty: 0, shortQty: 0 }));
-      for (let i = 0; i < lines.length; i += TASK.maxLines) {
-        const t: Task = { taskId: this.id('PICK'), waveId, trfId, kind: 'PICK', state: 'CREATED', version: 0, lines: lines.slice(i, i + TASK.maxLines), createdAt: this.iso() };
+    for (const [, g] of [...groups.entries()].sort(([a], [b]) => (a < b ? -1 : 1))) {
+      // 줄 순서 = 동선 순: 자르기 값(DPS 컨베이어 구역 순) → 위치 코드 순
+      const ord = (l: TaskLine) => `${this.cutKey?.(l.locationCode) ?? ""}|${l.locationCode}`;
+      const lines = [...g.lines.values()].sort((a, b) => (ord(a) < ord(b) ? -1 : 1));
+      for (const l of lines) l.shares.sort((a, b) => (a.trfId < b.trfId ? -1 : 1));
+      // 자르기: 줄 수(TASK.maxLines) 또는 자르기 값(cutKey — DPS 구역)이 바뀌는 곳
+      const chunks: TaskLine[][] = [];
+      for (const l of lines) {
+        const last = chunks[chunks.length - 1];
+        const ck = this.cutKey?.(l.locationCode) ?? '';
+        if (!last || last.length >= TASK.maxLines || (this.cutKey?.(last[0].locationCode) ?? '') !== ck) chunks.push([l]);
+        else last.push(l);
+      }
+      for (const ls of chunks) {
+        const trfIds = [...new Set(ls.flatMap((l) => l.shares.map((x) => x.trfId)))].sort();
+        const t: Task = {
+          taskId: this.id('PICK'),
+          waveId,
+          trfId: g.mode === 'DISCRETE' ? trfIds[0] : null,
+          trfIds,
+          pickMode: g.mode,
+          ...(g.method ? { pickMethod: g.method } : {}),
+          regionCode: g.region,
+          kind: 'PICK',
+          state: 'CREATED',
+          version: 0,
+          lines: ls,
+          createdAt: this.iso(),
+        };
         this.tasks.set(t.taskId, t);
+        this.taskDue.set(t.taskId, ls.flatMap((l) => l.shares.map((x) => x.dueAt)).sort()[0]);
         out.push(t);
       }
     }
     return out;
+  }
+
+  /** 이 TRF 몫이 든 작업 */
+  private tasksOf(trfId: string): Task[] {
+    return [...this.tasks.values()].filter((t) => t.trfIds.includes(trfId));
   }
 
   async listTasks(waveId: string, filter: { state?: TaskState; assigneeId?: string } = {}): Promise<Task[]> {
@@ -568,6 +643,13 @@ export class MockBackend implements CdcOutboundPort {
   /** 시뮬레이터가 모든 Wave 의 작업을 한 번에 본다 (MOCK 전용 조회) */
   allTasks(): Task[] {
     return [...this.tasks.values()].map((t) => this.publicTask(t));
+  }
+
+  /** 조건에 맞는 작업만 복사해 본다 (MOCK 전용 조회 — 전부 복사하지 않게) */
+  findTasks(pred: (t: Task) => boolean): Task[] {
+    const out: Task[] = [];
+    for (const t of this.tasks.values()) if (pred(t)) out.push(this.publicTask(t));
+    return out;
   }
 
   private publicTask(t: Task): Task {
@@ -587,7 +669,7 @@ export class MockBackend implements CdcOutboundPort {
   /**
    * 다음 작업 받기 (0.2.0 pullNextTask) — 들고 있는 ACCEPTED·IN_PROGRESS 가 있으면 그것(200),
    * 없으면 RELEASED·IN_PROGRESS Wave 의 담당 없는 CREATED 작업 하나를 ACCEPTED 로 배정(201).
-   * 순서: TRF 기한 이른 순 → 만든 순. 근무·자격·온도대 검사는 계약대로 아직 하지 않는다.
+   * 순서: 작업 기한(몫 TRF 중 가장 이른 dueAt) 이른 순 → 만든 순. 근무·자격·온도대 검사는 계약대로 아직 하지 않는다.
    */
   async pullNextTask(cdcId: string, workerId: string, body: NextTaskRequest, idempotencyKey: string): Promise<{ status: 200 | 201; task: Task }> {
     return this.call('POST', `/cdcs/${cdcId}/workers/${workerId}/next-tasks`, 201, () =>
@@ -599,19 +681,14 @@ export class MockBackend implements CdcOutboundPort {
           if (t.state !== 'CREATED' || t.assigneeId) return false;
           const w = this.waves.get(t.waveId);
           if (!w || (w.state !== 'RELEASED' && w.state !== 'IN_PROGRESS')) return false;
-          const r = this.trfs.get(t.trfId);
-          if (!r || r.cancelled || r.departed) return false;
+          if (!t.trfIds.some((id) => { const r = this.trfs.get(id); return r && !r.cancelled && !r.departed; })) return false;
           const sc = this.taskScope(t);
-          return (!body.kind || t.kind === body.kind) && (!body.zone || sc.zone === body.zone) && (!body.floor || sc.floor === String(body.floor));
+          return (!body.kind || t.kind === body.kind) && (!body.zone || sc.zone === body.zone) && (!body.floor || sc.floor === String(body.floor)) && (!body.pickMode || t.pickMode === body.pickMode);
         });
         cands.sort((a, b) => {
-          const da = this.trfs.get(a.trfId)!.intake.dueAt;
-          const db = this.trfs.get(b.trfId)!.intake.dueAt;
+          const da = this.taskDue.get(a.taskId)!;
+          const db = this.taskDue.get(b.taskId)!;
           if (da !== db) return da < db ? -1 : 1;
-          // 같은 상품 자리 작업을 MFC 끼리 이어서 — 라인(DAS)에서 한 상품을 여러 MFC 칸으로 나누게 [시뮬, R-18 2단계 묶음 피킹 대신]
-          const la = a.lines[0]?.locationCode ?? '';
-          const lb = b.lines[0]?.locationCode ?? '';
-          if (la !== lb) return la < lb ? -1 : 1;
           if (a.createdAt !== b.createdAt) return a.createdAt < b.createdAt ? -1 : 1;
           return a.taskId < b.taskId ? -1 : 1;
         });
@@ -654,8 +731,6 @@ export class MockBackend implements CdcOutboundPort {
         this.checkVersion(t.version, expectedVersion);
         if (t.assigneeId !== body.workerId) throw problem(409, 'NOT_ASSIGNEE', `담당 ${t.assigneeId ?? '없음'}`);
         if (t.state !== 'IN_PROGRESS') throw problem(409, 'INVALID_STATE', `Task ${t.state} — 착수 뒤에만 실적`);
-        const rec = this.mustTrf(t.trfId);
-        if (rec.cancelled || rec.departed) throw problem(409, 'INVALID_STATE', `TRF ${rec.cancelled ? '취소' : '출발'}`);
         if (!body.lines.length) throw problem(422, 'VALIDATION_FAILED', '행 없음');
         // 먼저 전부 검사
         for (const l of body.lines) {
@@ -665,26 +740,51 @@ export class MockBackend implements CdcOutboundPort {
           if ((l.shortQty ?? 0) > 0 && !l.shortReason) throw problem(422, 'VALIDATION_FAILED', '부족 사유 없음');
           if (tl.pickedQty + tl.shortQty + l.pickedQty + (l.shortQty ?? 0) > tl.plannedQty)
             throw problem(409, 'PICK_EXCEEDS_ALLOCATION', `${l.sku} 지시 ${tl.plannedQty} 초과`);
+          for (const sh of tl.shares) {
+            const r = this.mustTrf(sh.trfId);
+            if ((r.cancelled || r.departed) && sh.plannedQty - sh.pickedQty - sh.shortQty > 0) throw problem(409, 'INVALID_STATE', `TRF ${sh.trfId} ${r.cancelled ? '취소' : '출발'}`);
+          }
         }
-        const stagingNo = this.mfcStagingNo(rec.intake.mfcId);
         let applied = 0;
+        const touched = new Set<string>();
         for (const l of body.lines) {
           const tl = t.lines.find((x) => x.sku === l.sku && x.lot === l.lot && x.locationCode === l.locationCode)!;
-          if (l.pickedQty > 0) {
-            this.ledger.move(rec.intake.allocationId!, l.sku, l.lot, l.locationCode, stagingCodeFor(l.locationCode, stagingNo), l.pickedQty, taskId);
-            tl.pickedQty += l.pickedQty;
-            applied += l.pickedQty;
-          }
+          const left = (sh: TaskLineShare) => sh.plannedQty - sh.pickedQty - sh.shortQty;
+          // 실피킹은 기한 이른 몫부터, 부족은 기한 늦은 몫부터(같으면 trfId 순) [0.9.0, 사용자 결정 §7-2]
+          const early = [...tl.shares].sort((a, b) => (a.dueAt !== b.dueAt ? (a.dueAt < b.dueAt ? -1 : 1) : a.trfId < b.trfId ? -1 : 1));
           const short = l.shortQty ?? 0;
-          if (short > 0) {
-            tl.shortQty += short;
+          const shortBy = new Map<TaskLineShare, number>();
+          let sLeft = short;
+          for (const sh of [...early].reverse()) {
+            if (sLeft <= 0) break;
+            const q = Math.min(sLeft, left(sh));
+            if (q > 0) shortBy.set(sh, q);
+            sLeft -= q;
+          }
+          let pLeft = l.pickedQty;
+          for (const sh of early) {
+            const q = Math.min(pLeft, left(sh) - (shortBy.get(sh) ?? 0));
+            if (q <= 0) continue;
+            const rec = this.mustTrf(sh.trfId);
+            this.ledger.move(rec.intake.allocationId!, l.sku, l.lot, l.locationCode, stagingCodeFor(l.locationCode, this.mfcStagingNo(sh.mfcId)), q, taskId);
+            sh.pickedQty += q;
+            tl.pickedQty += q;
+            applied += q;
+            pLeft -= q;
+            touched.add(sh.trfId);
+          }
+          for (const [sh, q] of shortBy) {
+            const rec = this.mustTrf(sh.trfId);
+            sh.shortQty += q;
+            tl.shortQty += q;
             tl.shortReason = l.shortReason;
-            this.ledger.release(rec.intake.allocationId!, 'PICK_SHORTAGE', [{ sku: l.sku, lot: l.lot, locationCode: l.locationCode, qty: short }]);
+            this.ledger.release(rec.intake.allocationId!, 'PICK_SHORTAGE', [{ sku: l.sku, lot: l.lot, locationCode: l.locationCode, qty: q }]);
             // 현물은 지우지 않는다(차이 보고 ≠ 손실). 재계수 전까지 그 칸을 새 할당에서 뺀다
             this.ledger.blocked.add(`${l.sku}|${l.lot}|${l.locationCode}`);
-            const re = this.ledger.reallocate(rec.intake.allocationId!, l.sku, short, this.minDays(l.sku), ALLOCATION.safetyQty);
+            const re = this.ledger.reallocate(rec.intake.allocationId!, l.sku, q, this.minDays(l.sku), ALLOCATION.safetyQty);
             const got = re.reduce((s, x) => s + x.qty, 0);
-            this.emit('PickShortageReported', `${t.trfId} ${l.sku} 부족 ${short} (${l.shortReason}) → 재할당 ${got}${got < short ? ` · 남은 부족 ${short - got}` : ''}`);
+            this.emit('PickShortageReported', `${sh.trfId} ${l.sku} 부족 ${q} (${l.shortReason}) → 재할당 ${got}${got < q ? ` · 남은 부족 ${q - got}` : ''}`);
+            touched.add(sh.trfId);
           }
         }
         const resolved = t.lines.every((x) => x.pickedQty + x.shortQty === x.plannedQty);
@@ -692,7 +792,7 @@ export class MockBackend implements CdcOutboundPort {
         if (resolved) t.completedAt = this.iso();
         t.version += 1;
         // 재할당분이 선반에 있으면 바로 새 Task, 팔레트에 있으면 선반 보충 뒤에(replenishMove) 생긴다
-        this.spawnFollowUps(rec);
+        for (const id of touched) this.spawnFollowUps(this.mustTrf(id));
         this.refreshWave(this.mustWave(t.waveId));
         return { status: 'APPLIED', requestId: idempotencyKey, resultId: taskId, appliedQty: applied, version: t.version } satisfies CommandResponse;
       }),
@@ -707,9 +807,9 @@ export class MockBackend implements CdcOutboundPort {
     const w = rec.intake.waveId ? this.waves.get(rec.intake.waveId) : undefined;
     if (!w || w.state === 'PLANNED' || w.state === 'CANCELLED' || rec.cancelled || rec.departed) return;
     const open = new Map<string, number>();
-    for (const t of this.tasks.values()) {
-      if (t.trfId !== rec.intake.trfId || TASK_TERMINAL.includes(t.state)) continue;
-      for (const l of t.lines) open.set(`${l.sku}|${l.lot}|${l.locationCode}`, (open.get(`${l.sku}|${l.lot}|${l.locationCode}`) ?? 0) + l.plannedQty - l.pickedQty - l.shortQty);
+    for (const t of this.tasksOf(rec.intake.trfId)) {
+      if (TASK_TERMINAL.includes(t.state)) continue;
+      for (const l of t.lines) for (const sh of l.shares) if (sh.trfId === rec.intake.trfId) open.set(`${l.sku}|${l.lot}|${l.locationCode}`, (open.get(`${l.sku}|${l.lot}|${l.locationCode}`) ?? 0) + sh.plannedQty - sh.pickedQty - sh.shortQty);
     }
     const extra = this.ledger
       .holdingsOf(rec.intake.allocationId!)
@@ -717,12 +817,7 @@ export class MockBackend implements CdcOutboundPort {
       .map((h) => ({ ...h, qty: h.qty - (open.get(`${h.sku}|${h.lot}|${h.locationCode}`) ?? 0) }))
       .filter((h) => h.qty > 0);
     if (!extra.length) return;
-    const groups = new Map<string, typeof extra>();
-    for (const h of extra) {
-      const [, zone, floor] = h.locationCode.split('-');
-      groups.set(`${floor}${zone}`, [...(groups.get(`${floor}${zone}`) ?? []), h]);
-    }
-    for (const hs of groups.values()) this.newPickTask(w.waveId, rec.intake.trfId, hs);
+    this.buildTasks(w.waveId, [{ trfId: rec.intake.trfId, holds: extra }]);
     if (w.state === 'WORK_DONE') {
       w.state = 'IN_PROGRESS';
       w.version += 1;
@@ -740,7 +835,7 @@ export class MockBackend implements CdcOutboundPort {
 
   private pickedBySkuLot(trfId: string): Map<string, number> {
     const m = new Map<string, number>();
-    for (const t of this.tasks.values()) if (t.trfId === trfId) for (const l of t.lines) m.set(`${l.sku}|${l.lot}`, (m.get(`${l.sku}|${l.lot}`) ?? 0) + l.pickedQty);
+    for (const t of this.tasksOf(trfId)) for (const l of t.lines) for (const sh of l.shares) if (sh.trfId === trfId) m.set(`${l.sku}|${l.lot}`, (m.get(`${l.sku}|${l.lot}`) ?? 0) + sh.pickedQty);
     return m;
   }
 
@@ -859,7 +954,7 @@ export class MockBackend implements CdcOutboundPort {
         this.cancellations.set(c.requestId, c);
         if (body.scope === 'PARTIAL') {
           // MOCK 은 배포 전 축소만 [시뮬] — 배포 뒤 축소는 작업 버전 재발행이 필요해 거절
-          const released = [...this.tasks.values()].some((t) => t.trfId === trfId);
+          const released = this.tasksOf(trfId).length > 0;
           if (released || !body.lines?.length) {
             c.state = 'REJECTED';
             c.reason = released ? 'MOCK: 작업 배포 뒤 부분 축소 미지원' : '축소 행 없음';
@@ -889,8 +984,18 @@ export class MockBackend implements CdcOutboundPort {
     if ([...this.lpns.values()].some((l) => l.trfId === trfId && l.loaded)) return; // 하차(UNLOADED) 기다림
     const held = rec.intake.allocationId ? this.ledger.heldQty(rec.intake.allocationId) : 0;
     const commit = held > 0 ? this.ledger.release(rec.intake.allocationId!, 'PRE_DEPARTURE_CANCEL') : undefined;
-    for (const t of this.tasks.values()) if (t.trfId === trfId && !TASK_TERMINAL.includes(t.state)) {
-      t.state = 'CANCELLED';
+    for (const t of this.tasksOf(trfId)) {
+      if (TASK_TERMINAL.includes(t.state)) continue;
+      // 묶음 작업이면 그 TRF 남은 몫만 뺀다 — 다른 TRF 몫이 남으면 작업은 그대로 [시뮬]
+      for (const l of t.lines)
+        for (const sh of l.shares)
+          if (sh.trfId === trfId) {
+            const left = sh.plannedQty - sh.pickedQty - sh.shortQty;
+            sh.plannedQty -= left;
+            l.plannedQty -= left;
+          }
+      const resolved = t.lines.every((x) => x.pickedQty + x.shortQty === x.plannedQty);
+      if (resolved) t.state = t.lines.some((x) => x.pickedQty > 0) ? (t.lines.some((x) => x.shortQty > 0) ? 'PARTIAL' : 'DONE') : 'CANCELLED';
       t.version += 1;
     }
     rec.cancelled = true;
