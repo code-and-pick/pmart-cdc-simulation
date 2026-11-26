@@ -261,7 +261,12 @@ export async function runLanOne(
           const veh = trip.vehicleId ?? confirmed.vehicleId;
           live.scan = [...(confirmed.dockCode ? [{ label: '도크', value: confirmed.dockCode }] : []), ...(veh ? [{ label: `차량${trip.plateNo ? ` ${trip.plateNo}` : ''}`, value: veh }] : []), ...(await lpnCodes('실을 박스', (x) => !x.loaded).catch(() => []))];
           onStep([...steps]);
-          if (trip.state === 'LOADED' || trip.state === 'DEPARTED') return { v: trip, detail: `운행 ${trip.state} · 실음 ${sum(t, 'loadedQty')}개` };
+          if (trip.state === 'LOADED' || trip.state === 'DEPARTED') {
+            // 검품 합격분을 다 안 실었는데 상차완료됐으면 출차하지 않는다 — 출발은 한 번뿐이라 남은 박스는 미출발로 남음(사용자 2026-11-26 "박스 스캔 다 안 했는데 상차완료가 넘어갔어")
+            const left = (await lpnCodes('', (x) => !x.loaded).catch(() => [])).map((x) => x.value);
+            if (trip.state === 'LOADED' && left.length) throw new Error(`상차완료됐지만 안 실은 박스 ${left.length}개(${left.join(', ')}) — 출차하지 않음. 출발은 TRF 당 한 번이라 이대로 출차하면 남은 박스는 미출발로 남습니다`);
+            return { v: trip, detail: `운행 ${trip.state} · 실음 ${sum(t, 'loadedQty')}개` };
+          }
           if (Date.now() > until) throw new Error(`${opt.pdaWaitMin ?? 60}분 안에 상차완료가 안 됨 — 운행 ${trip.state}`);
           await wait(3000);
         }
