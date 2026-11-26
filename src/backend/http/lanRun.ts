@@ -252,12 +252,14 @@ export async function runLanOne(
       await waitStage('PDA 검품', 'DC 업무 → 검품 → 출고대기 박스 스캔', (t) => sum(t, 'sortedQty') > 0 && sum(t, 'inspectedQty') >= sum(t, 'sortedQty'), (t) => `합격 ${sum(t, 'inspectedQty')}/${sum(t, 'sortedQty')}`, inspectCodes);
       await step('PDA 상차 — 도크 스캔 → 운행 → 박스 스캔 → 상차완료', async () => {
         for (;;) {
-          const trip = (await deps.gateway.call<{ state?: string }>('GET', `/trips/${encodeURIComponent(tripId)}`)).body;
+          const trip = (await deps.gateway.call<{ state?: string; vehicleId?: string | null; plateNo?: string | null }>('GET', `/trips/${encodeURIComponent(tripId)}`)).body;
           const t = await deps.internal.getTransferIntake(trfId);
           const live = steps[steps.length - 1];
           live.detail = `도크 ${confirmed.dockCode ?? '-'} · 운행 ${tripId} ${trip.state ?? ''} · 실음 ${sum(t, 'loadedQty')}/${sum(t, 'inspectedQty')}`;
           live.trfId = trfId;
-          live.scan = [...(confirmed.dockCode ? [{ label: '도크', value: confirmed.dockCode }] : []), ...(await lpnCodes('실을 박스', (x) => !x.loaded).catch(() => []))];
+          // PDA 상차 = 도크 → 차량(차량 ID 나 번호판, 사용자 2026-11-26 "차량 번호 스캔하라는데 QR 이 없네") → 박스
+          const veh = trip.vehicleId ?? confirmed.vehicleId;
+          live.scan = [...(confirmed.dockCode ? [{ label: '도크', value: confirmed.dockCode }] : []), ...(veh ? [{ label: `차량${trip.plateNo ? ` ${trip.plateNo}` : ''}`, value: veh }] : []), ...(await lpnCodes('실을 박스', (x) => !x.loaded).catch(() => []))];
           onStep([...steps]);
           if (trip.state === 'LOADED' || trip.state === 'DEPARTED') return { v: trip, detail: `운행 ${trip.state} · 실음 ${sum(t, 'loadedQty')}개` };
           if (Date.now() > until) throw new Error(`${opt.pdaWaitMin ?? 60}분 안에 상차완료가 안 됨 — 운행 ${trip.state}`);
