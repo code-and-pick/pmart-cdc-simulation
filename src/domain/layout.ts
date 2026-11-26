@@ -6,7 +6,7 @@
 // 방 밖(승강기·출고대기)으로는 닫은 박스와 R/T 만 나간다(에어커튼). 7F H 작은 비식재는 오토스토어(§5).
 // 위치 코드 형식(CDC01-구역-층-통로-베이-단-슬롯)은 그대로 [정본 CDC-3].
 
-import { AISLE_PITCH, AUTOSTORE, BUILDING, FLOW, DOCK_PITCH, DOCKS, STAGING_X0, CAPACITY, CDC_FACTS, CENTER_ID, CHILLED_RACK, FLOOR_PYEONG, LIFTS_PER_FLOOR, PYEONG_M2, RACK, SHELF, SKU_PLACE, SKU_TARGET, STAGING_SLOTS, STORE, VEG_LANES } from '../config';
+import { AISLE_PITCH, AUTOSTORE, BUILDING, FLOW, DOCK_PITCH, DOCKS, STAGING_X0, CAPACITY, CDC_FACTS, CENTER_ID, CHILLED_RACK, FLOOR_PYEONG, MFCS, LIFTS_PER_FLOOR, PYEONG_M2, RACK, SHELF, SKU_PLACE, SKU_TARGET, STAGING_SLOTS, STORE, VEG_LANES } from '../config';
 import { CHILGOK_FLOORS, type EquipKind, type FloorNo, type FloorSpec, type RackZoneSpec, type Temp } from './sites/chilgok';
 
 export interface Rect {
@@ -519,12 +519,10 @@ class FloorBuilder {
       const temp: Temp = this.spec.zones.find((z) => z.letter === letter)?.temp ?? 'AMBIENT';
       // 출고대기를 두 글자로 나누는 층(5F 상온·냉동)은 짝수로 — 앞뒤 줄 칸 수가 같게(사용자 2026-11-26 "하나만 튀어나온 칸 없애")
       const per = this.spec.stagingLetters.length > 1 ? Math.floor(STAGING_SLOTS / 4) * 2 : STAGING_SLOTS;
-      // 앞줄(휠소터 쪽, z 3.7) = 01~절반, 뒷줄(북쪽 벽 쪽) = 나머지 — MFC 자리 PPC-01~05 가 앞줄에 한 칸씩이라
-      // 휠소터 슈트가 다른 롤테이너 위를 지나지 않는다(사용자 2026-11-26 "롤테이너가 컨베이어를 뚫고 있다")
-      const half = Math.ceil(per / 2);
+      // MFC 별 칸 묶음(사용자 2026-11-26 "MFC 별로 칸 묶음") — stagingCells: 01~05 = MFC 머리 칸(앞줄, 휠소터 슈트가 닿는 곳), 그 뒤 번호는 MFC 묶음의 나머지 칸, 남는 칸은 맨 끝
+      const cells = stagingCells(per);
       for (let k = 1; k <= per; k++) {
-        const row = k <= half ? 1 : 0;
-        const col = (k - 1) % half;
+        const { row, col } = cells[k - 1];
         this.staging.push({
           code: locationCode(letter, this.floor, 91, k, 0, 1),
           short: `PPC-${pad2(k)}${this.spec.stagingLetters.length > 1 ? letter : ''}`,
@@ -905,6 +903,29 @@ export function skuQuota(): Map<string, number> {
  * 피킹한 물건이 가는 출고대기(91) 자리 — 그 칸이 있는 층, 같은 온도대의 출고대기 구역 글자, MFC 자리 번호(PPC-01~05) [정본 CDC-5].
  * 5F 는 상온 C·냉동 A 두 줄, 6F 는 냉장 B, 7F 는 생활용품 G.
  */
+/**
+ * 출고대기 칸 배치 — 칸 번호(1~per) → 앞뒤 줄·열·MFC 묶음.
+ * 앞줄(휠소터 쪽) 열을 MFC 마다 c = ⌊절반 / MFC 수⌋ 열씩 나눠, MFC m 은 그 열들의 앞뒤 칸을 묶음으로 쓴다(6F·7F 3열 × 2줄 = 6칸, 5F 글자당 1열 × 2줄 = 2칸).
+ * 번호 01~05 는 MFC 머리 칸(묶음 맨 왼쪽 앞줄 — 슈트가 닿는 곳, 서버가 고르는 91 자리), 다음 번호는 MFC 1 묶음의 나머지부터 차례로, 묶음에 안 드는 칸은 맨 끝(mfc = -1).
+ * 칸 번호 집합(위치 목록)은 그대로 — 자리(좌표)만 바뀐다.
+ */
+export function stagingCells(per: number): { row: 0 | 1; col: number; mfc: number }[] {
+  const half = Math.ceil(per / 2);
+  const M = MFCS.length;
+  const c = Math.max(1, Math.floor(half / M));
+  const out: { row: 0 | 1; col: number; mfc: number }[] = [];
+  for (let m = 0; m < M; m++) out.push({ row: 1, col: m * c, mfc: m });
+  for (let m = 0; m < M; m++)
+    for (const row of [1, 0] as const)
+      for (let j = 0; j < c; j++) {
+        const col = m * c + j;
+        if (row === 1 && j === 0) continue;
+        if (col < half && (row === 1 || col < per - half)) out.push({ row, col, mfc: m });
+      }
+  for (const row of [1, 0] as const) for (let col = M * c; col < half; col++) if (row === 1 || col < per - half) out.push({ row, col, mfc: -1 });
+  return out.slice(0, per);
+}
+
 export function stagingCodeFor(rackLocationCode: string, stagingNo: number): string {
   const [, zone, floorStr] = rackLocationCode.split('-');
   const floor = Number(floorStr) as FloorNo;

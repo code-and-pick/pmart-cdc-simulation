@@ -6,7 +6,7 @@ import * as THREE from 'three';
 import { AppContext, useApp, useTick, useView, type AppCtx } from '../../app/context';
 import { OUTBOUND, RACK, SHELF, TMS, BUILDING, MFCS } from '../../config';
 import { TEMP_KO } from '../../sim/simulation';
-import type { FloorLayout, Location } from '../../domain/layout';
+import { stagingCells, type FloorLayout, type Location } from '../../domain/layout';
 import { SCENE, zoneBoxColor } from '../colors';
 import { boxTexture, palletTexture, plateTexture } from '../sprites';
 import { Agents, SimDriver } from './Agents';
@@ -253,32 +253,69 @@ function Staging({ f }: { f: FloorLayout }) {
   const view = useView();
   useTick();
   const pick = view.mfcFilter ? MFCS.find((m) => m.id === view.mfcFilter)?.staging : null;
+  // 출고대기 칸을 MFC 묶음으로(사용자 2026-11-26) — 글자마다 stagingCells 로 묶음을 알고, 그 MFC 머리 칸(서버가 고른 91)에 쌓인 박스를 묶음 칸에 R/T 한 대씩 나눠 세운다
+  const letters = [...new Set(f.staging.map((s) => s.zone))];
   return (
     <>
-      {f.staging.map((s) => {
-        const used = s.bay <= 5;
-        const cold = s.temp !== 'AMBIENT';
-        const boxes = sim.staged.get(s.code)?.length ?? 0;
-        const rolls = Math.min(4, Math.ceil(boxes / OUTBOUND.boxesPerRt));
-        return (
-          <group key={s.code} position={[s.pos.x, 0, s.pos.z]} visible={!pick || s.bay === pick}>
-            {pick === s.bay && (
-              <mesh rotation-x={-Math.PI / 2} position={[0, 0.03, 0]}>
-                <ringGeometry args={[1.0, 1.25, 32]} />
-                <meshBasicMaterial color={0xffb020} />
+      {letters.map((letter) => {
+        const slots = f.staging.filter((s) => s.zone === letter).sort((p, q) => p.bay - q.bay);
+        const cells = stagingCells(slots.length);
+        const cold = slots[0]?.temp !== 'AMBIENT';
+        return MFCS.map((m, mi) => {
+          const block = slots.filter((s) => cells[s.bay - 1]?.mfc === mi);
+          if (!block.length) return null;
+          const head = slots.find((s) => s.bay === m.staging) ?? block[0];
+          const boxes = block.reduce((x, s) => x + (sim.staged.get(s.code)?.length ?? 0), 0);
+          const rolls = Math.ceil(boxes / OUTBOUND.boxesPerRt);
+          const xs = block.map((s) => s.pos.x);
+          const x0 = Math.min(...xs) - 0.65;
+          const x1 = Math.max(...xs) + 0.65;
+          const zs = block.map((s) => s.pos.z);
+          return (
+            <group key={`${letter}-${m.id}`} visible={!pick || m.staging === pick}>
+              {/* 묶음 테두리 + 이름(앞줄 남쪽 바닥) */}
+              <mesh rotation-x={-Math.PI / 2} position={[(x0 + x1) / 2, 0.008, (Math.min(...zs) + Math.max(...zs)) / 2]}>
+                <planeGeometry args={[x1 - x0, Math.max(...zs) - Math.min(...zs) + 2.0]} />
+                <meshBasicMaterial color={pick === m.staging ? 0xffb020 : 0x5b6474} transparent opacity={0.18} />
               </mesh>
-            )}
-            <mesh rotation-x={-Math.PI / 2} position={[0, 0.01, 0]}>
-              <planeGeometry args={[1.2, 1.9]} />
-              <meshBasicMaterial color={SCENE.hazard} transparent opacity={0.35} />
-            </mesh>
-            {used && rolls === 0 && <RollContainer x={0} z={0} fill={0} />}
-            {Array.from({ length: rolls }, (_, i) => (
-              <RollContainer key={i} x={(i % 2) * 0.45 - 0.22} z={Math.floor(i / 2) * 0.8 - 0.4} cold={cold} fill={0.8} />
-            ))}
-          </group>
-        );
+              <mesh rotation-x={-Math.PI / 2} position={[(x0 + x1) / 2, 0.02, Math.max(...zs) + 1.35]}>
+                <planeGeometry args={[Math.min(4, x1 - x0), 0.55]} />
+                <meshBasicMaterial map={plateTexture(`MFC-${String(m.staging).padStart(2, '0')} ${m.name.replace(/^\d호점 /, '')}`, { w: 320, h: 64 })} transparent depthWrite={false} />
+              </mesh>
+              {block.map((_s, i) => {
+                // 칸마다 R/T 한 대(머리 칸부터), 묶음보다 많으면 머리 칸부터 두 대씩
+                const n = rolls <= block.length ? (i < rolls ? 1 : 0) : 1 + (i < rolls - block.length ? 1 : 0);
+                const order = [head, ...block.filter((x) => x !== head)];
+                const at = order[i];
+                return (
+                  <group key={at.code} position={[at.pos.x, 0, at.pos.z]}>
+                    <mesh rotation-x={-Math.PI / 2} position={[0, 0.01, 0]}>
+                      <planeGeometry args={[1.2, 1.9]} />
+                      <meshBasicMaterial color={SCENE.hazard} transparent opacity={0.35} />
+                    </mesh>
+                    {n === 0 && at === head && <RollContainer x={0} z={0} fill={0} />}
+                    {Array.from({ length: n }, (_, j) => (
+                      <RollContainer key={j} x={0} z={n > 1 ? j * 0.8 - 0.4 : 0} cold={cold} fill={0.8} />
+                    ))}
+                  </group>
+                );
+              })}
+            </group>
+          );
+        });
       })}
+      {/* 묶음에 안 드는 남는 칸 — 표시만 흐리게 */}
+      {f.staging
+        .filter((s) => {
+          const n = f.staging.filter((x) => x.zone === s.zone).length;
+          return stagingCells(n)[s.bay - 1]?.mfc === -1;
+        })
+        .map((s) => (
+          <mesh key={s.code} rotation-x={-Math.PI / 2} position={[s.pos.x, 0.01, s.pos.z]} visible={!pick}>
+            <planeGeometry args={[1.2, 1.9]} />
+            <meshBasicMaterial color={SCENE.hazard} transparent opacity={0.12} />
+          </mesh>
+        ))}
     </>
   );
 }
