@@ -227,7 +227,7 @@ export async function runLanOne(
         const out: { label: string; value: string }[] = [];
         for (const x of ts) {
           if (x.regionCode) out.push({ label: `지역 카드 ${x.regionCode}`, value: x.regionCode });
-          for (const l of x.lines) if (l.pickedQty + l.shortQty < l.plannedQty) out.push({ label: `위치 (${l.plannedQty - l.pickedQty - l.shortQty}개)`, value: l.locationCode }, { label: `상품 ${l.sku} × ${l.plannedQty - l.pickedQty - l.shortQty}`, value: l.sku });
+          for (const l of x.lines) if (l.pickedQty + l.shortQty < l.plannedQty) out.push({ label: `위치 — 여기서 ${l.sku} ${l.plannedQty - l.pickedQty - l.shortQty}개 집기`, value: l.locationCode }, { label: `상품 ${l.sku} — ${l.plannedQty - l.pickedQty - l.shortQty}번 찍기`, value: l.sku });
         }
         return out.filter((c, i, a) => a.findIndex((y) => y.value === c.value) === i);
       };
