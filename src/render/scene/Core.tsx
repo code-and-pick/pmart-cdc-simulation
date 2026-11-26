@@ -133,6 +133,7 @@ export function Picker() {
   useEffect(() => {
     const el = gl.domElement;
     const ray = new THREE.Raycaster();
+    ray.layers.enableAll(); // AutoBatch 가 원본을 숨김 레이어로 옮겨도 누르기는 원본으로
     const box = new THREE.Box3();
     const hit = new THREE.Vector3();
     let down: { x: number; y: number } | null = null;

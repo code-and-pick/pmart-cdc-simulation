@@ -10,6 +10,8 @@ import { stagingCells, type FloorLayout, type Location } from '../../domain/layo
 import { SCENE, zoneBoxColor } from '../colors';
 import { boxTexture, palletTexture, plateTexture } from '../sprites';
 import { Agents, SimDriver } from './Agents';
+import { RollLayer } from './RollLayer';
+import { AutoBatch } from './AutoBatch';
 import { Facility, Lights } from './Facility';
 import { EquipmentModel, FreightLift, RollContainer, WorkLights } from './Equipment3D';
 import { CameraRig, CellLabels, Picker } from './Core';
@@ -24,6 +26,8 @@ export function SiteScene({ app }: { app: AppCtx }) {
         <Lights />
         <FloorContent />
         <Agents />
+        <RollLayer />
+        <AutoBatch />
         <SimDriver />
         {PerfProbe && (
           <Suspense fallback={null}>

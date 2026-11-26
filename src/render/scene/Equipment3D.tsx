@@ -15,6 +15,7 @@ import type { FloorNo } from '../../domain/sites/chilgok';
 import { autostorePorts, dasRows, inboundSpots, mfcSlotIndex } from '../../sim/site';
 import { boxTexture, crateTexture, palletTexture, plateTexture } from '../sprites';
 import { StaticMerge } from './StaticMerge';
+import { rolls, type RollEntry } from './RollLayer';
 
 const BLUE = 0x1f63d0;
 const STEEL = 0xc9ced6;
@@ -110,77 +111,23 @@ function TowerLight({ x, z, busy }: { x: number; z: number; busy: () => boolean 
  * CDC 만 더한 것: 저온(cold)은 사진처럼 은색 보냉 커버를 씌움, 실린 상자는 fill(0~1) 만큼 MFC 상자 무늬로 쌓음.
  */
 export function RollContainer({ x, z, cold = false, rot = 0, fill = 0.6 }: { x: number; z: number; cold?: boolean; rot?: number; fill?: number }) {
-  const W = 0.8;
-  const D = 0.6;
-  const H = 1.7;
-  const frame = 0x2f6fd6; // MFC 파랑
-  const bar = { color: frame, metalness: 0.5, roughness: 0.35 };
+  // 모양은 RollLayer 가 모든 R/T 를 부품별 InstancedMesh 로 한 번에 그린다(성능, 2026-11-26). 여기는 자리(group)만 두고 등록
+  const ref = useRef<THREE.Group>(null!);
   const layers = Math.round(Math.max(0, Math.min(1, fill)) * 4); // 상자 층 0~4(층마다 2개)
-  return (
-    <group position={[x, 0, z]} rotation={[0, rot, 0]}>
-      <StaticMerge>
-        <mesh position={[0, 0.16, 0]}>
-          <boxGeometry args={[W, 0.04, D]} />
-          <meshStandardMaterial color={0x24569f} metalness={0.3} roughness={0.5} />
-        </mesh>
-        {[-1, 1].flatMap((sx) =>
-          [-1, 1].map((sz) => (
-            <mesh key={`w${sx}${sz}`} position={[sx * (W / 2 - 0.07), 0.06, sz * (D / 2 - 0.07)]} rotation={[0, 0, Math.PI / 2]}>
-              <cylinderGeometry args={[0.06, 0.06, 0.04, 12]} />
-              <meshStandardMaterial color={0x1f2229} />
-            </mesh>
-          )),
-        )}
-        {[-1, 1].flatMap((sx) =>
-          [-1, 1].map((sz) => (
-            <mesh key={`p${sx}${sz}`} position={[sx * (W / 2 - 0.015), 0.18 + (H - 0.18) / 2, sz * (D / 2 - 0.015)]}>
-              <boxGeometry args={[0.03, H - 0.18, 0.03]} />
-              <meshStandardMaterial {...bar} />
-            </mesh>
-          )),
-        )}
-        {[0.45, 0.75, 1.05, 1.35, 1.65].flatMap((y) => [
-          <mesh key={`b${y}`} position={[0, y, -D / 2 + 0.015]}>
-            <boxGeometry args={[W, 0.02, 0.015]} />
-            <meshStandardMaterial {...bar} />
-          </mesh>,
-          ...[-1, 1].map((sx) => (
-            <mesh key={`s${y}${sx}`} position={[sx * (W / 2 - 0.015), y, 0]}>
-              <boxGeometry args={[0.015, 0.02, D]} />
-              <meshStandardMaterial {...bar} />
-            </mesh>
-          )),
-        ])}
-        {[-0.25, -0.08, 0.08, 0.25].map((dx) => (
-          <mesh key={`v${dx}`} position={[dx, 0.18 + (H - 0.18) / 2, -D / 2 + 0.015]}>
-            <boxGeometry args={[0.012, H - 0.18, 0.012]} />
-            <meshStandardMaterial {...bar} />
-          </mesh>
-        ))}
-        {Array.from({ length: layers }, (_, k) =>
-          [-1, 1].map((sx) => (
-            <mesh key={`c${k}${sx}`} position={[sx * 0.18, 0.18 + 0.18 + k * 0.37, 0]}>
-              <boxGeometry args={[0.34, 0.35, 0.5]} />
-              <meshStandardMaterial color={(k + (sx > 0 ? 1 : 0)) % 2 ? 0xc99a6b : 0xd2a679} roughness={0.85} map={boxTexture()} />
-            </mesh>
-          )),
-        )}
-      </StaticMerge>
-      {cold && (
-        // 보냉 커버(사진: 은색 덮개, 앞에 파란 창) — 철망 위에 씌움
-        <>
-          <mesh position={[0, 0.18 + (H - 0.18) / 2, 0]}>
-            <boxGeometry args={[W + 0.05, H - 0.12, D + 0.05]} />
-            <meshStandardMaterial color={0xdde1e6} metalness={0.15} roughness={0.35} />
-          </mesh>
-          <mesh position={[0, H * 0.62, D / 2 + 0.03]}>
-            <planeGeometry args={[0.32, 0.36]} />
-            <meshStandardMaterial color={0x2f7fd6} />
-          </mesh>
-        </>
-      )}
-    </group>
-  );
+  const entry = useRef<RollEntry | null>(null);
+  useLayoutEffect(() => {
+    const e: RollEntry = { obj: ref.current, cold, layers };
+    entry.current = e;
+    rolls.add(e);
+    return () => {
+      rolls.delete(e);
+    };
+  }, []);
+  if (entry.current) {
+    entry.current.cold = cold;
+    entry.current.layers = layers;
+  }
+  return <group ref={ref} position={[x, 0, z]} rotation={[0, rot, 0]} />;
 }
 
 /**
