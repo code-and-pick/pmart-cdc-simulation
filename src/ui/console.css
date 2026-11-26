@@ -1810,3 +1810,6 @@ tr.ex td { color: var(--muted); font-style: italic; }
 .lan-trf .lt-act button { height: 32px; border-radius: 8px; border: 0; background: #2f80ed; color: #fff; font-weight: 700; font-size: 12.5px; cursor: pointer; }
 .lan-trf .lt-act button:disabled { opacity: .5; cursor: default; }
 .lan-trf .lt-codes { display: grid; gap: 6px; }
+.lr-open-row.on span b { color: #2f80ed; }
+.lr-open-row.on { background: color-mix(in srgb, #2f80ed 9%, transparent); border-radius: 7px; }
+.lr-open-row i { width: 0; }

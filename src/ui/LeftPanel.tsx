@@ -776,7 +776,7 @@ function LanRun() {
           찍을 코드 {scanCodes.length}개 보기
         </button>
       )}
-      {!busy && <LanOpenTrfs onResume={go} />}
+      <LanOpenTrfs onResume={go} busy={busy} />
       {steps && steps.length > 0 && (
         <ol className="lr-steps">
           {steps.map((st, i) => (
@@ -796,16 +796,18 @@ function LanRun() {
 
 /** PDA 가 찍을 코드 팝업 — 앱 맨 위에 늘 붙어 있어 어느 탭·3D 를 눌러도 남는다(사용자 2026-11-26 "지역 카드 어딨어? 팝업으로", "화면 누르니까 팝업 없어졌어") */
 /** LAN 에 출발 전으로 남은 시험 TRF — PDA 로 하던 걸 그 단계부터 이어서(사용자 2026-11-26 "출고대기로 넘어갔는데 계속 피킹 팝업") */
-function LanOpenTrfs({ onResume }: { onResume: (trfId: string) => void }) {
+function LanOpenTrfs({ onResume, busy }: { onResume: (trfId: string) => void; busy: boolean }) {
   const { real } = useApp();
-  const [rows, setRows] = useState<{ trfId: string; trfNumber?: string; state: string; mfcId: string; pickedQty: number; allocatedQty: number }[]>([]);
+  const viewing = useLanRun().trfId;
+  const [rows, setRows] = useState<{ trfId: string; trfNumber?: string; state: string; mfcId: string; pickedQty: number; allocatedQty: number; updatedAt?: string }[]>([]);
   useEffect(() => {
     if (!real) return;
     let on = true;
     const load = () =>
       real.backend.client
-        .call<{ items?: { trfId: string; trfNumber?: string; state: string; mfcId: string; pickedQty: number; allocatedQty: number }[] }>('GET', '/cdcs/CDC01/transfers', { query: { size: '50' } })
-        .then((r) => on && setRows((r.body.items ?? []).filter((x) => x.trfId.startsWith('TRF-SIM-') && ['IN_WAVE', 'PICKED', 'SORTED', 'INSPECTED', 'LOADED'].includes(x.state))))
+        .call<{ items?: { trfId: string; trfNumber?: string; state: string; mfcId: string; pickedQty: number; allocatedQty: number; updatedAt?: string }[] }>('GET', '/cdcs/CDC01/transfers', { query: { size: '50' } })
+        // 출발한 것도 오늘 것은 남김(도착·인계를 이어 봄) — 단추는 [흐름]만
+        .then((r) => on && setRows((r.body.items ?? []).filter((x) => x.trfId.startsWith('TRF-SIM-') && (['IN_WAVE', 'PICKED', 'SORTED', 'INSPECTED', 'LOADED'].includes(x.state) || (x.state === 'DEPARTED' && Date.now() - new Date(x.updatedAt ?? 0).getTime() < 24 * 3600_000))).reverse()))
         .catch(() => undefined);
     void load();
     const t = setInterval(load, 10_000);
@@ -815,16 +817,20 @@ function LanOpenTrfs({ onResume }: { onResume: (trfId: string) => void }) {
     };
   }, [real]);
   if (!rows.length) return null;
+  // 단계 이름으로 — 어느 TRF 가 어디까지 왔는지 한눈에(사용자 2026-11-26 "상차하고 있었는데 웬 피킹" — 다른 TRF 를 이어 하기로 눌렀음)
+  const KO: Record<string, string> = { IN_WAVE: '피킹 전·중', PICKED: '분배 전', SORTED: '검품 전', INSPECTED: '상차 전', LOADED: '출차 전', DEPARTED: '출발함' };
   return (
     <div className="lr-open">
-      <b>하던 TRF 이어 하기</b>
+      <b>시험 TRF (최근 순)</b>
       {rows.map((x) => (
-        <div key={x.trfId} className="lr-open-row">
-          <span>
-            {x.trfNumber ?? x.trfId} · {x.state} · 집음 {x.pickedQty}/{x.allocatedQty}
+        <div key={x.trfId} className={`lr-open-row${x.trfId === viewing ? ' on' : ''}`}>
+          <span title={x.trfId}>
+            <b>{x.trfNumber ?? x.trfId}</b> {KO[x.state] ?? x.state} · 집음 {x.pickedQty}/{x.allocatedQty}
           </span>
-          <button className="ghost" onClick={() => setLanRun({ trfId: x.trfId })}>흐름</button>
-          <button onClick={() => onResume(x.trfId)}>이어 하기</button>
+          <button className="ghost" onClick={() => setLanRun({ trfId: x.trfId })}>
+            흐름
+          </button>
+          {x.state === 'DEPARTED' ? <i /> : <button disabled={busy} title={busy ? "지금 도는 실행이 끝나야 함" : undefined} onClick={() => onResume(x.trfId)}>이어 하기</button>}
         </div>
       ))}
     </div>
