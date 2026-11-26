@@ -1802,3 +1802,11 @@ tr.ex td { color: var(--muted); font-style: italic; }
 .lr-sel { min-width: 0; width: 100%; }
 /* 실서버 TRF 흐름 카드 — 보라 테두리 빼고 다른 카드와 같은 테두리(사용자 2026-11-26 "보라 형광테두리 별론데") */
 .sec.wflow.lan-trf { border-color: var(--line); box-shadow: none; }
+/* 출차 뒤 운행 단추(도착·정차 출발·운행 종료) */
+.lan-trf .lt-act { display: grid; gap: 8px; padding: 10px; border: 1px solid var(--line); border-radius: 10px; background: color-mix(in srgb, #2f80ed 7%, transparent); }
+.lan-trf .lt-act-h { display: grid; gap: 2px; }
+.lan-trf .lt-act-h b { font-size: 12.5px; }
+.lan-trf .lt-act-h span, .lan-trf .lt-act p, .lan-trf .lt-act small { color: var(--muted); font-size: 11.5px; margin: 0; }
+.lan-trf .lt-act button { height: 32px; border-radius: 8px; border: 0; background: #2f80ed; color: #fff; font-weight: 700; font-size: 12.5px; cursor: pointer; }
+.lan-trf .lt-act button:disabled { opacity: .5; cursor: default; }
+.lan-trf .lt-codes { display: grid; gap: 6px; }

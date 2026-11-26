@@ -3,12 +3,20 @@
 import { useEffect, useState } from 'react';
 import { useApp } from '../app/context';
 import type { TransferIntake } from '../domain/contract';
+import { ApiProblem } from '../domain/contract';
+import { Barcode } from './Barcode';
 import { setLanRun, useLanRun } from './lanRunStore';
 
-const STAGES = ['인수', '할당', 'Wave 배포', '피킹', '분배·패킹', '검품', '상차', '출발'] as const;
-const COLORS = ['#8e9aaf', '#56ccf2', '#2f80ed', '#27ae60', '#9b51e0', '#f2994a', '#eb5757', '#219653'];
+const STAGES = ['인수', '할당', 'Wave 배포', '피킹', '분배·패킹', '검품', '상차', '출발', 'MFC 도착', '하차 인계', '운행 종료'] as const;
+const COLORS = ['#8e9aaf', '#56ccf2', '#2f80ed', '#27ae60', '#9b51e0', '#f2994a', '#eb5757', '#219653', '#2d9cdb', '#bb6bd9', '#6c7a89'];
 /** 지금 하고 있는(아직 안 끝난) 단계 번호 — 다 끝났으면 STAGES.length */
-function stageOf(t: TransferIntake): number {
+function stageOf(t: TransferIntake, trip?: Trip | null, stop?: Stop | null): number {
+  if (t.state === 'DEPARTED' && trip && stop) {
+    if (trip.state === 'COMPLETED') return 11;
+    if (stop.state === 'PLANNED') return 8;
+    if (stop.state === 'ARRIVED') return 9;
+    return 10;
+  }
   switch (t.state) {
     case 'RECEIVED':
       return 0;
@@ -36,6 +44,25 @@ function stageOf(t: TransferIntake): number {
 const hm = (iso?: string | null) => (iso ? new Date(iso).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }) : '');
 const who = (id?: string | null) => (id ? (id.startsWith('OP-') ? `작업자 ${id.slice(3, 9)}` : id) : '');
 
+interface Stop {
+  seq: number;
+  mfcId: string;
+  state: string;
+  trfIds?: string[];
+  arrivedAt?: string | null;
+  handedOverAt?: string | null;
+  departedAt?: string | null;
+  plannedArrivalAt?: string | null;
+}
+interface Trip {
+  tripId: string;
+  state: string;
+  vehicleId?: string | null;
+  departedAt?: string | null;
+  endedAt?: string | null;
+  stops: Stop[];
+  events?: { at: string; type: string; stopSeq?: number | null; actorId?: string | null; source?: string | null }[];
+}
 interface Task {
   taskId: string;
   taskNumber?: string;
@@ -72,8 +99,11 @@ interface Data {
   tasks: Task[];
   lpns: Lpn[];
   events: Ev[];
+  trip: Trip | null;
   at: number;
 }
+
+const TRIP_KO: Record<string, string> = { SCHEDULED: '계획완료', CHECKED_IN: '입차', LOADED: '상차완료', DEPARTED: '출차', ARRIVED: 'MFC 도착', STOP_ARRIVED: 'MFC 도착', HANDED_OVER: '하차 인계', STOP_HANDED_OVER: '하차 인계', STOP_DEPARTED: '정차 출발', COMPLETED: '운행 종료', ENDED: '운행 종료' };
 
 const EV_KO: Record<string, string> = {
   TRF_RECEIVED: 'TRF 인수',
@@ -96,12 +126,14 @@ export function LanTrfFlow() {
       try {
         const c = real.backend.client;
         const intake = await real.internal.getTransferIntake(trfId);
-        const [sum, tasks, lpns, events] = await Promise.all([
+        const [sum, tasks, lpns, events, trips] = await Promise.all([
           c.call<{ items?: { trfId: string; trfNumber?: string; waveNumber?: string }[] }>('GET', '/cdcs/CDC01/transfers', { query: { size: '100' } }).then((r) => (r.body.items ?? []).find((x) => x.trfId === trfId)),
           intake.waveId ? c.call<{ items?: Task[] }>('GET', '/cdcs/CDC01/tasks', { query: { waveId: intake.waveId } }).then((r) => r.body.items ?? []) : Promise.resolve([] as Task[]),
           c.call<{ items?: Lpn[] }>('GET', '/cdcs/CDC01/lpns', { query: { trfId, size: '100' } }).then((r) => r.body.items ?? []),
           c.call<{ items?: Ev[] }>('GET', '/cdcs/CDC01/events', { query: { size: '200' } }).then((r) => r.body.items ?? []),
+          c.call<{ items?: Trip[] }>('GET', '/cdcs/CDC01/trips', { query: { size: '100' } }).then((r) => r.body.items ?? []).catch(() => [] as Trip[]),
         ]);
+        const trip = trips.find((x) => x.stops.some((st) => (st.trfIds ?? []).includes(trfId))) ?? null;
         const taskIds = new Set(tasks.map((t) => t.taskId));
         if (!on) return;
         setD({
@@ -110,6 +142,7 @@ export function LanTrfFlow() {
           waveNumber: sum?.waveNumber,
           tasks,
           lpns,
+          trip,
           events: events.filter((e) => e.trfId === trfId || (intake.waveId && e.waveId === intake.waveId && !e.taskId) || (e.taskId && taskIds.has(e.taskId))),
           at: Date.now(),
         });
@@ -127,15 +160,19 @@ export function LanTrfFlow() {
   }, [real, trfId]);
   if (!real || !trfId) return null;
   const t = d?.intake;
-  const cur = t ? stageOf(t) : -1;
+  const trip = d?.trip ?? null;
+  const stop = trip?.stops.find((st) => (st.trfIds ?? []).includes(trfId)) ?? null;
+  const cur = t ? stageOf(t, trip, stop) : -1;
+  const loadedLpns = (d?.lpns ?? []).filter((l) => l.loaded);
   const q = (k: 'approvedQty' | 'allocatedQty' | 'pickedQty' | 'sortedQty' | 'inspectedQty' | 'loadedQty' | 'departedQty') => (t ? t.progress.reduce((a, p) => a + p[k], 0) : 0);
-  const stageQty = ['', `${q('allocatedQty')}/${q('approvedQty')}`, d?.waveNumber ?? '', `${q('pickedQty')}/${q('allocatedQty')}`, `${q('sortedQty')}/${q('pickedQty')}`, `${q('inspectedQty')}/${q('sortedQty')}`, `${q('loadedQty')}/${q('inspectedQty')}`, `${q('departedQty')}`];
+  const stageQty = ['', `${q('allocatedQty')}/${q('approvedQty')}`, d?.waveNumber ?? '', `${q('pickedQty')}/${q('allocatedQty')}`, `${q('sortedQty')}/${q('pickedQty')}`, `${q('inspectedQty')}/${q('sortedQty')}`, `${q('loadedQty')}/${q('inspectedQty')}`, `${q('departedQty')}`, stop?.arrivedAt ? hm(stop.arrivedAt) : '', stop?.handedOverAt ? hm(stop.handedOverAt) : '', trip?.endedAt ? hm(trip.endedAt) : ''];
   // 시간 순 기록 — 사건 + 박스(분류·검품·상차 시각)
   const log: { at: string; what: string; who?: string }[] = [
     ...(d?.events ?? []).map((e) => {
       const task = d?.tasks.find((x) => x.taskId === e.taskId);
       return { at: e.at, what: `${EV_KO[e.type] ?? e.type}${e.refNumber ? ` ${e.refNumber}` : ''}${task?.regionCode && e.type === 'TASK_STARTED' ? ` · 지역 ${task.regionCode}` : ''}`, who: who(e.actorId) };
     }),
+    ...(trip?.events ?? []).filter((e) => e.stopSeq == null || e.stopSeq === stop?.seq).map((e) => ({ at: e.at, what: `운행 ${TRIP_KO[e.type] ?? e.type}${e.stopSeq ? ` · 정차 ${e.stopSeq}` : ''}`, who: e.source === 'mfc-app' ? 'PDA' : e.source === 'pmart-cdc-simulation' ? '시뮬레이터' : '' })),
     ...(d?.lpns ?? []).flatMap((l) => [
       ...(l.sortedAt ? [{ at: l.sortedAt, what: `박스 닫음 ${l.lpn} · ${l.contents.map((c) => `${c.sku}×${c.qty}`).join(', ')}`, who: who(l.sortedBy) }] : []),
       ...(l.inspectedAt ? [{ at: l.inspectedAt, what: `검품 ${l.inspection === 'PASSED' ? '합격' : l.inspection === 'FAILED' ? '불합격' : l.inspection} ${l.lpn}` }] : []),
@@ -171,6 +208,8 @@ export function LanTrfFlow() {
           </li>
         ))}
       </ol>
+
+      {trip && stop && t?.state === 'DEPARTED' && <TripActions trip={trip} stop={stop} boxes={loadedLpns.map((l) => l.lpn)} />}
 
       {!!d?.tasks.length && (
         <>
@@ -244,5 +283,63 @@ export function LanTrfFlow() {
         </>
       )}
     </section>
+  );
+}
+
+/** 출차 뒤 — 실서버엔 DC 트럭 기사 앱이 없어 도착·정차 출발·운행 종료를 운영자로 보낸다(transport-execution, OPERATOR). 하차 인계는 MFC 점원이 PDA 로(사용자 2026-11-26 "도착 보내는 버튼을 시뮬에 만들어도 되고") */
+function TripActions({ trip, stop, boxes }: { trip: Trip; stop: Stop; boxes: string[] }) {
+  const { real } = useApp();
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  if (!real) return null;
+  const send = async (path: string, label: string) => {
+    setBusy(true);
+    setMsg(null);
+    try {
+      await real.backend.client.call('POST', path, { body: {}, idempotencyKey: `sim-lan-${label}-${trip.tripId}-${stop.seq}` });
+      setMsg(`${label} 보냄`);
+    } catch (e) {
+      setMsg(`${label} 막힘 — ${e instanceof ApiProblem ? `${e.problem.code} ${e.problem.detail ?? ''}` : String(e)}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const base = `/trips/${encodeURIComponent(trip.tripId)}`;
+  return (
+    <div className="lt-act">
+      <div className="lt-act-h">
+        <b>운행 {trip.tripId}</b>
+        <span>
+          {trip.vehicleId ?? ''} · 정차 {stop.seq} {stop.mfcId} {stop.state}
+          {stop.plannedArrivalAt ? ` · 도착 예정 ${hm(stop.plannedArrivalAt)}` : ''}
+        </span>
+      </div>
+      {trip.state === 'DEPARTED' && stop.state === 'PLANNED' && (
+        <button disabled={busy} onClick={() => void send(`${base}/stops/${stop.seq}/arrivals`, 'MFC 도착')}>
+          MFC 도착 보내기
+        </button>
+      )}
+      {stop.state === 'ARRIVED' && (
+        <>
+          <p>MFC 점원이 PDA(입고 → 하차 인계)로 박스를 찍습니다</p>
+          <div className="lt-codes">
+            {boxes.map((b) => (
+              <Barcode key={b} value={b} caption="하차 인계할 박스" />
+            ))}
+          </div>
+        </>
+      )}
+      {stop.state === 'HANDED_OVER' && (
+        <button disabled={busy} onClick={() => void send(`${base}/stops/${stop.seq}/departures`, '정차 출발')}>
+          정차 출발 보내기
+        </button>
+      )}
+      {trip.state !== 'COMPLETED' && trip.stops.every((st) => st.state === 'DEPARTED') && (
+        <button disabled={busy} onClick={() => void send(`${base}/physical-ends`, '운행 종료')}>
+          운행 종료 보내기(DC 복귀)
+        </button>
+      )}
+      {msg && <small>{msg}</small>}
+    </div>
   );
 }
