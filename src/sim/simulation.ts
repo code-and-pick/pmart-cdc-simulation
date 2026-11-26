@@ -860,7 +860,8 @@ export class Simulation implements DutyClock {
    * DPS(냉동): 빈 박스를 들고 작업자 색 불·숫자가 켜진 선반 칸에서 집는다 → 박스 닫아 DPS 컨베이어에.
    * 라인용 상자 상품(6F): 자키가 상품 박스를 핸드자키로 라인에 가져다준다.
    */
-  private async pickOnce(a: Agent) {
+  /** only = 받을 작업 거르기(분배 작업자 — 냉장 G 지역 묶음 = 야채 레인 분배). 없으면 분배대에서 기다림 */
+  private async pickOnce(a: Agent, only?: { zone: string; pickMode: 'REGION_BATCH' }) {
     const site = this.floorSite(a);
     const held = this.carts.get(a.id);
     if (held && this.time / 60 >= this.window(a).end - 20) {
@@ -870,7 +871,8 @@ export class Simulation implements DutyClock {
     let task: Task;
     try {
       const fzones = this.floorOf(a).spec.zones;
-      if (fzones.some((z) => z.letter === 'H')) {
+      if (only) ({ task } = await this.backend.pullNextTask(CENTER_ID, a.id, { kind: 'PICK', floor: String(a.floor), ...only }, newId('next')));
+      else if (fzones.some((z) => z.letter === 'H')) {
         // 냉동 H 가 있는 층(5F)의 FC — 다음 작업 받기 구역 거르기(계약 그대로)
         let got: Task | null = null;
         let last: unknown = null;
@@ -891,6 +893,19 @@ export class Simulation implements DutyClock {
       if (e instanceof ApiProblem && e.problem.code === 'NO_TASK_AVAILABLE') {
         if (held) {
           await this.deliver(a, held);
+          return;
+        }
+        if (only) {
+          // 분배 작업자 — 분배대(크레이트 줄) 앞에서 기다림
+          const e = this.floorOf(a).equipment.find((x) => x.kind === 'SPLIT');
+          if (e) {
+            const rows = dasRowsOf(this.floorOf(a), 'SPLIT');
+            const k = Number(a.id.slice(-2));
+            const spot = site.lineSpot('SPLIT', k % rows, Math.floor(k / rows) % 6, 6).stand;
+            if (a.at.x !== spot.x || a.at.z !== spot.z) await this.go(a, spot, WORK.walk, '분배대로');
+          }
+          a.pda = { title: HANDLING_TITLE.SPLIT, step: '야채 분배 작업 기다림', rows: [] };
+          await a.wait(WORK.idlePoll, '분배 작업 대기');
           return;
         }
         a.pda = { title: 'FC 피킹', step: '받을 작업 없음', rows: [] };
@@ -1489,8 +1504,11 @@ export class Simulation implements DutyClock {
   private async sortOnce(a: Agent) {
     const k = Number(a.id.slice(-2));
 
-    if (k <= FLOW.lineWorkers[a.floor as FloorNo]) await this.lineOnce(a, Math.floor((k - 1) / WORK.perLine));
+    if (k <= FLOW.lineWorkers[a.floor as FloorNo]) await this.lineOnce(a, Math.floor((k - 1) / WORK.perLine), (k - 1) % WORK.perLine);
     // (줄 하나에 WORK.perLine 명 — 같은 칸에 서로 다른 색 불)
+    // 나머지 = 분배 작업자(5F 냉장): 야채 바닥 레인 작업(냉장 G · 지역 묶음 = DISTRIBUTION)만 받아 분배대 크레이트에 담는다. 없으면 분배대에서 기다림
+    // (전엔 일반 피킹을 받아 냉장 선반에서 FC 처럼 일해 분배대·크레이트에 사람이 안 보였음, 사용자 2026-11-26)
+    else if (this.floorOf(a).equipment.some((e) => e.kind === 'SPLIT')) await this.pickOnce(a, { zone: 'G', pickMode: 'REGION_BATCH' });
     else await this.pickOnce(a);
   }
 
@@ -1499,10 +1517,10 @@ export class Simulation implements DutyClock {
    * 그 상품을 받는 MFC 칸마다 **내 스캐너 색 불과 숫자**가 켜지고, 칸마다 숫자만큼 넣는다. 한 줄에 두 사람이 있어 같은 칸에 두 색이 함께 켜질 수 있다.
    * 그 MFC 몫이 라인에 더 없으면 칸(MFC 박스)을 닫아 분류 결과(MFC 별) → 자키가 출고대기로 [현장 라인, 설계 §5.4].
    */
-  private async lineOnce(a: Agent, k: number) {
+  private async lineOnce(a: Agent, k: number, j = 0) {
     const site = this.floorSite(a);
     const fl = a.floor as FloorNo;
-    const spot = site.lineSpot('DAS', k);
+    const spot = site.lineSpot('DAS', k, j, WORK.perLine);
     const q = this.lineQueue.get(fl)!;
     const color = this.colorOf(a);
     const atStand = a.at.x === spot.stand.x && a.at.z === spot.stand.z;

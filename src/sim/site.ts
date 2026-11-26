@@ -87,7 +87,8 @@ export class FloorSite {
   }
 
   /** 라인(DAS)·분배 작업자 k 의 자리 — 줄 하나를 맡는다. stand = 줄 서쪽 끝 작업대 앞, slot(m) = MFC m 칸 앞, light(m) = 그 칸 위 표시등 */
-  lineSpot(kind: 'DAS' | 'SPLIT', k: number) {
+  /** j = 그 줄에서 몇째 사람(0~), per = 한 줄 사람 수 — 서는 자리를 옆으로 1.1m 씩 벌린다(같은 자리에 겹쳐 한 사람처럼 보이던 것, 사용자 2026-11-26) */
+  lineSpot(kind: 'DAS' | 'SPLIT', k: number, j = 0, per = 1) {
     const e = this.f.equipment.find((x) => x.kind === kind);
     if (!e) throw new Error(`${this.floor}F ${kind} 없음`);
     const rows = dasRows(e.rect);
@@ -95,7 +96,7 @@ export class FloorSite {
     const sx = (m: number) => r.slots[mfcSlotIndex(m, r.slots.length)];
     return {
       // 한 줄에 여럿이면(5F DAS 한 줄) 서쪽 끝부터 1.2m 씩 옆으로
-      stand: { x: r.cx - r.len / 2 + 0.8 + Math.floor(k / rows.length) * 1.2, z: r.z - 0.9, lane: 'R' as const },
+      stand: { x: r.cx - r.len / 2 + 0.8 + (Math.floor(k / rows.length) * per + j) * 1.1, z: r.z - 0.9, lane: 'R' as const },
       slot: (m: number): WalkPoint => ({ x: sx(m), z: r.z - 0.9, lane: 'R' }),
       light: (m: number) => ({ x: sx(m), y: 2.45, z: r.z + 0.83 }),
     };
