@@ -1,7 +1,7 @@
 import { useEffect, useSyncExternalStore } from 'react';
 import { SiteScene } from '../render/scene/SiteScene';
 import { IssueBar } from '../ui/IssueBar';
-import { LeftPanel } from '../ui/LeftPanel';
+import { LanScanPopup, LeftPanel } from '../ui/LeftPanel';
 import { ScanZoom } from '../ui/Barcode';
 import { Pda } from '../ui/Pda';
 import { Rail } from '../ui/Rail';
@@ -35,6 +35,8 @@ export function App({ app }: { app: AppCtx }) {
           </div>
           <Pda />
           <ScanZoom />
+          {/* PDA 로 찍을 코드 — 어느 탭에서도 떠 있음 */}
+          <LanScanPopup />
         </div>
       </div>
     </AppContext.Provider>

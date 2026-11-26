@@ -1,7 +1,8 @@
 // 왼쪽 패널 — 설정(센터 고정값·시간표) · 구역(층·칸 정보) · 도움말. MFC 시뮬레이터 LeftPanel 의 sec/srow 모양을 쓴다.
 import { Fragment, lazy, Suspense, useEffect, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { runLanOne, type RunStep } from '../backend/http/lanRun';
+import { runLanOne } from '../backend/http/lanRun';
+import { setLanRun, useLanRun } from './lanRunStore';
 import { checkReadiness, READINESS_KO, type ProbeResult } from '../backend/http/readiness';
 import { useApp, useTick, useView } from '../app/context';
 import { CDC_FACTS, MFCS, OUTBOUND, SHIFT, WORK, RACK, FLOW, AUTOSTORE } from '../config';
@@ -717,22 +718,16 @@ function CellCard() {
 /** 실서버 한 건 돌리기 — 새 TRF 하나를 인수부터 출발까지(LAN 에 씀, 사용자 2026-11-26 승인 "LAN 에서 새 TRF 한 건을 처음부터 끝까지 돌리는 점검") */
 function LanRun() {
   const { real } = useApp();
-  const [mfcId, setMfcId] = useState<string>(MFCS[0].id);
-  const [mode, setMode] = useState<'auto' | 'pda'>('pda');
-  const [steps, setSteps] = useState<RunStep[] | null>(null);
-  const [busy, setBusy] = useState(false);
+  // 상태는 패널 밖(lanRunStore) — 탭이 바뀌어도 진행·팝업이 남는다
+  const { mfcId, mode, steps, busy, hideScan } = useLanRun();
   if (!real) return null;
   const go = () => {
-    setBusy(true);
-    setSteps([]);
-    void runLanOne({ gateway: real.backend.client, backend: real.backend, internal: real.internal, operatorId: () => real.tokens.operatorId }, { mfcId, skus: 3, qty: 2, pda: mode === 'pda', pdaWaitMin: 60 }, setSteps).finally(() => setBusy(false));
+    setLanRun({ busy: true, steps: [] });
+    void runLanOne({ gateway: real.backend.client, backend: real.backend, internal: real.internal, operatorId: () => real.tokens.operatorId }, { mfcId, skus: 3, qty: 2, pda: mode === 'pda', pdaWaitMin: 60 }, (st) => setLanRun({ steps: st })).finally(() => setLanRun({ busy: false }));
   };
   const waitingPda = busy && steps?.at(-1)?.name.startsWith('PDA');
   const cur = steps?.at(-1);
-  const [hideScan, setHideScan] = useState(false);
   const scanCodes = busy && cur?.state === 'run' && cur.scan?.length ? cur.scan : null;
-  // 단계가 바뀌면 팝업을 다시 띄움
-  useEffect(() => setHideScan(false), [cur?.name]);
   return (
     // 실서버 한 건 — 새 TRF 1건을 LAN 에 실제로 넣어 출발까지. 피킹은 자동(시뮬레이터) 또는 PDA 앱(사람)으로(사용자 2026-11-26 "PDA 로 작업 되는지 확인")
     <section className="sec lr">
@@ -743,15 +738,15 @@ function LanRun() {
       <div className="lr-form">
         <span>피킹</span>
         <div className="wk-seg c2">
-          <button className={mode === 'pda' ? 'on' : ''} onClick={() => setMode('pda')} disabled={busy}>
+          <button className={mode === 'pda' ? 'on' : ''} onClick={() => setLanRun({ mode: 'pda' })} disabled={busy}>
             PDA 앱으로
           </button>
-          <button className={mode === 'auto' ? 'on' : ''} onClick={() => setMode('auto')} disabled={busy}>
+          <button className={mode === 'auto' ? 'on' : ''} onClick={() => setLanRun({ mode: 'auto' })} disabled={busy}>
             자동
           </button>
         </div>
         <span>MFC</span>
-        <select className="lr-sel" value={mfcId} onChange={(e) => setMfcId(e.target.value)} disabled={busy}>
+        <select className="lr-sel" value={mfcId} onChange={(e) => setLanRun({ mfcId: e.target.value })} disabled={busy}>
           {MFCS.filter((m) => !m.id.startsWith('ETC-')).map((m) => (
             <option key={m.id} value={m.id}>
               {m.name}
@@ -773,27 +768,8 @@ function LanRun() {
       <button className="lr-go" onClick={go} disabled={busy}>
         {busy ? (waitingPda ? `PDA 기다리는 중 — ${steps?.at(-1)?.name.replace(/^PDA /, '').split(' — ')[0]}` : '도는 중…') : '새 TRF 로 시작'}
       </button>
-      {/* PDA 가 찍을 코드 — 기다리는 단계마다 팝업(사용자 2026-11-26 "지역 카드 찍으라는데 어딨어? 팝업으로") */}
-      {/* 패널의 backdrop-filter 가 position:fixed 를 패널 안에 가둬 팝업이 안 보였음 — body 로 꺼내 그림 */}
-      {scanCodes && !hideScan && createPortal(
-        <div className="scan-pop" role="dialog" aria-label="PDA 로 찍을 코드">
-          <div className="scan-pop-h">
-            <b>{cur?.name.replace(/^PDA /, 'PDA · ').split(' — ')[0]}</b>
-            <span>PDA 로 이 코드를 찍으세요</span>
-            <button onClick={() => setHideScan(true)} aria-label="접기">
-              ×
-            </button>
-          </div>
-          <div className="scan-pop-list">
-            {scanCodes.map((c) => (
-              <Barcode key={c.label + c.value} value={c.value} caption={c.label} />
-            ))}
-          </div>
-        </div>,
-        document.body,
-      )}
       {scanCodes && hideScan && (
-        <button className="scan-pop-open" onClick={() => setHideScan(false)}>
+        <button className="scan-pop-open" onClick={() => setLanRun({ hideScan: false })}>
           찍을 코드 {scanCodes.length}개 보기
         </button>
       )}
@@ -811,6 +787,31 @@ function LanRun() {
         </ol>
       )}
     </section>
+  );
+}
+
+/** PDA 가 찍을 코드 팝업 — 앱 맨 위에 늘 붙어 있어 어느 탭·3D 를 눌러도 남는다(사용자 2026-11-26 "지역 카드 어딨어? 팝업으로", "화면 누르니까 팝업 없어졌어") */
+export function LanScanPopup() {
+  const { steps, busy, hideScan } = useLanRun();
+  const cur = steps?.at(-1);
+  const codes = busy && cur?.state === 'run' && cur.scan?.length ? cur.scan : null;
+  if (!codes || hideScan) return null;
+  return createPortal(
+    <div className="scan-pop" role="dialog" aria-label="PDA 로 찍을 코드">
+      <div className="scan-pop-h">
+        <b>{cur?.name.replace(/^PDA /, 'PDA · ').split(' — ')[0]}</b>
+        <span>PDA 로 이 코드를 찍으세요 · {cur?.detail.split(' · ').slice(-1)[0]}</span>
+        <button onClick={() => setLanRun({ hideScan: true })} aria-label="접기">
+          ×
+        </button>
+      </div>
+      <div className="scan-pop-list">
+        {codes.map((c) => (
+          <Barcode key={c.label + c.value} value={c.value} caption={c.label} />
+        ))}
+      </div>
+    </div>,
+    document.body,
   );
 }
 
