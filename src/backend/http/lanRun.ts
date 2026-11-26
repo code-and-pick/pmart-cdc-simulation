@@ -82,8 +82,20 @@ export async function runLanOne(
       return { v: chosen, detail: chosen.map((c) => `${c.sku} @ ${c.loc.locationCode}`).join(' · ') };
     });
     // 1) 인수
-    const now = new Date();
-    const shipDate = kst(now);
+    // 출고일 고르기 — 그 MFC 노선·상온 운송지시서가 이미 계획완료(닫힘)인 날은 새 TRF 가 HELD ORDER_CLOSED 로 남는다(2026-11-26 두 번째 시험에서 막힘).
+    // 오늘부터 하루씩 보며 닫힌 지시서가 없는 첫 날을 쓴다
+    const shipDate = await step('출고일 고르기 (닫히지 않은 운송지시서)', async () => {
+      type Ord = { orderId: string; tempClass?: string; state: string; stops?: { mfcId?: string }[] };
+      const base = new Date(`${kst(new Date())}T00:00:00+09:00`);
+      for (let d = 0; d < 14; d++) {
+        const day = kst(new Date(base.getTime() + d * 86_400_000));
+        const r = await deps.gateway.call<{ items?: Ord[] } | Ord[]>('GET', `/cdcs/${CENTER_ID}/transport-orders`, { query: { shipDate: day } });
+        const list = Array.isArray(r.body) ? r.body : (r.body.items ?? []);
+        const closed = list.find((o) => (o.tempClass ?? 'AMBIENT') === 'AMBIENT' && o.state !== 'PLANNING' && o.state !== 'CANCELLED' && (o.stops ?? []).some((s) => s.mfcId === opt.mfcId));
+        if (!closed) return { v: day, detail: `${day}${d ? ` (오늘 지시서 ${d}일치가 닫혀 있어 건너뜀)` : ''}` };
+      }
+      throw new Error('14일 안에 열린 출고일이 없음');
+    });
     const due = new Date(`${shipDate}T00:00:00+09:00`);
     due.setTime(due.getTime() + (24 + 6) * 3600_000); // 다음 날 06:00 KST — [출고일 12:00, 다음 날 12:00) 안
     const trfId = `TRF-SIM-${runId.toUpperCase()}`;
@@ -130,7 +142,17 @@ export async function runLanOne(
       const order = await step('배차 생성 (transport-orders/generations)', async () => {
         const r = await deps.gateway.call<{ orders?: Order[]; requests?: Record<string, number>; unplannedReasons?: { routeId: string; tempClass: string; reason: string }[] }>('POST', `/cdcs/${CENTER_ID}/transport-orders/generations`, { body: { shipDate }, idempotencyKey: key('gen') });
         const o = (r.body.orders ?? []).find((x) => (x.trfIds ?? []).includes(trfId) || (x.stops ?? []).some((s) => (s.trfIds ?? []).includes(trfId)));
-        if (!o) throw new Error(`이 TRF 가 든 지시서 없음 — 요청서 ${JSON.stringify(r.body.requests ?? {})} · 미계획 ${JSON.stringify(r.body.unplannedReasons ?? [])}`);
+        if (!o) {
+          // 이 TRF 요청서가 왜 빠졌는지(보류 사유) 바로 보여 준다
+          let why = '';
+          try {
+            const req = (await deps.gateway.call<{ state?: string; reason?: string | null }>('GET', `/cdcs/${CENTER_ID}/transport-requests/${encodeURIComponent(trfId)}`)).body;
+            why = ` · 이 TRF 요청서 ${req.state ?? '?'}${req.reason ? ` (${req.reason})` : ''}`;
+          } catch {
+            /* 사유 조회 실패는 넘어감 */
+          }
+          throw new Error(`이 TRF 가 든 지시서 없음${why} — 출고일 ${shipDate} 요청서 ${JSON.stringify(r.body.requests ?? {})}`);
+        }
         return { v: o, detail: `${o.orderId} ${o.state}` };
       });
       return step('계획완료 (confirmations — 차량·도크 예약)', async () => {
