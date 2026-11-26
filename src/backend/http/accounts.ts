@@ -11,6 +11,8 @@ export function keycloakUsername(account: string): string {
 export function passwordFileFor(account: string): string | null {
   const short = account.replace(/@pmart\.com$/, '');
   if (short === 'claude-cdc-sup') return 'keycloak-claude-cdc-sup-password';
+  // MFC 센터 관리자(다섯 센터) — 실서버 한 건 돌리기 뒤 MFC 입고 예정·도착 운행 조회용(사용자 2026-11-26 "입고 예정 MFC 계정으로 보면", lan-test-accounts.md)
+  if (short === 'claude-mfc-sup') return 'keycloak-claude-mfc-sup-password';
   if (/^cdcw-(fc-(0[1-9]|10)|(dl|qc|ld)-0[1-5]|fk-0[1-3])$/.test(short)) return 'keycloak-cdc-test-workers-password';
   return null;
 }

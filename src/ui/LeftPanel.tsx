@@ -7,6 +7,7 @@ import { CDC_FACTS, MFCS, OUTBOUND, SHIFT, WORK, RACK, FLOW, AUTOSTORE } from '.
 import { ROLE_KO, type Role } from '../sim/agent';
 import { equipZoneId } from '../domain/layout';
 import type { FloorNo } from '../domain/sites/chilgok';
+import { autostorePorts } from '../sim/site';
 import { DayTimeline, Meter, Tile } from './viz';
 
 function Sec({ title, aside, children }: { title: string; aside?: ReactNode; children: ReactNode }) {
@@ -322,6 +323,15 @@ function Stat({ v, k }: { v: ReactNode; k: string }) {
  * 왼쪽 "구역" — MFC ZonePanel 과 같은 구조: 위 구역 칩(누르면 그 구역으로), 고른 구역 이름·평, 숫자 칸(stats)·채움 막대·누르면 가는 목록(lows),
  * 그 아래 고른 칸. (사용자 2026-11-25 "탭 UI 가 MFC 랑 완전 다른데 정보도 별로")
  */
+const ZONE_GROUPS: [string, string][] = [
+  ['RACK', '보관 랙'],
+  ['SHELF', '피킹 선반'],
+  ['EQUIP', '설비'],
+  ['BAND', '작업장'],
+];
+/** 구역 이름 짧게 — "(서쪽)·(동쪽)"은 남기고 그 밖의 괄호 설명은 뗀다(마우스를 올리면 전체) */
+const zoneShort = (label: string) => label.replace(/\s*\((서쪽|동쪽)\)/, ' · $1').replace(/\s*\(.*\)$/, '').replace(/ 피킹 선반/, ' 선반');
+
 function ZoneInfo() {
   const { layout } = useApp();
   const view = useView();
@@ -333,12 +343,28 @@ function ZoneInfo() {
   const r = zone?.rect;
   return (
     <section className="sec zone-panel">
-      <div className="chips zone-chips">
-        {views.map((v) => (
-          <button key={v.key} className={v.key === view.focusedZone ? 'on' : ''} onClick={() => view.focusZone(v.key)}>
-            {v.label}
-          </button>
-        ))}
+      {/* 구역 고르기 — 종류별 묶음(보관 랙 · 피킹 선반 · 설비 · 작업장), 짧은 이름 + 온도 점. 긴 설명은 마우스를 올리면(사용자 2026-11-26 "구역 왼쪽 탭 UI 수정") */}
+      <div className="zone-groups">
+        {ZONE_GROUPS.map(([kind, title]) => {
+          const vs = views.filter((v) => (f.zones.find((z) => z.id === v.key)?.kind ?? 'BAND') === kind);
+          if (!vs.length) return null;
+          return (
+            <div key={kind} className="zone-group">
+              <small>{title}</small>
+              <div className="zone-chips2">
+                {vs.map((v) => {
+                  const z = f.zones.find((x) => x.id === v.key);
+                  return (
+                    <button key={v.key} className={v.key === view.focusedZone ? 'on' : ''} onClick={() => view.focusZone(v.key)} title={v.label}>
+                      <i className={`tdot ${(z?.temp ?? 'NONE').toLowerCase()}`} />
+                      {zoneShort(v.label)}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })}
       </div>
       {zone && r ? (
         <>
@@ -362,6 +388,56 @@ function ZoneInfo() {
 }
 
 /** 오토스토어 — 설계(격자·통·칸·로봇·포트·하중)와 작동(포트 가동률·로봇·통 교환·대기·실사·보충) [사용자 2026-11-26 "누르면 안에 설계랑 작동"] */
+/** 오토스토어 흐름 — 피킹(FC)과 보충(지게차) 두 줄, 단계마다 지금 몇 명(숫자가 있는 단계만 강조) */
+function AutoFlow({ floor }: { floor: number }) {
+  const { sim } = useApp();
+  const people = sim.agents.filter((a) => a.floor === floor);
+  const fc = people.filter((a) => a.role !== 'REPL' && a.pda?.title === '오토스토어 포트 피킹');
+  const rp = people.filter((a) => a.role === 'REPL' && /오토스토어|입고 포트/.test(a.activity));
+  const cnt = (xs: typeof people, re: RegExp) => xs.filter((a) => re.test(a.activity)).length;
+  const lanes: { title: string; steps: [string, number][] }[] = [
+    {
+      title: '피킹 (FC)',
+      steps: [
+        ['포트로', cnt(fc, /포트로|포트 대기/)],
+        ['로봇이 통 가져옴', cnt(fc, /로봇이 통/)],
+        ['칸에서 집기', cnt(fc, /스캔|담기|집기/)],
+        ['통 반납·실사', cnt(fc, /실사/)],
+        ['MFC 박스 → 휠소터', cnt(fc, /휠소터|내려놓/)],
+      ],
+    },
+    {
+      title: '보충 (지게차)',
+      steps: [
+        ['입고 포트로', cnt(rp, /입고 포트로/)],
+        ['통에 채우기', cnt(rp, /통에 채우기/)],
+      ],
+    },
+  ];
+  return (
+    <div className="as-flow">
+      {lanes.map((l) => (
+        <div key={l.title} className="as-lane">
+          <small>{l.title}</small>
+          <div className="trip-flow">
+            {l.steps.map(([k, n], i) => (
+              <span key={k} className="trip-wrap">
+                <span className={`trip-node${n ? ' now' : ''}`}>
+                  <i>{n}</i>
+                  <span>
+                    <b>{k}</b>
+                  </span>
+                </span>
+                {i < l.steps.length - 1 && <span className="trip-arrow">→</span>}
+              </span>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function AutoStoreInfo() {
   const { sim } = useApp();
   const view = useView();
@@ -373,7 +449,6 @@ function AutoStoreInfo() {
   const busyRobots = st.robotFree.filter((t) => t > sim.time).length;
   const m2 = (A.rect.x1 - A.rect.x0) * (A.rect.z1 - A.rect.z0);
   const fill = A.binsFit ? A.bins / A.binsFit : 0;
-  const atPort = sim.agents.filter((a) => a.floor === fl.floor && /포트|오토스토어|로봇이 통/.test(a.activity));
   return (
     <>
       <Sec title="설계" aside="[가정] 값은 설정에서">
@@ -387,26 +462,35 @@ function AutoStoreInfo() {
         <Row k="통 가져오기" v={`로봇 ${AUTOSTORE.fetchSec}초 · 다음 통 미리 줄 세움`} />
         <Row k="바닥 하중" v={`${A.floorLoadKgM2.toLocaleString()} / 허용 ${A.floorLoadAllowedKgM2.toLocaleString()} kg/㎡`} />
       </Sec>
+      {/* 작동 — 흐름(단계마다 지금 몇 명) · 포트마다 누가 무엇 · 숫자 타일. 사용자 2026-11-26 "오토스토어 작업 흐름 UI 고쳐" — 전엔 사람 이름·활동을 쉼표로 길게 이음 */}
       <Sec title="작동" aside={sim.clockText()}>
-        {u.length ? (
-          u.map((x, i) => (
-            <div key={i}>
-              <Row k={`포트 ${i + 1} 가동률`} v={`${Math.round(x * 100)}%`} />
-              <Meter value={x} max={1} tone={x > 0.85 ? 'warn' : 'ok'} />
-            </div>
-          ))
-        ) : (
-          <Row k="포트" v="아직 통이 오지 않음(석간 피킹 13:00~)" />
-        )}
-        <Row k="로봇" v={`일하는 ${busyRobots} / ${A.robots}대`} />
-        <Meter value={busyRobots} max={A.robots} />
-        <Row k="오늘 꺼낸 통" v={st.bins.toLocaleString()} />
-        <Row k="로봇이 가져오는 중" v={`${st.waiting}통`} />
-        <Row k="포트 대기" v={`${st.waits}회 · 평균 ${st.waits ? Math.round(st.waitSec / st.waits) : 0}초`} />
-        <Row k="순환 실사 · 보충" v={`${st.counts}회 · ${st.refills}회`} />
-        <Row k="포트 앞 작업자" v={atPort.length ? atPort.map((a) => `${a.name} — ${a.activity}`).join(', ') : '없음'} />
-        <div className="note">
-          FC 피커가 포트에 서면 로봇이 격자 위에서 그 상품의 통을 꺼내 포트로 가져옵니다 → 칸에서 수량만큼 집어 MFC 박스에 → 통은 로봇이 다시 격자로. 다음 통은 미리 줄을 세워 포트가 쉬지 않게 합니다. 칸이 최소 수량({AUTOSTORE.minQty}) 아래로 내려가면 주간조가 입고 포트에서 통을 채웁니다.
+        <AutoFlow floor={fl.floor} />
+        <div className="as-ports">
+          {autostorePorts(A.rect, A.ports).map((px, i) => {
+            const who = sim.agents.find((a) => a.floor === fl.floor && a.role !== 'REPL' && a.pda?.title === '오토스토어 포트 피킹' && Math.abs(a.at.x - px) < 0.5);
+            const x = u[i] ?? 0;
+            const doing = !who ? '비어 있음' : /로봇이 통/.test(who.activity) ? '통 오는 중' : /포트로/.test(who.activity) ? '오는 중' : /포트 대기/.test(who.activity) ? '포트 대기' : /실사/.test(who.activity) ? '순환 실사' : '집는 중';
+            return (
+              <div key={i} className={`as-port${who ? ' on' : ''}`}>
+                <div className="as-port-h">
+                  <b>포트 {i + 1}</b>
+                  <span>{Math.round(x * 100)}%</span>
+                </div>
+                <Meter value={x} max={1} tone={x > 0.85 ? 'warn' : 'ok'} />
+                <small>{who ? `${who.name.replace(/^.* /, '')} · ${doing}` : doing}</small>
+              </div>
+            );
+          })}
+        </div>
+        <div className="tiles3">
+          <Tile v={`${busyRobots}/${A.robots}`} k="일하는 로봇">
+            <Meter value={busyRobots} max={A.robots} tone="ok" />
+          </Tile>
+          <Tile v={st.bins.toLocaleString()} k="오늘 꺼낸 통" />
+          <Tile v={`${st.waiting}통`} k="로봇이 가져오는 중" />
+          <Tile v={`${st.waits}회`} k={`포트 대기 · 평균 ${st.waits ? Math.round(st.waitSec / st.waits) : 0}초`} />
+          <Tile v={`${st.counts}회`} k="순환 실사" />
+          <Tile v={`${st.refills}회`} k="보충(통 채움)" />
         </div>
       </Sec>
     </>
