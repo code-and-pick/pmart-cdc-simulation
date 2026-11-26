@@ -14,6 +14,9 @@ export interface SupplyRequest {
   mfcId: string;
   state: string;
   requestedReadyAt?: string | null;
+  /** 서버가 이관했으면 채워짐(mfc-inbound 0.23.0) */
+  linkedTrfId?: string | null;
+  transferCdcId?: string | null;
   approvedLines?: { sku: string; requestedQty: number; approvedQty: number }[];
   lines?: { sku: string; qty: number }[];
 }
@@ -25,7 +28,10 @@ export interface BridgeResult {
   detail: string;
 }
 
-export const trfIdForSupply = (supplyRequestId: string) => `TRF-SR-${supplyRequestId}`.slice(0, 64);
+/** trfId = TRF-{supplyRequestId} — 백엔드 mfc-inbound 0.23.0(ADR-0091) SupplyRequestService.trfIdOf 와 같게(서버가 직접 이관해도 같은 번호라 다리는 EXISTS 로 한 번만). 2026-11-27 mfc 시뮬 부탁(사용자 "찾은 거 문제 없게") */
+export const trfIdForSupply = (supplyRequestId: string) => `TRF-${supplyRequestId}`.slice(0, 64);
+/** 예전 다리 번호(2026-11-26~27 TRF-SR-…) — 이미 이걸로 인수된 요청은 다시 만들지 않음 */
+const legacyTrfId = (supplyRequestId: string) => `TRF-SR-${supplyRequestId}`.slice(0, 64);
 const kst = (d: Date) => new Date(d.getTime() + 9 * 3600_000).toISOString().slice(0, 10);
 const tempOfLoc = (code: string) => {
   const z = code.split('-')[1];
@@ -62,19 +68,33 @@ export async function bridgeOnce(deps: { mfcGateway: (mfcId: string) => HttpClie
       const trfId = trfIdForSupply(q.supplyRequestId);
       const lines = (q.approvedLines ?? []).filter((l) => l.approvedQty > 0).map((l) => ({ sku: l.sku, approvedQty: l.approvedQty }));
       const base = { supplyRequestId: q.supplyRequestId, mfcId, trfId };
+      // 서버가 이미 이관한 요청(0.23.0 — linkedTrfId·transferCdcId)은 건드리지 않음
+      if (q.linkedTrfId || q.transferCdcId) {
+        out.push({ ...base, trfId: q.linkedTrfId ?? trfId, state: 'SKIPPED', detail: '서버가 이관함' });
+        continue;
+      }
       if (!lines.length) {
         out.push({ ...base, state: 'SKIPPED', detail: '승인 수량 0' });
         continue;
       }
-      try {
-        await deps.internal.getTransferIntake(trfId);
-        out.push({ ...base, state: 'EXISTS', detail: '이미 인수됨' });
-        continue;
-      } catch (e) {
-        if (!(e instanceof ApiProblem && e.problem.status === 404)) {
-          out.push({ ...base, state: 'FAILED', detail: e instanceof Error ? e.message : String(e) });
-          continue;
+      let found: string | null = null;
+      let bad: string | null = null;
+      for (const id of [trfId, legacyTrfId(q.supplyRequestId)]) {
+        try {
+          await deps.internal.getTransferIntake(id);
+          found = id;
+          break;
+        } catch (e) {
+          if (!(e instanceof ApiProblem && e.problem.status === 404)) bad = e instanceof Error ? e.message : String(e);
         }
+      }
+      if (found) {
+        out.push({ ...base, trfId: found, state: 'EXISTS', detail: '이미 인수됨' });
+        continue;
+      }
+      if (bad) {
+        out.push({ ...base, state: 'FAILED', detail: bad });
+        continue;
       }
       try {
         const temp = await tempOf(lines[0].sku);
