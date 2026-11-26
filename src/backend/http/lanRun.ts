@@ -5,7 +5,8 @@
 // - 단계마다 응답 상태·code 를 남기고, 막히면 거기서 멈춘다(실패로 단정하지 않고 응답 그대로 보여 줌). 같은 단계 다시 누르면 같은 Idempotency-Key.
 // React 에 의존하지 않는다.
 
-import { CENTER_ID, SHELF, SKU_PLACE } from '../../config';
+import { CENTER_ID, MFCS, SHELF, SKU_PLACE } from '../../config';
+import { stagingCodeFor } from '../../domain/layout';
 import { ApiProblem, type Task, type TransferIntake } from '../../domain/contract';
 import type { HttpBackend } from './HttpBackend';
 import type { HttpInternal } from './HttpInternal';
@@ -237,9 +238,17 @@ export async function runLanOne(
       };
       const box = `BOX-${runId.toUpperCase()}-1`;
       const t0Items = () => picks.map((x) => ({ label: `상품 ${x.sku}`, value: x.sku }));
+      // 검품 — 먼저 출고대기(91) 자리, 그다음 박스. 자리 = 집은 칸의 층·온도대 출고대기, MFC 자리 번호(PPC-01~05, 정본 CDC-5)
+      const inspectCodes = async () => {
+        const ts = await deps.backend.listTasks(wave.waveId).catch(() => []);
+        const loc = ts.flatMap((x) => x.lines.map((l) => l.locationCode))[0];
+        const mfcNo = Math.max(0, MFCS.findIndex((m) => m.id === (res?.intake.mfcId ?? opt.mfcId))) + 1;
+        const stage = loc ? [{ label: '출고대기 자리(먼저)', value: stagingCodeFor(loc, mfcNo) }] : [];
+        return [...stage, ...(await lpnCodes('검품할 박스'))];
+      };
       await waitStage('PDA 피킹', 'DC 업무 → 피킹 → 다음 작업 받기 → 칸·상품 스캔', (t) => sum(t, 'allocatedQty') > 0 && sum(t, 'pickedQty') >= sum(t, 'allocatedQty'), (t) => `집음 ${sum(t, 'pickedQty')}/${sum(t, 'allocatedQty')}`, pickCodes);
       await waitStage('PDA 분배·패킹', 'DC 업무 → 분배 → 박스(LPN) 닫기', (t) => sum(t, 'pickedQty') > 0 && sum(t, 'sortedQty') >= sum(t, 'pickedQty'), (t) => `박스에 담음 ${sum(t, 'sortedQty')}/${sum(t, 'pickedQty')}`, async () => [{ label: '새 박스(LPN)', value: box }, ...t0Items()]);
-      await waitStage('PDA 검품', 'DC 업무 → 검품 → 출고대기 박스 스캔', (t) => sum(t, 'sortedQty') > 0 && sum(t, 'inspectedQty') >= sum(t, 'sortedQty'), (t) => `합격 ${sum(t, 'inspectedQty')}/${sum(t, 'sortedQty')}`, () => lpnCodes('검품할 박스'));
+      await waitStage('PDA 검품', 'DC 업무 → 검품 → 출고대기 박스 스캔', (t) => sum(t, 'sortedQty') > 0 && sum(t, 'inspectedQty') >= sum(t, 'sortedQty'), (t) => `합격 ${sum(t, 'inspectedQty')}/${sum(t, 'sortedQty')}`, inspectCodes);
       await step('PDA 상차 — 도크 스캔 → 운행 → 박스 스캔 → 상차완료', async () => {
         for (;;) {
           const trip = (await deps.gateway.call<{ state?: string }>('GET', `/trips/${encodeURIComponent(tripId)}`)).body;
