@@ -793,9 +793,11 @@ export class Simulation implements DutyClock {
   /** 지게차 보충 — 팔레트 랙에 잡힌 Wave 수요를 선반으로(CDC-F-013) */
   private async replenishOnce(a: Agent) {
     const site = this.floorSite(a);
-    const need = this.backend
-      .replenishmentNeeds()
-      .find((n) => Number(n.from.split('-')[2]) === a.floor && !this.claimed.has(`${n.sku}|${n.lot}|${n.from}`));
+    // 5F 는 냉장·냉동 두 방 — 보충 요청이 위치 코드 순(G 먼저)이라 오전 내내 냉장만 하고 냉동 방엔 아무도 없었음(사용자 2026-11-26 "냉동에도 작업하는 사람이 없고").
+    // 냉동 전담 지게차를 더 둔다: 5F 주간 보충 마지막 WORK.frozenRepl 명은 냉동(H) 먼저, 나머지는 냉장(G) 먼저 — 자기 방 일이 없으면 다른 방도 한다(냉장 인원을 빼면 냉장 배포가 늦음)
+    const open = this.backend.replenishmentNeeds().filter((n) => Number(n.from.split('-')[2]) === a.floor && !this.claimed.has(`${n.sku}|${n.lot}|${n.from}`));
+    const mine = a.floor === 5 ? (a.shift === 'DAY' && Number(a.id.slice(-2)) > WORKFORCE[5].replDay - WORK.frozenRepl ? 'H' : 'G') : null;
+    const need = (mine && open.find((n) => n.from.split('-')[1] === mine)) || open[0];
     if (!need) {
       a.pda = null;
       await a.wait(WORK.idlePoll, '보충 대기');
