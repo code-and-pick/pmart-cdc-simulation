@@ -795,14 +795,26 @@ export function LanScanPopup() {
   const { steps, busy, hideScan } = useLanRun();
   const cur = steps?.at(-1);
   const codes = busy && cur?.state === 'run' && cur.scan?.length ? cur.scan : null;
-  if (!codes || hideScan) return null;
+  if (!codes) return null;
+  const title = cur?.name.replace(/^PDA /, 'PDA · ').split(' — ')[0];
+  const now = cur?.detail.split(' · ').slice(-1)[0];
+  // 접으면 위쪽 가운데 작은 띠(제목·진행·코드 수), 누르면 다시 펼침 — 사용자 2026-11-26 "접었다 펼 수 있게"
+  if (hideScan)
+    return createPortal(
+      <button className="scan-pop-mini" onClick={() => setLanRun({ hideScan: false })} title="펼치기">
+        <b>{title}</b>
+        <span>{now}</span>
+        <em>코드 {codes.length}개 ▾</em>
+      </button>,
+      document.body,
+    );
   return createPortal(
     <div className="scan-pop" role="dialog" aria-label="PDA 로 찍을 코드">
       <div className="scan-pop-h">
-        <b>{cur?.name.replace(/^PDA /, 'PDA · ').split(' — ')[0]}</b>
-        <span>PDA 로 이 코드를 찍으세요 · {cur?.detail.split(' · ').slice(-1)[0]}</span>
-        <button onClick={() => setLanRun({ hideScan: true })} aria-label="접기">
-          ×
+        <b>{title}</b>
+        <span>PDA 로 이 코드를 찍으세요 · {now}</span>
+        <button onClick={() => setLanRun({ hideScan: true })} aria-label="접기" title="접기">
+          ▴
         </button>
       </div>
       <div className="scan-pop-list">

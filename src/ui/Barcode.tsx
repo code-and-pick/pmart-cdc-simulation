@@ -2,6 +2,7 @@
 // 화면에 띄우는 코드(PDA 카메라로 모니터를 찍는 용도). 값은 같고 모양만 QR 또는 1차원 바코드(위치·카트 Code128, 상품 EAN-13).
 // PDA 앱 카메라(ML Kit)는 형식 제한 없이 읽으므로 QR 로 띄워도 같은 값이 들어간다. 인쇄 라벨은 백엔드 Code128 그대로.
 // LOT 라벨(kind gs1)은 늘 GS1-128 1차원 — PDA 가 (01)(17)(10) 을 GS1 규칙으로 읽어야 해서 QR 로 바꾸지 않는다(inventory 0.21.0).
+import { createPortal } from 'react-dom';
 import { code128, ean13, gs1_128, type Bars } from '../domain/barcode';
 import { qrEncode } from '../domain/qr';
 import { scanView, useScanView, type ScanCodeMode } from './scanView';
@@ -88,14 +89,16 @@ export function ScanZoom() {
   if (!z) return null;
   const vw = typeof window === 'undefined' ? 800 : window.innerWidth;
   const vh = typeof window === 'undefined' ? 600 : window.innerHeight;
-  return (
+  // body 로 꺼내 그림 — PDA 코드 팝업(body)보다 위에(사용자 2026-11-26 "크게 누르니까 뒤에 뜬다")
+  return createPortal(
     <div className="scan-zoom" onClick={() => scanView.close()} onKeyDown={(e) => e.key === 'Escape' && scanView.close()} tabIndex={-1} ref={(el) => el?.focus()}>
       <div className="scan-zoom-box">
         {z.caption && <div className="bc-cap">{z.caption}</div>}
         <CodeImage value={z.value} kind={z.kind} mode={v.mode} size={v.mode === 'qr' && z.kind !== 'gs1' ? Math.min(vw, vh) * 0.6 : vw * 0.85} height={Math.round(vh * 0.28)} />
         <div className="bc-val big">{z.value}</div>
-        <div className="note">누르거나 Esc 로 닫기 · 위의 QR/바코드 전환은 스캔 판 위쪽 단추</div>
+        <div className="note">누르거나 Esc 로 닫기</div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
