@@ -902,7 +902,8 @@ function RealCheck() {
               <span>{READINESS_KO[r.state]}</span>
             </div>
             <small>{r.use}</small>
-            <code>{r.detail}</code>
+            {/* 준비됨이면 코드 줄을 감춤 — 문제일 때만 상태 코드 */}
+            {r.state !== 'READY' && <code>{r.detail}</code>}
           </div>
         ))}
         {!rows && <div className="note">점검 중…</div>}
