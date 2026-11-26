@@ -10,7 +10,6 @@ const RIGHT: [RightView, string, string][] = [
   ['api', '⧉', 'API'],
   ['events', '⇄', '이벤트'],
   ['inventory', '▦', '재고'],
-  ['moves', '⇵', '변동'],
   ['barcode', '▥', '바코드'],
 ];
 const LEFT: [LeftView, string, string][] = [

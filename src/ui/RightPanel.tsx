@@ -6,6 +6,7 @@ import { useApp, useTick, useView } from '../app/context';
 import { MFCS, OUTBOUND, TMS } from '../config';
 import type { RightView } from '../render/controller';
 import { TEMP_KO } from '../sim/simulation';
+import { ROLE_KO } from '../sim/agent';
 import { trfTemp } from '../sim/supply';
 import { AdminBoard, BarcodeBoard, MfcPick, MovesBoard, StockSearch, TrfBoard } from './Boards';
 import { DayTimeline, Meter, Tile } from './viz';
@@ -16,9 +17,126 @@ const clock = (sec: number) => `${String(Math.floor(sec / 3600) % 24).padStart(2
 /** 큰 수는 만 단위로 짧게 */
 const short = (n: number) => (n >= 10_000 ? `${(n / 10_000).toFixed(n >= 100_000 ? 0 : 1)}만` : n.toLocaleString());
 
+/** 요약 타일 자세히 — 단계(승인~수령)는 MFC 별 막대, 작업 중은 층 × 역할, 1시간 피킹은 층별, 결품은 최근 기록 */
+function SummaryDetail({ k, onClose }: { k: string; onClose: () => void }) {
+  const { sim } = useApp();
+  const trfs = sim.uiTransfers();
+  const head = (t: string) => (
+    <div className="sd-h">
+      <b>{t}</b>
+      <button onClick={onClose} aria-label="닫기">
+        ×
+      </button>
+    </div>
+  );
+  const STAGE: Record<string, (p: { approvedQty: number; pickedQty: number; sortedQty: number; inspectedQty: number; departedQty: number }) => number> = {
+    승인: (p) => p.approvedQty,
+    피킹: (p) => p.pickedQty,
+    분류: (p) => p.sortedQty,
+    검품: (p) => p.inspectedQty,
+    출발: (p) => p.departedQty,
+  };
+  if (STAGE[k] || k === '수령') {
+    const rows = MFCS.map((m) => {
+      const ts = trfs.filter((t) => t.mfcId === m.id);
+      const ap = ts.reduce((a, t) => a + t.progress.reduce((b, p) => b + p.approvedQty, 0), 0);
+      const v =
+        k === '수령'
+          ? [...sim.runs.values()].reduce((a, r) => a + r.stops.filter((s) => s.mfcId === m.id).reduce((b, s) => b + (s.received ?? 0), 0), 0)
+          : ts.reduce((a, t) => a + t.progress.reduce((b, p) => b + STAGE[k](p), 0), 0);
+      return { m, ap, v, n: ts.length };
+    }).filter((r) => r.ap > 0);
+    return (
+      <div className="sd">
+        {head(`${k} — MFC 별`)}
+        {rows.map((r) => (
+          <div key={r.m.id} className="sd-row">
+            <span>{r.m.name.replace(/^d호점 /, '')}</span>
+            <i>
+              <em style={{ width: r.ap ? `${Math.min(100, (100 * r.v) / r.ap)}%` : 0 }} />
+            </i>
+            <b>
+              {short(r.v)}
+              {k !== '승인' && <small> / {short(r.ap)}</small>}
+              {k === '승인' && <small> · TRF {r.n}</small>}
+            </b>
+          </div>
+        ))}
+        {!rows.length && <div className="note">아직 없음</div>}
+      </div>
+    );
+  }
+  if (k === '작업 중') {
+    const roles = [...new Set(sim.agents.map((a) => a.role))];
+    return (
+      <div className="sd">
+        {head('일하는 사람 — 층 × 역할')}
+        <table className="inv sd-tbl">
+          <thead>
+            <tr>
+              <th>역할</th>
+              {[5, 6, 7].map((f) => (
+                <th key={f}>{f}F</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {roles.map((r) => (
+              <tr key={r}>
+                <td>{ROLE_KO[r]}</td>
+                {[5, 6, 7].map((f) => {
+                  const ps = sim.agents.filter((a) => a.floor === f && a.role === r);
+                  return <td key={f}>{ps.length ? `${ps.filter((a) => !a.idle).length}/${ps.length}` : '—'}</td>;
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    );
+  }
+  if (k === '1시간') {
+    const from = sim.time - 3600;
+    const by = (f: number) => sim.pickLog.filter((x) => x.at > from && x.floor === f).reduce((a, x) => a + x.qty, 0);
+    const max = Math.max(1, ...[5, 6, 7].map(by));
+    return (
+      <div className="sd">
+        {head('최근 1시간 피킹 — 층별')}
+        {[5, 6, 7].map((f) => (
+          <div key={f} className="sd-row">
+            <span>{f}F</span>
+            <i>
+              <em style={{ width: `${(100 * by(f)) / max}%` }} />
+            </i>
+            <b>{by(f).toLocaleString()}</b>
+          </div>
+        ))}
+      </div>
+    );
+  }
+  // 결품
+  const list = [...sim.shortLog].reverse().slice(0, 12);
+  return (
+    <div className="sd">
+      {head(`결품 보고 — 최근 ${list.length}건`)}
+      {list.map((x, i) => (
+        <div key={i} className="sd-row sd-short">
+          <span>{String(Math.floor(x.at / 3600) % 24).padStart(2, '0')}:{String(Math.floor(x.at / 60) % 60).padStart(2, '0')}</span>
+          <span>{x.code.replace(/^CDC01-/, '')}</span>
+          <b>{x.qty}개</b>
+        </div>
+      ))}
+      {!list.length && <div className="note">없음</div>}
+      <div className="note">재할당으로 다른 칸에서 다시 집습니다</div>
+    </div>
+  );
+}
+
 /** 맨 위 요약 — 하루 흐름(승인 → 피킹 → 분류 → 검품 → 출발 → 수령) + 핵심 숫자 4개, 나머지는 "숫자 모두" */
 function Summary() {
   const { sim, backend, layout, catalog } = useApp();
+  /** 누른 타일 — 아래에 자세히(사용자 2026-11-26 "버튼 누르면 해당 내용이 아래에") */
+  const [sel, setSel] = useState<string | null>(null);
   const d = sim.live('summary', 700, () => sim.summary(true));
   const q = sim.queues();
   const t = backend.ledger.totals();
@@ -83,7 +201,7 @@ function Summary() {
       {/* 하루 흐름 — 승인 대비 막대(글 대신 막대, 사용자 2026-11-25) */}
       <div className="flow2">
         {flow.map(([k, v, w]) => (
-          <div key={k} className={w ? 'w' : ''} title={`${k} ${v.toLocaleString()}개 (승인 대비 ${d.approved ? Math.round((100 * v) / d.approved) : 0}%)`}>
+          <div key={k} className={`${w ? 'w' : ''} click${sel === k ? ' on' : ''}`} onClick={() => setSel(sel === k ? null : k)} title={`${k} ${v.toLocaleString()}개 (승인 대비 ${d.approved ? Math.round((100 * v) / d.approved) : 0}%)`}>
             <b>{short(v)}</b>
             <Meter value={v} max={d.approved} tone={w ? 'warn' : k === '수령' && v > 0 ? 'ok' : 'accent'} />
             <small>{k}</small>
@@ -91,12 +209,13 @@ function Summary() {
         ))}
       </div>
       <div className="tiles3">
-        <Tile v={`${d.busy}/${sim.agents.length}`} k="작업 중">
+        <Tile v={`${d.busy}/${sim.agents.length}`} k="작업 중" onClick={() => setSel(sel === '작업 중' ? null : '작업 중')} on={sel === '작업 중'}>
           <Meter value={d.busy} max={sim.agents.length} tone="ok" />
         </Tile>
-        <Tile v={short(sim.pickedLastHour())} k="최근 1시간 피킹" />
-        <Tile v={short(sim.shortUnits)} k="결품 보고" tone={sim.shortUnits > 0 ? 'warn' : undefined} />
+        <Tile v={short(sim.pickedLastHour())} k="최근 1시간 피킹" onClick={() => setSel(sel === '1시간' ? null : '1시간')} on={sel === '1시간'} />
+        <Tile v={short(sim.shortUnits)} k="결품 보고" tone={sim.shortUnits > 0 ? 'warn' : undefined} onClick={() => setSel(sel === '결품' ? null : '결품')} on={sel === '결품'} />
       </div>
+      {sel && <SummaryDetail k={sel} onClose={() => setSel(null)} />}
       <details className="more">
         <summary>숫자 모두</summary>
         <div className="kpis">
@@ -171,7 +290,7 @@ function SiteFlow() {
           </button>
         ))}
       </div>
-      {!rows.length && <div className="note">08:00 에 MFC 보충 요청(TRF)을 받습니다.</div>}
+      {!rows.length && <div className="note">08:00 에 TRF 도착</div>}
       {/* MFC × 온도대 격자 — 칸 하나 = TRF 하나: 지금 단계 + 6단계 막대(글 대신, 사용자 2026-11-25). 누르면 그 MFC 의 TRF 카드로 */}
       {rows.length > 0 && (
         <div className="mfc-grid">
@@ -257,14 +376,10 @@ function SiteFlow() {
  * ② MFC 별 흐름: 할당 → 피킹 → 상차 → 출발(운송 중) → 수령, 막대
  * ③ 실시간 이동: 방금 일어난 피킹(→ 출고대기)·출발·수령 줄(원장 커밋)
  */
-function StockOverview() {
+function StockOverview({ part }: { part: 'mfc' | 'feed' }) {
   const { backend, sim } = useApp();
   useTick();
   const t = backend.ledger.totals();
-  const v = sim.live('check', 2000, () => backend.ledger.check());
-  const stock = sim.live('stock', 500, () => backend.ledger.onHandByLocation());
-  let staged = 0;
-  for (const [code, q] of stock) if (code.split('-')[3] === '91') staged += q;
   const trfs = sim.uiTransfers();
   const received = new Map<string, number>();
   for (const r of sim.runs.values()) for (const st of r.stops) if (st.received) received.set(st.mfcId, (received.get(st.mfcId) ?? 0) + st.received);
@@ -294,136 +409,197 @@ function StockOverview() {
       if (c.postingKind === 'TOUT') return { c, what: '출발 (운송 중으로)', who: '', qty };
       return { c, what: 'MFC 수령', who: '', qty };
     });
-  const maxAp = Math.max(1, ...rows.map((r) => r.ap));
-  return (
-    <>
-      <div className="tiles3" style={{ marginBottom: 8 }}>
-        <Tile v={t.onHand.toLocaleString()} k="CDC 현물" />
-        <Tile v={t.reserved.toLocaleString()} k="예약(할당)" />
-        <Tile v={staged.toLocaleString()} k="출고대기(91)" />
-        <Tile v={t.transit.toLocaleString()} k="운송 중" />
-        <Tile v={t.acked.toLocaleString()} k="MFC 수령" />
-        <Tile v={v.length ? `${v.length}건` : '없음'} k="원장 불변식 위반" tone={v.length ? 'bad' : undefined} />
-      </div>
-      <section className="sec">
-        <h4>
-          MFC 로 가는 재고 <span>할당 → 피킹 → 상차 → 출발 → 수령</span>
-        </h4>
-        <table className="inv">
-          <thead>
-            <tr>
-              <th>MFC</th>
-              <th>할당</th>
-              <th>피킹</th>
-              <th>상차</th>
-              <th>운송 중</th>
-              <th>수령</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((r) => (
-              <tr key={r.m.id}>
-                <td>
-                  {r.m.name.replace(/^\d호점 /, '')}
-                  <Meter value={r.ap} max={maxAp} tone="muted" title={`승인 ${r.ap.toLocaleString()}`} />
-                </td>
-                <td>{r.al.toLocaleString()}</td>
-                <td>{r.pk.toLocaleString()}</td>
-                <td>{r.ld.toLocaleString()}</td>
-                <td>{Math.max(0, r.dp - r.rc).toLocaleString()}</td>
-                <td>{r.rc.toLocaleString()}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </section>
-      <section className="sec">
-        <h4>
-          실시간 재고 이동 <span>{feed.length ? '최근 원장 기록' : '13:00 피킹부터'}</span>
-        </h4>
+  if (part === 'feed')
+    return (
+      <div className="mv-feed">
+        {!feed.length && <div className="note">13:00 피킹부터</div>}
         {feed.map(({ c, what, who, qty }) => (
-          <div key={c.commitId} className="row">
+          <div key={c.commitId} className="mv-row">
             <span className="t">{c.appliedAt.slice(11, 16)}</span>
-            <span className="ev">{what}</span>
-            <span>
-              {who && `${who} · `}
-              {qty.toLocaleString()}개
-            </span>
+            <span className={`mv-kind ${c.postingKind.toLowerCase()}`}>{what}</span>
+            <span className="mv-who">{who}</span>
+            <b>{qty.toLocaleString()}</b>
           </div>
         ))}
-      </section>
+      </div>
+    );
+  // MFC 로 가는 재고 — 맨 위 운송 중·MFC 수령 합, MFC 마다 단계 막대(승인 대비)
+  const STEPS: ['al' | 'pk' | 'ld' | 'tr' | 'rc', string][] = [
+    ['al', '할당'],
+    ['pk', '피킹'],
+    ['ld', '상차'],
+    ['tr', '운송 중'],
+    ['rc', '수령'],
+  ];
+  const live = rows.filter((r) => r.ap > 0);
+  return (
+    <>
+      <div className="mfs-top">
+        <div>
+          <small>승인(보낼 것)</small>
+          <b>{short(rows.reduce((a, r) => a + r.ap, 0))}</b>
+        </div>
+        <div>
+          <small>운송 중</small>
+          <b>{short(t.transit)}</b>
+        </div>
+        <div>
+          <small>MFC 수령</small>
+          <b>{short(t.acked)}</b>
+        </div>
+      </div>
+      {live.map((r) => {
+        const val = { al: r.al, pk: r.pk, ld: r.ld, tr: Math.max(0, r.dp - r.rc), rc: r.rc };
+        return (
+          <div key={r.m.id} className="mfs-card">
+            <div className="mfs-h">
+              <b>{r.m.name.replace(/^d호점 /, '')}</b>
+              <small>승인 {r.ap.toLocaleString()}</small>
+            </div>
+            <div className="mfs-steps">
+              {STEPS.map(([k, label]) => (
+                <div key={k}>
+                  <i>
+                    <em style={{ width: `${Math.min(100, (100 * val[k]) / Math.max(1, r.ap))}%` }} />
+                  </i>
+                  <small>{label}</small>
+                  <b>{short(val[k])}</b>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })}
+      {!live.length && <div className="note">08:00 에 TRF 도착</div>}
     </>
   );
 }
 
-function Stock() {
-  const { layout, backend, sim } = useApp();
-  const view = useView();
-  const stock = sim.live('stock', 500, () => backend.ledger.onHandByLocation());
-  const t = backend.ledger.totals();
-  const v = sim.live('check', 2000, () => backend.ledger.check());
-  // 고른 MFC 몫 — 할당(예약)·피킹·출고대기 박스
-  const mfc = view.mfcFilter ? MFCS.find((m) => m.id === view.mfcFilter) : undefined;
-  const mine = mfc ? sim.live(`mfc-stock-${mfc.id}`, 1000, () => {
-    const ts = sim.uiTransfers().filter((x) => x.mfcId === mfc.id);
-    const sum = (k: 'allocatedQty' | 'pickedQty' | 'departedQty') => ts.reduce((a, x) => a + x.progress.reduce((b, l) => b + l[k], 0), 0);
-    return { alloc: sum('allocatedQty'), picked: sum('pickedQty'), departed: sum('departedQty'), staged: [...sim.staged.values()].flat().filter((b) => b.mfcId === mfc.id).reduce((a, b) => a + b.units, 0) };
-  }) : undefined;
+
+/**
+ * 재고 탭 — 무엇의 재고인지 먼저 고르게(사용자 2026-11-26 "뭔 재고인지도 모르겠고 UI 도 별로"):
+ * [칠곡 DC 재고] 층·구역별 현물·채움 / [MFC 로 가는 재고] 할당 → 피킹 → 상차 → 운송 중 → 수령 / [실시간 이동] / [상품 찾기]
+ */
+function InventoryTab() {
+  const [sub, setSub] = useState<'dc' | 'mfc' | 'feed' | 'find'>('dc');
   return (
     <>
-      <div className="pick-row">
-        <MfcPick />
+      <div className="inv-tabs">
+        {(
+          [
+            ['dc', '칠곡 DC 재고'],
+            ['mfc', 'MFC 로 가는 재고'],
+            ['feed', '재고 변동'],
+            ['find', '상품 찾기'],
+          ] as const
+        ).map(([k, t]) => (
+          <button key={k} className={sub === k ? 'on' : ''} onClick={() => setSub(k)}>
+            {t}
+          </button>
+        ))}
       </div>
-      {mfc && mine && (
-        <div className="note">
-          {mfc.name} 몫 — 할당 {mine.alloc.toLocaleString()} · 피킹 {mine.picked.toLocaleString()} · 출고대기 박스 {mine.staged.toLocaleString()}개 · 출발 {mine.departed.toLocaleString()}
+      {sub === 'dc' && <DcStock />}
+      {sub === 'mfc' && <StockOverview part="mfc" />}
+      {/* 재고 변동 — 전엔 따로 있던 [변동] 탭(사용자 2026-11-26 "재고 탭이 있는데 변동 탭도 따로") */}
+      {sub === 'feed' && <MovesBoard />}
+      {sub === 'find' && <StockSearch />}
+    </>
+  );
+}
+
+/** 칠곡 DC 재고 — 맨 위 합계(어디에 얼마), 층마다 카드: 구역 × (보관 랙 / 피킹 자리) 채움 막대 */
+function DcStock() {
+  const { layout, backend, sim } = useApp();
+  const view = useView();
+  useTick();
+  const t = backend.ledger.totals();
+  const stock = sim.live('stock', 1000, () => backend.ledger.onHandByLocation());
+  const v = sim.live('check', 5000, () => backend.ledger.check());
+  const kindOf = (code: string) => {
+    const a = Number(code.split('-')[3]);
+    return a === 91 || a === 92 ? 'staged' : a === 90 ? 'dock' : 'store';
+  };
+  let staged = 0;
+  for (const [code, q] of stock) if (kindOf(code) === 'staged') staged += q;
+  const sumOf = (ls: { code: string }[]) => ls.reduce((s, l) => s + (stock.get(l.code) ?? 0), 0);
+  const rack = sumOf(layout.floors.flatMap((f) => f.locations));
+  const face = sumOf(layout.floors.flatMap((f) => f.shelves.filter((l) => !l.bin)));
+  const bins = sumOf(layout.floors.flatMap((f) => f.shelves.filter((l) => l.bin)));
+  const total = Math.max(1, rack + face + bins + staged);
+  const seg: [string, number, string][] = [
+    ['보관 랙', rack, '#2f80ed'],
+    ['피킹 자리', face, '#27ae60'],
+    ['오토스토어', bins, '#7c5cff'],
+    ['출고대기', staged, '#f2994a'],
+  ];
+  return (
+    <>
+      <div className="dcs-top">
+        <div className="dcs-total">
+          <small>칠곡 DC 현물</small>
+          <b>{short(t.onHand)}개</b>
+          <span>
+            할당(예약) {short(t.reserved)} · {Math.round((100 * t.reserved) / Math.max(1, t.onHand))}%
+          </span>
         </div>
-      )}
-      <div className="note">
-        CDC 현물 {t.onHand.toLocaleString()} · 예약 {t.reserved.toLocaleString()} · Transit {t.transit.toLocaleString()} · 원장 불변식 위반 {v.length}건{v.length ? ` (${v[0]})` : ''}. 줄을 누르면 그 구역으로 갑니다.
+        <div className="dcs-bar">
+          {seg.map(([k, n, c]) => (
+            <i key={k} style={{ width: `${(100 * n) / total}%`, background: c }} title={`${k} ${n.toLocaleString()}`} />
+          ))}
+        </div>
+        <div className="dcs-legend">
+          {seg.map(([k, n, c]) => (
+            <span key={k}>
+              <i style={{ background: c }} />
+              {k} <b>{short(n)}</b>
+            </span>
+          ))}
+        </div>
+        {v.length > 0 && <div className="dcs-bad">원장 불일치 {v.length}건 — {v[0]}</div>}
       </div>
-      <table className="inv">
-        <thead>
-          <tr>
-            <th>층·구역</th>
-            <th>종류</th>
-            <th>칸</th>
-            <th>현물 / 용량</th>
-            <th>채움</th>
-          </tr>
-        </thead>
-        <tbody>
-          {layout.floors.flatMap((f) =>
-            f.spec.zones.flatMap((z) =>
-              (['RACK', 'SHELF'] as const).map((kind) => {
-                const ls = kind === 'RACK' ? f.locations.filter((l) => l.zone === z.letter) : f.shelves.filter((l) => l.zone === z.letter);
-                const cap = ls.reduce((s, l) => s + l.capacity, 0);
-                const on = ls.reduce((s, l) => s + (stock.get(l.code) ?? 0), 0);
-                const id = kind === 'RACK' ? `${f.floor}-${z.letter}` : `${f.floor}-${z.letter}-SHELF`;
-                return (
-                  <tr
-                    key={id}
-                    onClick={() => {
-                      view.setFloor(f.floor);
-                      view.focusZone(id);
-                    }}
-                  >
-                    <td>
-                      {f.floor}F {z.label}
-                    </td>
-                    <td>{kind === 'RACK' ? '팔레트' : '선반'}</td>
-                    <td>{ls.length.toLocaleString()}</td>
-                    <td>
+      {layout.floors.map((f) => (
+        <section key={f.floor} className="sec dcs-floor">
+          <h4>
+            {f.floor}F <span>{f.spec.label.replace(/^\dF\s*/, '')}</span>
+          </h4>
+          {f.spec.zones.flatMap((z) =>
+            (['RACK', 'SHELF'] as const).map((kind) => {
+              const ls = kind === 'RACK' ? f.locations.filter((l) => l.zone === z.letter) : f.shelves.filter((l) => l.zone === z.letter);
+              if (!ls.length) return null;
+              const cap = ls.reduce((s, l) => s + l.capacity, 0);
+              const on = sumOf(ls);
+              const pct = cap ? Math.round((100 * on) / cap) : 0;
+              const id = kind === 'RACK' ? `${f.floor}-${z.letter}` : `${f.floor}-${z.letter}-SHELF`;
+              const what = kind === 'RACK' ? '보관 랙' : ls.some((l) => l.bin) ? '오토스토어' : ls.some((l) => l.lane) ? '피킹 선반·야채 레인' : '피킹 선반';
+              return (
+                <button
+                  key={id}
+                  className="dcs-row"
+                  onClick={() => {
+                    view.setFloor(f.floor);
+                    view.focusZone(id);
+                  }}
+                  title="누르면 3D 에서 그 구역"
+                >
+                  <span className="dcs-name">
+                    <b>{z.label.replace(/\s*\(.*\)$/, '')}</b>
+                    <small>{what}</small>
+                  </span>
+                  <span className="dcs-meter">
+                    <i>
+                      <em className={pct > 90 ? 'hi' : pct < 20 ? 'lo' : ''} style={{ width: `${Math.min(100, pct)}%` }} />
+                    </i>
+                    <small>
                       {short(on)} / {short(cap)}
-                    </td>
-                    <td>{cap ? Math.round((on / cap) * 100) : 0}%</td>
-                  </tr>
-                );
-              }),
-            ),
+                    </small>
+                  </span>
+                  <b className="dcs-pct">{pct}%</b>
+                </button>
+              );
+            }),
           )}
-        </tbody>
-      </table>
+        </section>
+      ))}
     </>
   );
 }
@@ -435,14 +611,7 @@ function LogBody({ tab }: { tab: RightView }): ReactNode {
   if (tab === 'admin') return <AdminBoard />;
   if (tab === 'moves') return <MovesBoard />;
   if (tab === 'barcode') return <BarcodeBoard />;
-  if (tab === 'inventory')
-    return (
-      <>
-        <StockOverview />
-        <StockSearch />
-        <Stock />
-      </>
-    );
+  if (tab === 'inventory') return <InventoryTab />;
   if (tab === 'api')
     return sim.apiLog.slice(-150).map((r, i) => {
       const ok = typeof r.status === 'number' && r.status < 400;
@@ -545,7 +714,7 @@ function Transport() {
           <MfcPick />
         </div>
         <div className="note">
-          22:00 배차 전 — 오늘 운행 예정(정규차, 노선 × 온도대 차 한 대, 5톤 {TMS.vehicle.maxRt} R/T). 물량 없는 운행은 배차 때 결행.
+          22:00 배차 전 · 오늘 예정 운행(5톤 {TMS.vehicle.maxRt} R/T)
         </div>
         <div className="trips">
           {pre.map((p) => (

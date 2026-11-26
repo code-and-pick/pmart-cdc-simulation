@@ -551,7 +551,7 @@ function ZoneBody({ zoneId }: { zoneId: string }) {
         </div>
         {zone.kind === 'RACK' && needs.length > 0 && (
           <>
-            <div className="note">선반으로 보충할 것 (팔레트 → 선반) — 누르면 그 팔레트 칸으로</div>
+            <div className="note">보충할 팔레트</div>
             <div className="lows">
               {needs.slice(0, 8).map((n) => (
                 <div key={`${n.sku}${n.from}`} onClick={() => go(n.from)}>
@@ -564,11 +564,11 @@ function ZoneBody({ zoneId }: { zoneId: string }) {
           </>
         )}
         <CategoryBars letter={letter} />
-        <div className="note">{zone.kind === 'RACK' ? '랙별(통로) — › 누르면 단별·칸별' : '선반 통로별 — › 누르면 단별·칸별'}</div>
+        <div className="note">{zone.kind === 'RACK' ? '랙(통로)별' : '선반 통로별'}</div>
         <RackList letter={letter} shelf={zone.kind === 'SHELF'} />
         {low.length > 0 && (
           <>
-            <div className="note">거의 빈 선반 칸 — 누르면 그 칸으로</div>
+            <div className="note">거의 빈 칸</div>
             <div className="lows">
               {low.map(({ l, q }) => (
                 <div key={l.code} onClick={() => go(l.code)}>
@@ -727,7 +727,7 @@ function LanRun() {
   return (
     <Sec title="한 건 돌리기 (LAN 에 씀)" aside={busy ? '도는 중…' : <button onClick={go}>시작</button>}>
       <div className="help">
-        <p>새 TRF 하나(상온 · 피킹면 재고 3품목 × 2개)를 인수 → 할당 → Wave → 피킹 → 분류 → 검품 → 배차·계획완료 → 상차 → 입차·상차완료·출차 → 출발 검증까지 계약 API 로 차례로 부릅니다. 막히면 그 단계에서 멈추고 응답 code 를 그대로 보여 줍니다.</p>
+        <p>새 TRF 1건(상온 3품목 × 2)을 인수부터 출발 검증까지 LAN 에 실제로 돌립니다.</p>
         <label>
           MFC{' '}
           <select value={mfcId} onChange={(e) => setMfcId(e.target.value)} disabled={busy}>
@@ -771,7 +771,7 @@ function RealCheck() {
   return (
     <Sec title="실서버 연결 점검" aside={busy ? '점검 중…' : <button onClick={run}>다시</button>}>
       <div className="help">
-        <p>실서버 모드에서는 시뮬레이션 엔진을 돌리지 않습니다 — TMS 가 LAN 에 아직 없고, LAN 위치표가 지금 도면(5F 냉장·냉동 · 6F·7F 상온)보다 예전 것입니다. CDC 시험 계정(claude-cdc-sup · cdcw-*)은 PC1 이 만들었고(R-16), 토큰을 받으려면 이 PC 비밀번호 폴더에 그 비밀번호 파일이 있어야 합니다. 아래는 조회만 해 보는 연결 점검입니다. 공개 경로는 게이트웨이 + 직원 토큰, 내부 경로는 LAN 서비스 직접(토큰 없음, CDC-9).</p>
+        <p>실서버 모드는 조회 점검만 합니다(시뮬레이션은 멈춤).</p>
         {real.tokens.lastError && <p>토큰: {real.tokens.lastError}</p>}
       </div>
       {/* 서비스마다 한 칸 — 상태는 색 점·글, 자세한 응답은 아래 줄(긴 문구가 값 칸을 한 글자 폭으로 찌그러뜨리던 것, 사용자 2026-11-26 "계속 안 떠") */}
@@ -815,25 +815,33 @@ function Workers() {
   return (
     <>
       <section className="sec wk-find">
-        <input className="search" placeholder="작업자 찾기 — 이름·번호·하는 일 (예: 5F-07, 지게차, 상차)" value={q} onChange={(e) => setQ(e.target.value)} />
-        <div className="wk-chips">
+        <input className="search" placeholder="작업자 찾기 (예: 5F-07 · 지게차)" value={q} onChange={(e) => setQ(e.target.value)} />
+        <div className="wk-row-f">
+          <span>층</span>
+          <div className="wk-seg c4">
           {([0, 5, 6, 7] as const).map((x) => (
             <button key={x} className={fl === x ? 'on' : ''} onClick={() => setFl(x)}>
-              {x ? `${x}F` : '전체 층'}
+              {x ? `${x}F` : '전체'}
             </button>
           ))}
+          </div>
         </div>
-        <div className="wk-chips">
+        <div className="wk-row-f">
+          <span>역할</span>
+          <div className="wk-seg c2 lr">
           <button className={!role ? 'on' : ''} onClick={() => setRole(null)}>
-            모든 역할 <small>{base.length}</small>
+            전체 <small>{base.length}</small>
           </button>
           {roles.map((r) => (
             <button key={r} className={role === r ? 'on' : ''} onClick={() => setRole(role === r ? null : r)}>
               {ROLE_KO[r]} <small>{base.filter((a) => a.role === r).length}</small>
             </button>
           ))}
+          </div>
         </div>
-        <div className="wk-chips">
+        <div className="wk-row-f">
+          <span>상태</span>
+          <div className="wk-seg c2 lr">
           {(
             [
               ['all', '모두'],
@@ -846,11 +854,12 @@ function Workers() {
               {t} <small>{v === 'all' ? base.filter((a) => !role || a.role === role).length : base.filter((a) => (!role || a.role === role) && stateOf(a) === v).length}</small>
             </button>
           ))}
+          </div>
         </div>
       </section>
       <section className="sec wk-list">
         <h4>
-          {list.length}명 <span>누르면 그 사람을 따라 오른쪽에 흐름</span>
+          {list.length}명 
         </h4>
         {list.slice(0, 200).map((a) => {
           const s = stateOf(a);
@@ -865,7 +874,7 @@ function Workers() {
             </button>
           );
         })}
-        {list.length > 200 && <div className="note">200명까지 보입니다 — 층·역할로 좁혀 주세요</div>}
+        {list.length > 200 && <div className="note">200명까지 표시</div>}
       </section>
       <details className="wk-floors">
         <summary>층별 자세히(예전 목록)</summary>

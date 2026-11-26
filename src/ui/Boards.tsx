@@ -29,8 +29,11 @@ const EX = {
   handover: MFCS.slice(0, 5).map((m, i) => ({ car: `칠곡-5T-0${i + 1}A`, mfc: m.id, at: 5.5 * 3600 + i * 1200, sent: [32_400, 41_800, 28_600, 30_100, 25_900][i], recv: [32_400, 41_800, 28_598, 30_100, 25_900][i] })),
   rt: MFCS.map((m, i) => ({ mfc: m.id, out: [62, 80, 55, 58, 50, 4, 4, 4, 4][i] ?? 4, back: [62, 80, 55, 58, 50, 4, 4, 4, 4][i] ?? 4, home: [62, 80, 55, 58, 50, 4, 4, 4, 4][i] ?? 4 })),
 };
+/** 작업 상태 한글 */
+const TASK_KO: Record<string, string> = { CREATED: '대기', ASSIGNED: '배정됨', ACCEPTED: '받음', IN_PROGRESS: '진행 중', PARTIAL: '부분 완료', DONE: '완료', EXCEPTION: '예외', CANCELLED: '취소' };
+
 function ExampleNote({ when }: { when: string }) {
-  return <div className="note ex-note">예시 — 아직 기록이 없어 본보기 줄을 보여 줍니다(흐린 글씨). {when}에 실제 값으로 바뀝니다. 머리줄 [22:00 ▶] 로 넘겨 볼 수 있습니다.</div>;
+  return <div className="note ex-note">예시 · {when}부터 실제 값</div>;
 }
 type Dot = 'done' | 'now' | 'wait';
 
@@ -80,10 +83,98 @@ export function MfcPick() {
 }
 
 /** TRF 카드 — MFC "실제 주문" 대신(사용자 §6-4): 단계 점, TRF·LPN 번호 검색, MFC 필터 */
+/**
+ * TRF 자세히(카드를 누르면 펼침) — 사용자 2026-11-26 "클릭해도 아무 데도 안 들어가지고 정보도 안 떠".
+ * 마감·할당·단계별 수량(승인 대비), 품목(많은 순 6), 박스(LPN), 실을 차·도크·출발, 3D 출고대기·운송 탭으로 가기.
+ */
+function TrfDetail({ t, p, lpns, handedAt }: { t: ReturnType<typeof useTrfRows>[number]['t']; p: ReturnType<typeof useTrfRows>[number]['p']; lpns: string[]; handedAt?: number }) {
+  const { sim, catalog, layout } = useApp();
+  const view = useView();
+  const run = [...sim.runs.values()].find((r) => r.stops.some((s) => s.trfIds.includes(t.trfId)));
+  const stop = run?.stops.find((s) => s.trfIds.includes(t.trfId));
+  const due = new Date(t.dueAt);
+  const dueText = Number.isNaN(due.getTime()) ? t.dueAt : `${due.getMonth() + 1}/${due.getDate()} ${String(due.getHours()).padStart(2, '0')}:${String(due.getMinutes()).padStart(2, '0')}`;
+  const al = t.progress.reduce((a, x) => a + x.allocatedQty, 0);
+  const pct = (v: number) => (p.ap ? `${Math.round((100 * v) / p.ap)}%` : '—');
+  const stages: [string, number][] = [
+    ['할당', al],
+    ['피킹', p.pk],
+    ['분류', p.so],
+    ['검품', p.ins],
+    ['상차', p.ld],
+    ['출발', p.dp],
+  ];
+  const lines = [...t.progress].sort((a, b) => b.approvedQty - a.approvedQty).slice(0, 6);
+  // 출고대기 칸(그 MFC · 그 온도대 층)
+  const m = MFCS.find((x) => x.id === t.mfcId);
+  const temp = trfTemp(t);
+  const st = m ? layout.floors.flatMap((f) => f.staging).find((s) => s.temp === temp && s.bay === m.staging) : undefined;
+  return (
+    <div className="trf-detail" onClick={(e) => e.stopPropagation()}>
+      <div className="trf-kv">
+        <span>마감({t.deadlineMeaning === 'ARRIVAL' ? '도착' : t.deadlineMeaning === 'HANDOVER' ? '인계' : '준비'})</span>
+        <b>{dueText}</b>
+        <span>줄</span>
+        <b>{t.progress.length.toLocaleString()}품목</b>
+        <span>차</span>
+        <b>{run ? `${run.plateNo} · ${run.driverName}` : '22:00 배차 때'}</b>
+        <span>도크·출발</span>
+        <b>{run ? `${run.dock.short} · ${run.departedAt !== undefined ? clock(run.departedAt) : `계획 ${clock(run.plan.plannedDepartMin * 60)}`}` : '—'}</b>
+        <span>도착·인계</span>
+        <b>{stop?.arrivedAt !== undefined ? `${clock(stop.arrivedAt)}${handedAt ? ` · ${clock(handedAt)}` : ''}` : '—'}</b>
+      </div>
+      <div className="trf-bars">
+        {stages.map(([k, v]) => (
+          <div key={k}>
+            <span>{k}</span>
+            <i>
+              <em style={{ width: p.ap ? `${Math.min(100, (100 * v) / p.ap)}%` : 0 }} />
+            </i>
+            <b>
+              {v.toLocaleString()} <small>{pct(v)}</small>
+            </b>
+          </div>
+        ))}
+      </div>
+      <div className="trf-lines">
+        <small>품목(많은 순)</small>
+        {lines.map((l) => (
+          <div key={l.sku}>
+            <span>{catalog.bySku.get(l.sku)?.name ?? l.sku}</span>
+            <b>
+              {l.pickedQty}/{l.approvedQty}
+            </b>
+          </div>
+        ))}
+      </div>
+      {lpns.length > 0 && (
+        <div className="trf-lpns">
+          <small>박스(LPN) {lpns.length}</small> {lpns.slice(0, 8).join(' · ')}
+          {lpns.length > 8 ? ' …' : ''}
+        </div>
+      )}
+      <div className="trf-acts">
+        {st && (
+          <button
+            onClick={() => {
+              view.setFloor(st.floor);
+              view.focusLocation(st);
+            }}
+          >
+            3D 출고대기 보기
+          </button>
+        )}
+        {run && <button onClick={() => view.toggleRight('transport')}>운송 탭에서 차 보기</button>}
+      </div>
+    </div>
+  );
+}
+
 export function TrfBoard() {
   const { sim } = useApp();
   const view = useView();
   const [q, setQ] = useState('');
+  const [open, setOpen] = useState<string | null>(null);
   const rows = useTrfRows()
     .filter((r) => !view.mfcFilter || r.t.mfcId === view.mfcFilter)
     .filter((r) => {
@@ -97,12 +188,12 @@ export function TrfBoard() {
         <MfcPick />
         <input className="search" placeholder="TRF·LPN 번호 검색" value={q} onChange={(e) => setQ(e.target.value)} style={{ flex: 1 }} />
       </div>
-      {!rows.length && <div className="note">{q ? '찾는 TRF·LPN 이 없습니다.' : '08:00 에 TRF 를 받습니다.'}</div>}
+      {!rows.length && <div className="note">{q ? '찾는 TRF·LPN 이 없습니다.' : '08:00 에 TRF 도착'}</div>}
       {rows.map(({ t, p, dots, handedAt }) => {
         const lp = lpnsOf(sim, t.trfId);
         const tone = dots[5] === 'done' ? 'done' : dots.includes('now') ? 'run' : 'wait';
         return (
-          <div key={t.trfId} className={`sfl-r tone-${tone}`}>
+          <div key={t.trfId} className={`sfl-r tone-${tone}${open === t.trfId ? ' open' : ''}`} onClick={() => setOpen(open === t.trfId ? null : t.trfId)} title="눌러서 자세히">
             <div className="sfl-h">
               <b>
                 {mfcName(t.mfcId)} {TEMP_KO[trfTemp(t)]}
@@ -122,6 +213,7 @@ export function TrfBoard() {
               승인 {p.ap.toLocaleString()} · 상태 {t.state} · 박스(LPN) {lp.length}
               {q && lp.filter((l) => l.toUpperCase().includes(q.trim().toUpperCase())).slice(0, 3).map((l) => ` · ${l}`)}
             </div>
+            {open === t.trfId && <TrfDetail t={t} p={p} lpns={lp} handedAt={handedAt} />}
           </div>
         );
       })}
@@ -155,7 +247,7 @@ export function AdminBoard() {
           [
             ['past', '지난 TRF'],
             ['tasks', '진행 중 작업'],
-            ['handover', 'MFC 인계 확인'],
+            ['handover', 'MFC 인계'],
             ['rt', 'R/T 회수'],
           ] as const
         ).map(([key, t]) => (
@@ -164,9 +256,26 @@ export function AdminBoard() {
           </button>
         ))}
       </div>
-      <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
-        <input className="search" placeholder="번호 검색(TRF·작업·차)" value={q} onChange={(e) => setQ(e.target.value)} style={{ flex: 1 }} />
-        <input type="date" value={day} onChange={(e) => setDay(e.target.value)} title="마감(도착) 날짜로 거르기" />
+      {/* 찾기 줄 — 검색 칸과 날짜를 같은 높이·같은 모양으로(사용자 2026-11-26 "이 UI 고쳐") */}
+      <div className="ad-tools">
+        <label className="ad-search">
+          <span aria-hidden>⌕</span>
+          <input placeholder="번호 찾기 — TRF·작업·차" value={q} onChange={(e) => setQ(e.target.value)} />
+          {q && (
+            <button onClick={() => setQ('')} aria-label="지우기">
+              ×
+            </button>
+          )}
+        </label>
+        <label className="ad-date" title="마감(도착) 날짜로 거르기">
+          <span>마감일</span>
+          <input type="date" value={day} onChange={(e) => setDay(e.target.value)} />
+          {day && (
+            <button onClick={() => setDay('')} aria-label="날짜 지우기">
+              ×
+            </button>
+          )}
+        </label>
       </div>
       {tab === 'past' && (
         <table className="inv">
@@ -209,44 +318,46 @@ export function AdminBoard() {
       )}
       {tab === 'past' && !hasPast && <ExampleNote when="첫 차가 출발하는 새벽(01:00~)" />}
       {tab === 'tasks' && (
-        <table className="inv">
-          <thead>
-            <tr>
-              <th>작업</th>
-              <th>TRF</th>
-              <th>상태</th>
-              <th>담당</th>
-              <th>줄</th>
-            </tr>
-          </thead>
-          <tbody>
-            {backend
-              .findTasks((t) => t.state !== 'DONE' && t.state !== 'PARTIAL' && t.state !== 'CANCELLED')
-              .filter((t) => match(t.taskId) || match(sim.no('TASK', t.taskId)) || t.trfIds.some((id) => match(id) || match(sim.no('TRF', id))))
-              .slice(0, 200)
-              .map((t) => (
-                <tr key={t.taskId}>
-                  <td title={`시스템 번호 ${t.taskId}`}>{sim.no('TASK', t.taskId)}</td>
-                  <td title={`시스템 번호 ${t.trfIds.join(', ')}`}>{t.trfIds.map((id) => sim.no('TRF', id)).join(' · ')}</td>
-                  <td>{t.state}</td>
-                  <td>{sim.agents.find((a) => a.id === t.assigneeId)?.name ?? '—'}</td>
-                  <td>
-                    {t.lines.filter((l) => l.pickedQty + l.shortQty >= l.plannedQty).length}/{t.lines.length}
-                  </td>
-                </tr>
-              ))}
-            {!hasTasks &&
-              EX.tasks.map((x) => (
-                <tr key={x.task} className="ex">
-                  <td>{x.task}</td>
-                  <td>{x.trf}</td>
-                  <td>{x.state}</td>
-                  <td>{x.who}</td>
-                  <td>{x.lines}</td>
-                </tr>
-              ))}
-          </tbody>
-        </table>
+        // 카드 — 작업 번호·상태(한글)·담당·TRF·줄 진행 막대(사용자 2026-11-26 "못 알아보겠다" — 표가 좁아 줄이 꺾이고 상태가 영어였음)
+        <div className="tk-list">
+          {(hasTasks
+            ? backend
+                .findTasks((t) => t.state !== 'DONE' && t.state !== 'PARTIAL' && t.state !== 'CANCELLED')
+                .filter((t) => match(t.taskId) || match(sim.no('TASK', t.taskId)) || t.trfIds.some((id) => match(id) || match(sim.no('TRF', id))))
+                .slice(0, 200)
+                .map((t) => ({
+                  key: t.taskId,
+                  no: sim.no('TASK', t.taskId),
+                  state: t.state as string,
+                  who: sim.agents.find((a) => a.id === t.assigneeId)?.name ?? '',
+                  trfs: t.trfIds.map((id) => sim.no('TRF', id)),
+                  done: t.lines.filter((l) => l.pickedQty + l.shortQty >= l.plannedQty).length,
+                  total: t.lines.length,
+                  ex: false,
+                }))
+            : EX.tasks.map((x) => ({ key: x.task, no: x.task, state: x.state, who: x.who === '—' ? '' : x.who, trfs: x.trf.split(' · '), done: Number(x.lines.split('/')[0]), total: Number(x.lines.split('/')[1]), ex: true }))
+          ).map((x) => (
+            <div key={x.key} className={`tk${x.ex ? ' ex' : ''}`}>
+              <div className="tk-h">
+                <b>{x.no}</b>
+                <span className={`tk-st ${x.state.toLowerCase()}`}>{TASK_KO[x.state] ?? x.state}</span>
+                {x.ex && <span className="tk-ex">예시</span>}
+              </div>
+              <div className="tk-m">
+                <span>{x.who || '담당 없음'}</span>
+                <span>TRF {x.trfs.join(', ')}</span>
+              </div>
+              <div className="tk-bar">
+                <i>
+                  <em style={{ width: x.total ? `${(100 * x.done) / x.total}%` : 0 }} />
+                </i>
+                <small>
+                  {x.done}/{x.total}줄
+                </small>
+              </div>
+            </div>
+          ))}
+        </div>
       )}
       {tab === 'tasks' && !hasTasks && <ExampleNote when="석간 Wave 배포(13:00) 뒤" />}
       {tab === 'handover' && (
@@ -297,7 +408,7 @@ export function AdminBoard() {
       {tab === 'handover' && !hasHand && <ExampleNote when="차가 MFC 에 도착하는 새벽(05:00~)" />}
       {tab === 'rt' && (
         <>
-          <div className="note">MFC 에 R/T 를 내리고 인계할 때 비워 둔 빈 R/T 를 같은 수만큼 돌려받아 싣고, 칠곡에 돌아오면 도크에 내립니다. 판매 불가·파손 상품 회수는 계약이 없어 넣지 않았습니다.</div>
+          <div className="ad-hint">인계 때 빈 R/T 같은 수만큼 회수 → 칠곡 도크</div>
           <table className="inv">
             <thead>
               <tr>
@@ -459,7 +570,7 @@ export function MovesBoard() {
           <input type="checkbox" checked={picks} onChange={(e) => setPicks(e.target.checked)} /> 피킹 이동도 보기(많음 — 기본은 선반 보충만)
         </label>
       )}
-      {!list.length && <div className="note">고른 종류의 변동이 아직 없습니다.</div>}
+      {!list.length && <div className="note">변동 없음</div>}
       <ul className="mv-list">
         {list.map((c) => {
           const qty = c.deltas.filter((d) => d.delta > 0 && (d.bucket === 'ON_HAND' || d.bucket === 'RESERVED' || d.bucket === 'TRANSIT')).reduce((a, d) => a + d.delta, 0)

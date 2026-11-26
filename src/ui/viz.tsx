@@ -13,9 +13,9 @@ export function Meter({ value, max, tone = 'accent', title }: { value: number; m
 }
 
 /** 숫자 타일 — 큰 값 + 작은 이름(+ 선택: 막대) */
-export function Tile({ v, k, children, tone }: { v: ReactNode; k: string; children?: ReactNode; tone?: 'warn' | 'bad' }) {
+export function Tile({ v, k, children, tone, onClick, on }: { v: ReactNode; k: string; children?: ReactNode; tone?: 'warn' | 'bad'; onClick?: () => void; on?: boolean }) {
   return (
-    <div className={`tile ${tone ? `tone-${tone}` : ''}`}>
+    <div className={`tile ${tone ? `tone-${tone}` : ''}${onClick ? ' click' : ''}${on ? ' on' : ''}`} onClick={onClick}>
       <b>{v}</b>
       <span>{k}</span>
       {children}

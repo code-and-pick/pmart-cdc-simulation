@@ -7,7 +7,7 @@ import { qrEncode } from '../domain/qr';
 import { scanView, useScanView, type ScanCodeMode } from './scanView';
 
 /** 1차원 바코드 한 장의 최대 화면 폭(CSS px) — 오른쪽 패널에 들어가게 */
-const MAX_CSS_WIDTH = 380;
+const MAX_CSS_WIDTH = 296;
 
 const dprNow = () => (typeof window === 'undefined' ? 1 : window.devicePixelRatio || 1);
 
@@ -34,7 +34,8 @@ export function CodeImage({ value, kind, mode, size, height = 56 }: { value: str
   const q = 10;
   const w = b.modules + q * 2;
   // 1 모듈 = 장치 픽셀 정수 개 — 소수 배율이면 막대 폭이 들쭉날쭉해져 카메라가 잘 못 읽는다
-  const dev = Math.max(2, Math.min(Math.round(3 * dpr), Math.floor((size * dpr) / w)));
+  // 패널에 다 들어가게 — 폭이 모자라면 1 장치 픽셀까지 줄인다(2 로 고정하면 긴 위치 코드가 오른쪽에서 잘렸음, 사용자 2026-11-26)
+  const dev = Math.max(1, Math.min(Math.round(3 * dpr), Math.floor((size * dpr) / w)));
   return (
     <svg viewBox={`0 0 ${w} ${height}`} preserveAspectRatio="none" shapeRendering="crispEdges" style={{ width: (w * dev) / dpr, height, display: 'block' }}>
       <rect width={w} height={height} fill="#fff" />
