@@ -1374,26 +1374,68 @@ details.sec > summary h4 { justify-content: flex-start; gap: 6px; }
 .k-RECEIPT_ACK { --mv: #34d399; }
 .k-INITIAL_BALANCE { --mv: #64748b; }
 
-/* 고른 작업자 흐름(WorkerFlow) — 사용자 2026-11-26 */
-.wflow { border-color: var(--accent, #7c5cff); }
-.wf-steps { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 2px; margin: 2px 0 10px; }
-.wf-step-wrap { display: inline-flex; align-items: center; gap: 2px; }
-.wf-step { display: inline-flex; align-items: center; gap: 5px; padding: 4px 8px; border-radius: 999px; border: 1px solid var(--line); background: var(--bg, transparent); font-size: 11.5px; color: var(--muted); }
-.wf-step i { font-style: normal; font-weight: 700; font-size: 10px; width: 16px; height: 16px; border-radius: 50%; display: inline-grid; place-items: center; background: var(--line); color: var(--ink, inherit); }
-.wf-step.done { color: var(--ink, inherit); opacity: .75; }
-.wf-step.done i { background: var(--ok, #2e9e6a); color: #fff; }
-.wf-step.now { color: #fff; background: var(--accent, #7c5cff); border-color: var(--accent, #7c5cff); font-weight: 700; animation: wfpulse 1.4s ease-in-out infinite; }
-.wf-step.now i { background: #fff; color: var(--accent, #7c5cff); }
-@keyframes wfpulse { 50% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent, #7c5cff) 25%, transparent); } }
-.wf-arrow { color: var(--muted); font-size: 11px; padding: 0 1px; }
-.wf-now { display: grid; gap: 6px; margin-bottom: 8px; }
-.wf-now > div { display: flex; gap: 8px; align-items: baseline; }
-.wf-now small, .wf-rows small { color: var(--muted); font-size: 11px; min-width: 34px; }
-.wf-now b { font-size: 13px; }
-.wf-rows { display: grid; grid-template-columns: 1fr 1fr; gap: 3px 10px; font-size: 12px; margin-bottom: 8px; }
-.wf-hist { max-height: 260px; overflow: auto; border-top: 1px solid var(--line); padding-top: 6px; font-size: 12px; }
-.wf-hist-h { color: var(--muted); font-size: 11px; margin-bottom: 4px; }
-.wf-hist > div:not(.wf-hist-h):not(.note) { display: grid; grid-template-columns: 62px 1fr auto; gap: 6px; padding: 2px 0; }
-.wf-hist .t { color: var(--muted); font-variant-numeric: tabular-nums; }
-.wf-hist .p { color: var(--muted); font-size: 11px; max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.wf-hist .now .x { font-weight: 700; }
+/* 고른 작업자 따라가기(WorkerFlow) — 사용자 2026-11-26 */
+.wflow { border-color: #7c5cff; display: flex; flex-direction: column; gap: 10px; }
+.wf-head { display: flex; align-items: center; gap: 6px; }
+.wf-head > div { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.wf-head b { font-size: 14px; }
+.wf-head small { color: var(--muted); font-size: 11px; }
+.wf-pill { font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 999px; white-space: nowrap; }
+.wf-pill.busy { background: rgba(39,174,96,.15); color: #27ae60; }
+.wf-pill.idle { background: rgba(242,153,74,.16); color: #d9822b; }
+.wf-pill.off { background: var(--line); color: var(--muted); }
+.wf-btn { font-size: 11px; padding: 4px 8px; border-radius: 8px; border: 1px solid var(--line); background: transparent; color: inherit; cursor: pointer; white-space: nowrap; }
+.wf-btn.on { background: #7c5cff; border-color: #7c5cff; color: #fff; }
+.wf-btn.x { padding: 4px 7px; }
+.wf-nowcard { border-radius: 10px; padding: 9px 10px; background: color-mix(in srgb, #7c5cff 9%, transparent); border: 1px solid color-mix(in srgb, #7c5cff 30%, transparent); display: grid; gap: 5px; }
+.wf-now-what { display: flex; align-items: center; gap: 7px; }
+.wf-now-what b { font-size: 14px; flex: 1; }
+.wf-now-what em { font-style: normal; font-size: 12px; font-variant-numeric: tabular-nums; color: var(--muted); }
+.wf-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; animation: wfpulse 1.4s ease-in-out infinite; }
+@keyframes wfpulse { 50% { opacity: .35; } }
+.wf-now-where { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 12px; }
+.wf-now-where span + span { color: var(--muted); }
+.wf-rows { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 10px; font-size: 11.5px; }
+.wf-rows > div { display: flex; gap: 5px; min-width: 0; }
+.wf-rows small { color: var(--muted); flex-shrink: 0; }
+.wf-rows span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wf-flow-h { display: flex; justify-content: space-between; align-items: baseline; gap: 6px; font-size: 12px; font-weight: 700; }
+.wf-flow-h small { font-weight: 500; color: var(--muted); font-size: 11px; }
+.wf-stepper { list-style: none; margin: -4px 0 0; padding: 0; }
+.wf-stepper li { position: relative; display: grid; grid-template-columns: 22px 1fr auto; align-items: center; gap: 8px; padding: 5px 4px 5px 0; font-size: 12.5px; color: var(--muted); }
+.wf-stepper li:not(:last-child)::after { content: ''; position: absolute; left: 10px; top: 25px; bottom: -6px; width: 2px; background: var(--line); }
+.wf-stepper li.done:not(:last-child)::after { background: var(--c); opacity: .5; }
+.wf-stepper i { font-style: normal; width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font-size: 11px; font-weight: 700; border: 2px solid var(--line); background: var(--soft); position: relative; z-index: 1; }
+.wf-stepper li.done { color: inherit; }
+.wf-stepper li.done i { background: var(--c); border-color: var(--c); color: #fff; }
+.wf-stepper li.now { color: inherit; font-weight: 700; background: color-mix(in srgb, var(--c) 12%, transparent); border-radius: 8px; }
+.wf-stepper li.now i { background: var(--c); border-color: var(--c); color: #fff; box-shadow: 0 0 0 4px color-mix(in srgb, var(--c) 25%, transparent); }
+.wf-stepper .t { font-variant-numeric: tabular-nums; font-size: 11.5px; text-align: right; white-space: nowrap; }
+.wf-stepper .t small { color: var(--muted); font-weight: 400; }
+.wf-map { border-radius: 10px; overflow: hidden; border: 1px solid var(--line); }
+.wf-map svg { display: block; width: 100%; height: 190px; }
+.wf-map-bg { fill: var(--bg, rgba(127,127,127,.06)); stroke: var(--line); stroke-width: .4; }
+.wf-map-dock { fill: #2f80ed; opacity: .55; }
+.wf-map-trail { fill: none; stroke: #7c5cff; stroke-width: .9; stroke-linejoin: round; stroke-linecap: round; opacity: .75; }
+.wf-map-next { stroke: #7c5cff; stroke-width: .6; stroke-dasharray: 1.4 1; opacity: .8; }
+.wf-map-dest { fill: none; stroke: #eb5757; stroke-width: .7; }
+.wf-map-me { fill: #7c5cff; stroke: #fff; stroke-width: .5; }
+.wf-map-pulse { fill: #7c5cff; opacity: .25; animation: wfring 1.4s ease-out infinite; transform-box: fill-box; transform-origin: center; }
+@keyframes wfring { from { transform: scale(.6); opacity: .45; } to { transform: scale(2.2); opacity: 0; } }
+.wf-map-legend { display: flex; gap: 10px; padding: 4px 8px; font-size: 10.5px; color: var(--muted); border-top: 1px solid var(--line); }
+.wf-map-legend i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; vertical-align: -1px; }
+.wf-map-legend i.me { background: #7c5cff; }
+.wf-map-legend i.trail { width: 12px; height: 2px; border-radius: 0; background: #7c5cff; vertical-align: 2px; }
+.wf-map-legend i.dest { border: 1.5px solid #eb5757; }
+.wf-ribbon .bar { position: relative; height: 12px; border-radius: 6px; background: var(--line); overflow: hidden; }
+.wf-ribbon .bar span { position: absolute; top: 0; bottom: 0; }
+.wf-ribbon .ax { display: flex; justify-content: space-between; color: var(--muted); font-size: 10.5px; margin-top: 2px; }
+.wf-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; text-align: center; }
+.wf-stats b { display: block; font-size: 15px; font-variant-numeric: tabular-nums; }
+.wf-stats small { color: var(--muted); font-size: 10.5px; }
+.wf-log summary { cursor: pointer; font-size: 11.5px; color: var(--muted); }
+.wf-log > div { max-height: 220px; overflow: auto; margin-top: 4px; font-size: 11.5px; }
+.wf-log > div > div { display: grid; grid-template-columns: 58px 8px 1fr auto; align-items: center; gap: 6px; padding: 2px 0; }
+.wf-log .t { color: var(--muted); font-variant-numeric: tabular-nums; }
+.wf-log .d { width: 8px; height: 8px; border-radius: 50%; }
+.wf-log .p { color: var(--muted); font-size: 10.5px; max-width: 130px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

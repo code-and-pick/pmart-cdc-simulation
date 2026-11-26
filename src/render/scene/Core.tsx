@@ -32,7 +32,7 @@ function cellBox(l: Location, box: THREE.Box3) {
 }
 
 export function CameraRig() {
-  const { controller } = useApp();
+  const { controller, sim } = useApp();
   const camera = useThree((s) => s.camera) as THREE.PerspectiveCamera;
   const gl = useThree((s) => s.gl);
   const controls = useMemo(() => {
@@ -99,6 +99,19 @@ export function CameraRig() {
       camera.position.lerpVectors(tw.from, tw.to, k);
       controls.target.lerpVectors(tw.tFrom, tw.tTo, k);
       if (tw.t >= 1) tween.current = null;
+    }
+    // 작업자 따라가기 — 보는 점을 그 사람 쪽으로 부드럽게 옮기고 카메라도 같은 만큼(거리·각도 그대로, 돌리기·확대는 사용자 몫)
+    if (controller.followWorker && !tween.current) {
+      const ag = sim.agents.find((x) => x.id === controller.followWorker);
+      if (ag && ag.floor === controller.floor) {
+        const k = Math.min(1, dt * 4);
+        const dx = (ag.pos.x - controls.target.x) * k;
+        const dz = (ag.pos.z - controls.target.z) * k;
+        controls.target.x += dx;
+        controls.target.z += dz;
+        camera.position.x += dx;
+        camera.position.z += dz;
+      }
     }
     controls.update();
     // 칸 정면 보기에서만 맞은편 랙을 잘라 낸다 — 사용자가 크게 물러나거나 다가가면 푼다

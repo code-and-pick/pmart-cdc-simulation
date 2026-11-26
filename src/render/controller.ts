@@ -67,6 +67,8 @@ export class ViewController extends Emitter {
   selected: Location | null = null;
   /** 누른 작업자(PDA 카드) */
   selectedWorker: string | null = null;
+  /** 카메라가 따라가는 작업자(작업자 흐름 패널 [따라가기], 사용자 2026-11-26) */
+  followWorker: string | null = null;
   cameraRequest: CameraRequest | null = null;
   /** 칸 정면 보기 중 근접 클리핑 거리 — 맞은편 랙을 잘라 낸다(MFC focusLocation 과 같은 방법) */
   nearCut = 0;
@@ -176,6 +178,7 @@ export class ViewController extends Emitter {
   backOut() {
     this.selected = null;
     this.selectedWorker = null;
+    this.followWorker = null;
     if (this.homeView) {
       this.cameraRequest = this.homeView;
       this.homeView = null;
@@ -194,6 +197,7 @@ export class ViewController extends Emitter {
 
   selectWorker(id: string | null, floor?: FloorKey) {
     this.selectedWorker = id;
+    if (this.followWorker && this.followWorker !== id) this.followWorker = null;
     if (floor !== undefined && floor !== this.floor) {
       this.floor = floor;
       this.selected = null;
@@ -249,6 +253,16 @@ export class ViewController extends Emitter {
 
   toggleRight(v: RightView) {
     this.rightView = this.rightView === v ? null : v;
+    this.emit();
+  }
+
+  /** 작업자 따라가기 켜기·끄기 — 켜면 그 사람 위 비스듬히로 옮기고, 그 뒤는 CameraRig 가 매 프레임 같은 거리로 따라간다 */
+  setFollow(id: string | null, at?: { x: number; z: number }) {
+    this.followWorker = id;
+    if (id && at) {
+      if (!this.homeView && this.cameraNow) this.homeView = { ...this.cameraNow(), animate: true };
+      this.cameraRequest = { pos: new THREE.Vector3(at.x, 26, at.z + 20), target: new THREE.Vector3(at.x, 0, at.z), animate: true };
+    }
     this.emit();
   }
 

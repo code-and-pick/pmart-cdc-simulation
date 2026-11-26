@@ -36,7 +36,7 @@ export interface ActivityRec {
   z: number;
 }
 /** 작업자마다 남기는 기록 수 */
-const HISTORY_MAX = 60;
+const HISTORY_MAX = 240;
 
 /** 일 없이 기다리는 중인지 — "작업 대기"·"DPS 박스 기다림" 등(좁은 통로에서 앞사람을 기다리는 것은 일하는 중으로 본다) */
 export function idleActivity(activity: string): boolean {
