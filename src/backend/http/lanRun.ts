@@ -15,6 +15,8 @@ export interface RunStep {
   name: string;
   state: 'ok' | 'fail' | 'run' | 'skip';
   detail: string;
+  /** PDA 가 이 단계에서 찍을 코드(화면 팝업 — 사용자 2026-11-26 "지역 카드 찍으라는데 어딨어? 팝업으로") */
+  scan?: { label: string; value: string }[];
 }
 
 interface SnapLoc {
@@ -175,27 +177,47 @@ export async function runLanOne(
       const until = Date.now() + (opt.pdaWaitMin ?? 60) * 60_000;
       const sum = (t: TransferIntake, k: 'approvedQty' | 'allocatedQty' | 'pickedQty' | 'sortedQty' | 'inspectedQty' | 'loadedQty') => t.progress.reduce((a, p) => a + p[k], 0);
       /** 인수 진행을 3초마다 보며 기다림 — 다 되면 그 단계 끝 */
-      const waitStage = (name: string, hint: string, done: (t: TransferIntake) => boolean, show: (t: TransferIntake) => string) =>
+      const waitStage = (name: string, hint: string, done: (t: TransferIntake) => boolean, show: (t: TransferIntake) => string, codes?: () => Promise<{ label: string; value: string }[]>) =>
         step(name, async () => {
           for (;;) {
             const t = await deps.internal.getTransferIntake(trfId);
             const live = steps[steps.length - 1];
             live.detail = `${hint} · 지금 ${t.state} · ${show(t)}`;
+            if (codes) live.scan = await codes().catch(() => live.scan);
             onStep([...steps]);
             if (done(t)) return { v: t, detail: `${t.state} · ${show(t)}` };
             if (Date.now() > until) throw new Error(`${opt.pdaWaitMin ?? 60}분 안에 끝나지 않음 — ${t.state}`);
             await wait(3000);
           }
         });
-      await waitStage('PDA 피킹', 'DC 업무 → 피킹 → 다음 작업 받기 → 칸·상품 스캔', (t) => sum(t, 'allocatedQty') > 0 && sum(t, 'pickedQty') >= sum(t, 'allocatedQty'), (t) => `집음 ${sum(t, 'pickedQty')}/${sum(t, 'allocatedQty')}`);
-      await waitStage('PDA 분배·패킹', 'DC 업무 → 분배 → 박스(LPN) 닫기', (t) => sum(t, 'pickedQty') > 0 && sum(t, 'sortedQty') >= sum(t, 'pickedQty'), (t) => `박스에 담음 ${sum(t, 'sortedQty')}/${sum(t, 'pickedQty')}`);
-      await waitStage('PDA 검품', 'DC 업무 → 검품 → 출고대기 박스 스캔', (t) => sum(t, 'sortedQty') > 0 && sum(t, 'inspectedQty') >= sum(t, 'sortedQty'), (t) => `합격 ${sum(t, 'inspectedQty')}/${sum(t, 'sortedQty')}`);
+      const TERM = ['DONE', 'PARTIAL', 'CANCELLED', 'EXCEPTION'];
+      // 피킹 — 남은 작업의 지역 카드(지역 묶음) · 줄마다 위치·상품
+      const pickCodes = async () => {
+        const ts = (await deps.backend.listTasks(wave.waveId)).filter((x) => !TERM.includes(x.state));
+        const out: { label: string; value: string }[] = [];
+        for (const x of ts) {
+          if (x.regionCode) out.push({ label: `지역 카드 ${x.regionCode}`, value: x.regionCode });
+          for (const l of x.lines) if (l.pickedQty + l.shortQty < l.plannedQty) out.push({ label: `위치 (${l.plannedQty - l.pickedQty - l.shortQty}개)`, value: l.locationCode }, { label: `상품 ${l.sku} × ${l.plannedQty - l.pickedQty - l.shortQty}`, value: l.sku });
+        }
+        return out.filter((c, i, a) => a.findIndex((y) => y.value === c.value) === i);
+      };
+      // 이 TRF 의 박스(LPN)
+      const lpnCodes = async (label: string) => {
+        const r = await deps.gateway.call<{ items?: { lpn: string }[] }>('GET', `/cdcs/${CENTER_ID}/lpns`, { query: { trfId, size: '50' } });
+        return (r.body.items ?? []).map((x) => ({ label, value: x.lpn }));
+      };
+      const box = `BOX-${runId.toUpperCase()}-1`;
+      const t0Items = () => picks.map((x) => ({ label: `상품 ${x.sku}`, value: x.sku }));
+      await waitStage('PDA 피킹', 'DC 업무 → 피킹 → 다음 작업 받기 → 칸·상품 스캔', (t) => sum(t, 'allocatedQty') > 0 && sum(t, 'pickedQty') >= sum(t, 'allocatedQty'), (t) => `집음 ${sum(t, 'pickedQty')}/${sum(t, 'allocatedQty')}`, pickCodes);
+      await waitStage('PDA 분배·패킹', 'DC 업무 → 분배 → 박스(LPN) 닫기', (t) => sum(t, 'pickedQty') > 0 && sum(t, 'sortedQty') >= sum(t, 'pickedQty'), (t) => `박스에 담음 ${sum(t, 'sortedQty')}/${sum(t, 'pickedQty')}`, async () => [{ label: '새 박스(LPN)', value: box }, ...t0Items()]);
+      await waitStage('PDA 검품', 'DC 업무 → 검품 → 출고대기 박스 스캔', (t) => sum(t, 'sortedQty') > 0 && sum(t, 'inspectedQty') >= sum(t, 'sortedQty'), (t) => `합격 ${sum(t, 'inspectedQty')}/${sum(t, 'sortedQty')}`, () => lpnCodes('검품할 박스'));
       await step('PDA 상차 — 도크 스캔 → 운행 → 박스 스캔 → 상차완료', async () => {
         for (;;) {
           const trip = (await deps.gateway.call<{ state?: string }>('GET', `/trips/${encodeURIComponent(tripId)}`)).body;
           const t = await deps.internal.getTransferIntake(trfId);
           const live = steps[steps.length - 1];
           live.detail = `도크 ${confirmed.dockCode ?? '-'} · 운행 ${tripId} ${trip.state ?? ''} · 실음 ${sum(t, 'loadedQty')}/${sum(t, 'inspectedQty')}`;
+          live.scan = [...(confirmed.dockCode ? [{ label: '도크', value: confirmed.dockCode }] : []), ...(await lpnCodes('실을 박스').catch(() => []))];
           onStep([...steps]);
           if (trip.state === 'LOADED' || trip.state === 'DEPARTED') return { v: trip, detail: `운행 ${trip.state} · 실음 ${sum(t, 'loadedQty')}개` };
           if (Date.now() > until) throw new Error(`${opt.pdaWaitMin ?? 60}분 안에 상차완료가 안 됨 — 운행 ${trip.state}`);

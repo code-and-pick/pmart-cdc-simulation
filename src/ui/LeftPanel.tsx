@@ -8,6 +8,7 @@ import { ROLE_KO, type Role } from '../sim/agent';
 import { equipZoneId } from '../domain/layout';
 import type { FloorNo } from '../domain/sites/chilgok';
 import { autostorePorts } from '../sim/site';
+import { Barcode } from './Barcode';
 import { DayTimeline, Meter, Tile } from './viz';
 
 function Sec({ title, aside, children }: { title: string; aside?: ReactNode; children: ReactNode }) {
@@ -726,6 +727,11 @@ function LanRun() {
     void runLanOne({ gateway: real.backend.client, backend: real.backend, internal: real.internal, operatorId: () => real.tokens.operatorId }, { mfcId, skus: 3, qty: 2, pda: mode === 'pda', pdaWaitMin: 60 }, setSteps).finally(() => setBusy(false));
   };
   const waitingPda = busy && steps?.at(-1)?.name.startsWith('PDA');
+  const cur = steps?.at(-1);
+  const [hideScan, setHideScan] = useState(false);
+  const scanCodes = busy && cur?.state === 'run' && cur.scan?.length ? cur.scan : null;
+  // 단계가 바뀌면 팝업을 다시 띄움
+  useEffect(() => setHideScan(false), [cur?.name]);
   return (
     // 실서버 한 건 — 새 TRF 1건을 LAN 에 실제로 넣어 출발까지. 피킹은 자동(시뮬레이터) 또는 PDA 앱(사람)으로(사용자 2026-11-26 "PDA 로 작업 되는지 확인")
     <section className="sec lr">
@@ -766,6 +772,28 @@ function LanRun() {
       <button className="lr-go" onClick={go} disabled={busy}>
         {busy ? (waitingPda ? `PDA 기다리는 중 — ${steps?.at(-1)?.name.replace(/^PDA /, '').split(' — ')[0]}` : '도는 중…') : '새 TRF 로 시작'}
       </button>
+      {/* PDA 가 찍을 코드 — 기다리는 단계마다 팝업(사용자 2026-11-26 "지역 카드 찍으라는데 어딨어? 팝업으로") */}
+      {scanCodes && !hideScan && (
+        <div className="scan-pop" role="dialog" aria-label="PDA 로 찍을 코드">
+          <div className="scan-pop-h">
+            <b>{cur?.name.replace(/^PDA /, 'PDA · ').split(' — ')[0]}</b>
+            <span>PDA 로 이 코드를 찍으세요</span>
+            <button onClick={() => setHideScan(true)} aria-label="접기">
+              ×
+            </button>
+          </div>
+          <div className="scan-pop-list">
+            {scanCodes.map((c) => (
+              <Barcode key={c.label + c.value} value={c.value} caption={c.label} />
+            ))}
+          </div>
+        </div>
+      )}
+      {scanCodes && hideScan && (
+        <button className="scan-pop-open" onClick={() => setHideScan(false)}>
+          찍을 코드 {scanCodes.length}개 보기
+        </button>
+      )}
       {steps && steps.length > 0 && (
         <ol className="lr-steps">
           {steps.map((st, i) => (
