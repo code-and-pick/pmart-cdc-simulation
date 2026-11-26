@@ -71,10 +71,26 @@ async function issue(account: string): Promise<SimToken> {
   return t;
 }
 
-/** 이 PC 의 브라우저만 토큰을 받는다(--host 로 열어도 다른 PC 는 못 받음) */
+/**
+ * 토큰을 받을 수 있는 브라우저 — 이 PC(loopback) + 사용자가 적은 PC IP 만(사용자 2026-11-26 "다른 pc 에서 쓸 수 있게").
+ * 허용 IP 는 저장소 밖에 두지 않고 이 프로젝트의 `.sim-auth-allow`(git 무시, 한 줄에 IP 하나)에 적는다. 요청마다 읽어 개발 서버를 다시 켤 필요 없음.
+ * LAN 전체를 열지 않는다 — 적은 IP 만.
+ */
+function allowedIps(): Set<string> {
+  try {
+    return new Set(
+      readFileSync(resolve(process.cwd(), '.sim-auth-allow'), 'utf-8')
+        .split(/\r?\n/)
+        .map((l) => l.replace(/#.*/, '').trim())
+        .filter((l) => /^\d{1,3}(\.\d{1,3}){3}$/.test(l)),
+    );
+  } catch {
+    return new Set();
+  }
+}
 function isLoopback(req: IncomingMessage): boolean {
-  const a = req.socket.remoteAddress ?? '';
-  return a === '127.0.0.1' || a === '::1' || a === '::ffff:127.0.0.1';
+  const a = (req.socket.remoteAddress ?? '').replace(/^::ffff:/, '');
+  return a === '127.0.0.1' || a === '::1' || allowedIps().has(a);
 }
 
 function send(res: ServerResponse, status: number, body: unknown) {
@@ -89,7 +105,7 @@ export function simAuthPlugin(): Plugin {
     name: 'pmart-cdc-sim-auth',
     configureServer(server) {
       server.middlewares.use('/sim-auth/tokens', (req, res) => {
-        if (!isLoopback(req)) return send(res, 403, { code: 'LOOPBACK_ONLY' });
+        if (!isLoopback(req)) return send(res, 403, { code: 'LOOPBACK_ONLY', detail: `이 PC 와 .sim-auth-allow 에 적은 IP 만 토큰을 받음 — 지금 ${(req.socket.remoteAddress ?? '').replace(/^::ffff:/, '')}` });
         if (req.method !== 'POST') return send(res, 405, { code: 'METHOD_NOT_ALLOWED' });
         let raw = '';
         req.on('data', (c: Buffer) => (raw += c.toString('utf-8')));
