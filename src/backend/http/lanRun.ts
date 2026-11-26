@@ -42,7 +42,8 @@ const why = (e: unknown) => (e instanceof ApiProblem ? `${e.problem.status} ${e.
 
 export async function runLanOne(
   deps: { gateway: HttpClient; backend: HttpBackend; internal: HttpInternal; operatorId: () => string | null },
-  opt: { mfcId: string; skus: number; qty: number },
+  /** pda = 피킹은 PDA 앱(사람)이 한다 — Wave 배포 뒤 그 Wave 작업이 다 끝날 때까지 기다렸다가 이어서(사용자 2026-11-26 "PDA 로 작업 되는지 확인") */
+  opt: { mfcId: string; skus: number; qty: number; pda?: boolean; pdaWaitMin?: number },
   onStep: (steps: RunStep[]) => void,
 ): Promise<RunStep[]> {
   const steps: RunStep[] = [];
@@ -125,7 +126,27 @@ export async function runLanOne(
     // 4) 피킹 — 이 Wave 작업을 받아 계획 수량대로
     const worker = deps.operatorId() ?? 'claude-cdc-sup';
     const picked: { sku: string; lot: string; qty: number }[] = [];
-    await step('PDA 피킹 (next-tasks → starts → pick-results)', async () => {
+    if (opt.pda)
+      await step('PDA 피킹 기다림 — PDA 앱에서 DC 업무 → 피킹 → 다음 작업 받기', async () => {
+        const until = Date.now() + (opt.pdaWaitMin ?? 30) * 60_000;
+        const TERM = ['DONE', 'PARTIAL', 'CANCELLED', 'EXCEPTION'];
+        for (;;) {
+          const ts = (await deps.backend.listTasks(wave.waveId)).filter((t) => t.kind === 'PICK' || !t.kind);
+          const done = ts.filter((t) => TERM.includes(t.state));
+          const run = ts.filter((t) => !TERM.includes(t.state));
+          const live = steps[steps.length - 1];
+          live.detail = `작업 ${ts.length}개 — 끝 ${done.length} · ${run.map((t) => `${t.state}${t.assigneeId ? ` (${t.assigneeId})` : ''}`).join(', ') || '없음'}`;
+          onStep([...steps]);
+          if (ts.length && !run.length) {
+            for (const t of ts) for (const l of t.lines) for (const sh of l.shares) if (sh.trfId === trfId && sh.pickedQty > 0) picked.push({ sku: l.sku, lot: l.lot, qty: sh.pickedQty });
+            if (!picked.length) throw new Error('PDA 작업이 끝났는데 집은 수량이 0');
+            return { v: ts.length, detail: `PDA 로 작업 ${ts.length}개 끝 · ${picked.reduce((a, x) => a + x.qty, 0)}개 집음 · 담당 ${[...new Set(ts.map((t) => t.assigneeId).filter(Boolean))].join(', ')}` };
+          }
+          if (Date.now() > until) throw new Error(`${opt.pdaWaitMin ?? 30}분 안에 PDA 피킹이 끝나지 않음`);
+          await wait(3000);
+        }
+      });
+    else await step('피킹 (next-tasks → starts → pick-results)', async () => {
       let n = 0;
       for (let i = 0; i < 20; i++) {
         let task: Task;

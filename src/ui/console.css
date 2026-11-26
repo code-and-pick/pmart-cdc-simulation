@@ -1729,3 +1729,26 @@ tr.ex td { color: var(--muted); font-style: italic; }
 .search:focus { border-color: #2f80ed; }
 .pick-row .search { width: auto; flex: 1; }
 .wk-find .search { padding-left: 30px; }
+
+/* 실서버 한 건 돌리기(LanRun) — 사용자 2026-11-26 "UI 고쳐" */
+.lr { display: grid; gap: 10px; }
+.lr-h { display: flex; align-items: center; justify-content: space-between; }
+.lr-h b { font-size: 13px; }
+.lr-tag { font-size: 10.5px; font-weight: 700; color: #d9822b; border: 1px solid #d9822b; border-radius: 6px; padding: 1px 6px; }
+.lr-form { display: grid; grid-template-columns: 34px 1fr; gap: 8px 8px; align-items: center; }
+.lr-form > span { font-size: 11.5px; color: var(--muted); }
+.lr-sel { height: 32px; padding: 0 8px; border-radius: 8px; border: 1px solid var(--line); background: color-mix(in srgb, var(--line) 30%, transparent); color: inherit; font-size: 12.5px; color-scheme: dark; }
+:root[data-theme='light'] .lr-sel { color-scheme: light; }
+.lr-pda { margin: 0; padding: 8px 10px 8px 26px; border-radius: 8px; background: color-mix(in srgb, #2f80ed 10%, transparent); font-size: 11.5px; line-height: 1.6; }
+.lr-go { height: 34px; border-radius: 8px; border: 0; background: #2f80ed; color: #fff; font-weight: 700; font-size: 12.5px; cursor: pointer; }
+.lr-go:disabled { background: color-mix(in srgb, #2f80ed 40%, var(--line)); cursor: default; }
+.lr-steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 0; }
+.lr-steps li { display: grid; grid-template-columns: 20px 1fr; gap: 8px; padding: 6px 0; border-top: 1px solid color-mix(in srgb, var(--line) 60%, transparent); }
+.lr-steps li:first-child { border-top: 0; }
+.lr-steps i { font-style: normal; width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; font-size: 10.5px; font-weight: 700; background: var(--line); }
+.lr-steps li.ok i { background: #27ae60; color: #fff; }
+.lr-steps li.fail i { background: #eb5757; color: #fff; }
+.lr-steps li.run i { background: #2f80ed; color: #fff; animation: wfpulse 1.4s ease-in-out infinite; }
+.lr-steps b { display: block; font-size: 12px; font-weight: 600; }
+.lr-steps small { display: block; font-size: 11px; color: var(--muted); word-break: break-all; }
+.lr-steps li.fail small { color: #eb5757; }

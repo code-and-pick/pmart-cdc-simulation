@@ -716,42 +716,66 @@ function CellCard() {
 function LanRun() {
   const { real } = useApp();
   const [mfcId, setMfcId] = useState<string>(MFCS[0].id);
+  const [mode, setMode] = useState<'auto' | 'pda'>('pda');
   const [steps, setSteps] = useState<RunStep[] | null>(null);
   const [busy, setBusy] = useState(false);
   if (!real) return null;
   const go = () => {
     setBusy(true);
     setSteps([]);
-    void runLanOne({ gateway: real.backend.client, backend: real.backend, internal: real.internal, operatorId: () => real.tokens.operatorId }, { mfcId, skus: 3, qty: 2 }, setSteps).finally(() => setBusy(false));
+    void runLanOne({ gateway: real.backend.client, backend: real.backend, internal: real.internal, operatorId: () => real.tokens.operatorId }, { mfcId, skus: 3, qty: 2, pda: mode === 'pda', pdaWaitMin: 30 }, setSteps).finally(() => setBusy(false));
   };
+  const waitingPda = busy && steps?.at(-1)?.name.startsWith('PDA 피킹 기다림');
   return (
-    <Sec title="한 건 돌리기 (LAN 에 씀)" aside={busy ? '도는 중…' : <button onClick={go}>시작</button>}>
-      <div className="help">
-        <p>새 TRF 1건(상온 3품목 × 2)을 인수부터 출발 검증까지 LAN 에 실제로 돌립니다.</p>
-        <label>
-          MFC{' '}
-          <select value={mfcId} onChange={(e) => setMfcId(e.target.value)} disabled={busy}>
-            {MFCS.filter((m) => !m.id.startsWith('ETC-')).map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.name} ({m.id})
-              </option>
-            ))}
-          </select>
-        </label>
+    // 실서버 한 건 — 새 TRF 1건을 LAN 에 실제로 넣어 출발까지. 피킹은 자동(시뮬레이터) 또는 PDA 앱(사람)으로(사용자 2026-11-26 "PDA 로 작업 되는지 확인")
+    <section className="sec lr">
+      <div className="lr-h">
+        <b>실서버 한 건 돌리기</b>
+        <span className="lr-tag">LAN 에 씀</span>
       </div>
-      <div className="rc-list">
-        {(steps ?? []).map((st, i) => (
-          <div key={i} className={`rc-item ${st.state === 'ok' ? 'ok' : st.state === 'fail' ? 'bad' : 'warn'}`}>
-            <div className="rc-top">
-              <i />
-              <b>{i + 1}. {st.name}</b>
-              <span>{st.state === 'ok' ? '완료' : st.state === 'fail' ? '막힘' : '도는 중'}</span>
-            </div>
-            <code>{st.detail}</code>
-          </div>
-        ))}
+      <div className="lr-form">
+        <span>피킹</span>
+        <div className="wk-seg c2">
+          <button className={mode === 'pda' ? 'on' : ''} onClick={() => setMode('pda')} disabled={busy}>
+            PDA 앱으로
+          </button>
+          <button className={mode === 'auto' ? 'on' : ''} onClick={() => setMode('auto')} disabled={busy}>
+            자동
+          </button>
+        </div>
+        <span>MFC</span>
+        <select className="lr-sel" value={mfcId} onChange={(e) => setMfcId(e.target.value)} disabled={busy}>
+          {MFCS.filter((m) => !m.id.startsWith('ETC-')).map((m) => (
+            <option key={m.id} value={m.id}>
+              {m.name}
+            </option>
+          ))}
+        </select>
       </div>
-    </Sec>
+      {mode === 'pda' && (
+        <ol className="lr-pda">
+          <li>PDA 앱에 <b>cdcw-fc-01</b> 로 로그인</li>
+          <li>DC 업무 → 피킹 → 다음 작업 받기</li>
+          <li>칸·상품 스캔 → 수량 → 보내기 (작업이 다 끝나면 여기서 이어서 출발까지)</li>
+        </ol>
+      )}
+      <button className="lr-go" onClick={go} disabled={busy}>
+        {busy ? (waitingPda ? 'PDA 피킹 기다리는 중…' : '도는 중…') : '새 TRF 로 시작'}
+      </button>
+      {steps && steps.length > 0 && (
+        <ol className="lr-steps">
+          {steps.map((st, i) => (
+            <li key={i} className={st.state}>
+              <i>{st.state === 'ok' ? '✓' : st.state === 'fail' ? '!' : i + 1}</i>
+              <div>
+                <b>{st.name}</b>
+                <small>{st.detail}</small>
+              </div>
+            </li>
+          ))}
+        </ol>
+      )}
+    </section>
   );
 }
 
@@ -771,7 +795,7 @@ function RealCheck() {
   return (
     <Sec title="실서버 연결 점검" aside={busy ? '점검 중…' : <button onClick={run}>다시</button>}>
       <div className="help">
-        <p>실서버 모드는 조회 점검만 합니다(시뮬레이션은 멈춤).</p>
+        <p>실서버 모드에선 3D 가상 작업자가 움직이지 않습니다(LAN 에 함부로 쓰지 않게). 여기서 LAN 연결을 보고, 아래 "한 건 돌리기"로 실제 흐름을 시험합니다.</p>
         {real.tokens.lastError && <p>토큰: {real.tokens.lastError}</p>}
       </div>
       {/* 서비스마다 한 칸 — 상태는 색 점·글, 자세한 응답은 아래 줄(긴 문구가 값 칸을 한 글자 폭으로 찌그러뜨리던 것, 사용자 2026-11-26 "계속 안 떠") */}
