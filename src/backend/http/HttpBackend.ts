@@ -99,10 +99,10 @@ export class HttpBackend implements CdcOutboundPort {
 
   // transfers
   async cancelBeforeDeparture(trfId: string, body: PreDepartureCancelRequest, idempotencyKey: string, expectedVersion?: number): Promise<CommandResponse> {
-    return (await this.client.call<CommandResponse>('POST', `/transfers/${enc(trfId)}/pre-departure-cancellations`, { body, idempotencyKey, expectedVersion })).body;
+    return (await this.client.call<CommandResponse>('POST', `/cdcs/${CENTER_ID}/transfers/${enc(trfId)}/pre-departure-cancellations`, { body, idempotencyKey, expectedVersion })).body;
   }
   async getPreDepartureCancellation(trfId: string, requestId: string): Promise<PreDepartureCancellation> {
-    return (await this.client.call<PreDepartureCancellation>('GET', `/transfers/${enc(trfId)}/pre-departure-cancellations/${enc(requestId)}`)).body;
+    return (await this.client.call<PreDepartureCancellation>('GET', `/cdcs/${CENTER_ID}/transfers/${enc(trfId)}/pre-departure-cancellations/${enc(requestId)}`)).body;
   }
 
   // 조회 (internal — 게이트웨이로 열지 않는다, LAN 서비스 직접 — 백엔드 CDC-9)
