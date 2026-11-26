@@ -608,8 +608,18 @@ function DcStock() {
 
 function LogBody({ tab }: { tab: RightView }): ReactNode {
   const { sim, real } = useApp();
-  // 실서버 모드 — 운송 탭은 LAN 운행(도착·인계 단추)
-  if (tab === 'transport') return real ? <LanTransport /> : <Transport />;
+  // 실서버 모드 — LAN 운행(도착·인계 단추) 위에, 원래 운송 흐름(시뮬레이션 운행)도 그대로 아래에(사용자 2026-11-26 "운송탭도 같이 보여줘야지 없애면 어떡해")
+  if (tab === 'transport')
+    return real ? (
+      <>
+        <div className="lt-sec-h">실서버 운행</div>
+        <LanTransport />
+        <div className="lt-sec-h">시뮬레이션 운송 흐름</div>
+        <Transport />
+      </>
+    ) : (
+      <Transport />
+    );
   if (tab === 'trf') return <TrfBoard />;
   if (tab === 'admin') return <AdminBoard />;
   if (tab === 'moves') return <MovesBoard />;
