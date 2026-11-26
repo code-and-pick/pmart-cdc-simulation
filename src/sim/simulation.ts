@@ -836,7 +836,7 @@ export class Simulation implements DutyClock {
     const site = this.floorSite(a);
     // 5F 는 냉장·냉동 두 방 — 보충 요청이 위치 코드 순(G 먼저)이라 오전 내내 냉장만 하고 냉동 방엔 아무도 없었음(사용자 2026-11-26 "냉동에도 작업하는 사람이 없고").
     // 냉동 전담 지게차를 더 둔다: 5F 주간 보충 마지막 WORK.frozenRepl 명은 냉동(H) 먼저, 나머지는 냉장(G) 먼저 — 자기 방 일이 없으면 다른 방도 한다(냉장 인원을 빼면 냉장 배포가 늦음)
-    const open = this.backend.replenishmentNeeds().filter((n) => Number(n.from.split('-')[2]) === a.floor && !this.claimed.has(`${n.sku}|${n.lot}|${n.from}`));
+    const open = this.backend.replenishmentNeeds(5).filter((n) => Number(n.from.split('-')[2]) === a.floor && !this.claimed.has(`${n.sku}|${n.lot}|${n.from}`));
     const mine = a.floor === 5 ? (a.shift === 'DAY' && Number(a.id.slice(-2)) > WORKFORCE[5].replDay - WORK.frozenRepl ? 'H' : 'G') : null;
     const need = (mine && open.find((n) => n.from.split('-')[1] === mine)) || open[0];
     if (!need) {
@@ -856,7 +856,7 @@ export class Simulation implements DutyClock {
       await a.wait(WORK.replPallet, '지게차로 팔레트 내리기');
       a.carrying = 'PALLET';
       a.pda.step = '선반으로 이동';
-      const now = this.backend.replenishmentNeeds().find((n) => `${n.sku}|${n.lot}|${n.from}` === k);
+      const now = this.backend.replenishmentNeeds().find((n) => `${n.sku}|${n.lot}|${n.from}` === k); // 옮기기 직전엔 최신 수량
       const qty = now?.qty ?? 0;
       if (to.bin) {
         // 오토스토어 보충 — 지게차가 팔레트를 입고 포트로, 작업자가 통에 채우고 스캔(통당 N초 + 낱개당 M초) [사용자 §5]
@@ -1965,6 +1965,11 @@ export class Simulation implements DutyClock {
    * 화면용 짧은 캐시 — 같은 무거운 계산(이관 진행·요약·원장 검사·칸별 현물)을 여러 패널이 1초에 여러 번 부르지 않게.
    * 120배속에서 패널 갱신(4Hz)마다 100ms 넘게 써 화면이 7fps 로 떨어지던 원인(사용자 §6-11). 시험·계산은 원래 함수를 그대로 쓴다.
    */
+  /** 화면이 쓰는 이관 목록 — 1초 캐시(모든 패널 공용) */
+  uiTransfers() {
+    return this.live('ui-trfs', 1000, () => this.backend.listTransfers());
+  }
+
   live<T>(key: string, ms: number, f: () => T): T {
     const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
     const c = this.liveCache.get(key);
@@ -2013,14 +2018,14 @@ export class Simulation implements DutyClock {
     return n;
   }
 
-  summary() {
-    const tasks = this.backend.allTasks();
-    const done = tasks.filter((t) => t.state === 'DONE' || t.state === 'PARTIAL').length;
-    const trfs = this.backend.listTransfers();
+  /** cached = 화면용 — 이관 목록을 1초에 한 번만 계산해 여러 패널이 나눠 씀(물량 30만에서 패널마다 따로 계산해 화면이 뻗던 것, 2026-11-26) */
+  summary(cached = false) {
+    const tc = this.backend.taskCounts();
+    const trfs = cached ? this.uiTransfers() : this.backend.listTransfers();
     const sum = (f: (p: TransferProgress) => number) => trfs.reduce((s, t) => s + t.progress.reduce((a, p) => a + f(p), 0), 0);
     return {
-      tasks: tasks.length,
-      tasksDone: done,
+      tasks: tc.total,
+      tasksDone: tc.done,
       approved: sum((p) => p.approvedQty),
       picked: sum((p) => p.pickedQty),
       sorted: sum((p) => p.sortedQty),
@@ -2030,7 +2035,7 @@ export class Simulation implements DutyClock {
       received: this.backend.ledger.totals().acked,
       trips: this.runs.size,
       tripsDone: [...this.runs.values()].filter((r) => r.state === 'RETURNED').length,
-      replNeeds: this.backend.replenishmentNeeds().length,
+      replNeeds: this.backend.replenishmentNeeds(cached ? 5 : 0).length,
       busy: this.agents.filter((a) => !a.idle).length,
       waveId: this.day.waveId,
       released: this.day.released,

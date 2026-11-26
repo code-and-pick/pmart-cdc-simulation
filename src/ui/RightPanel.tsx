@@ -19,7 +19,7 @@ const short = (n: number) => (n >= 10_000 ? `${(n / 10_000).toFixed(n >= 100_000
 /** 맨 위 요약 — 하루 흐름(승인 → 피킹 → 분류 → 검품 → 출발 → 수령) + 핵심 숫자 4개, 나머지는 "숫자 모두" */
 function Summary() {
   const { sim, backend, layout, catalog } = useApp();
-  const d = sim.live('summary', 700, () => sim.summary());
+  const d = sim.live('summary', 700, () => sim.summary(true));
   const q = sim.queues();
   const t = backend.ledger.totals();
   const flow: [string, number, boolean?][] = [
@@ -142,12 +142,12 @@ function MfcRow({ name, region, children }: { name: string; region: string; chil
 }
 
 function SiteFlow() {
-  const { sim, backend } = useApp();
+  const { sim } = useApp();
   const view = useView();
   const [only, setOnly] = useState<number | null>(null);
   const handed = new Map<string, number>();
   for (const r of sim.runs.values()) for (const st of r.stops) if (st.handedAt !== undefined) for (const id of st.trfIds ?? []) handed.set(id, st.handedAt);
-  const rows = sim.live('trfs', 700, () => backend.listTransfers()).map((t) => {
+  const rows = sim.uiTransfers().map((t) => {
     const p = t.progress.reduce(
       (a, x) => ({ ap: a.ap + x.approvedQty, pk: a.pk + x.pickedQty, so: a.so + x.sortedQty, ins: a.ins + x.inspectedQty, ld: a.ld + x.loadedQty, dp: a.dp + x.departedQty }),
       { ap: 0, pk: 0, so: 0, ins: 0, ld: 0, dp: 0 },
@@ -157,7 +157,7 @@ function SiteFlow() {
     const dots: Dot[] = [dot(p.pk, p.ap), dot(p.so, target), dot(p.ins, target), dot(p.ld, target), dot(p.dp, target), handed.has(t.trfId) ? 'done' : 'wait'];
     // 앞 단계가 끝나지 않았어도 뒤 단계가 시작됐으면 앞은 진행 중
     const first = dots.findIndex((x) => x !== 'done');
-    const cur = first < 0 ? 7 : !sim.live('summary', 700, () => sim.summary()).released && first === 0 && p.pk === 0 ? 0 : first + 1;
+    const cur = first < 0 ? 7 : !sim.live('summary', 700, () => sim.summary(true)).released && first === 0 && p.pk === 0 ? 0 : first + 1;
     return { t, p, dots, cur };
   });
   const count = GROUPS.map((_, i) => rows.filter((x) => x.cur === i).length);
@@ -265,7 +265,7 @@ function StockOverview() {
   const stock = sim.live('stock', 500, () => backend.ledger.onHandByLocation());
   let staged = 0;
   for (const [code, q] of stock) if (code.split('-')[3] === '91') staged += q;
-  const trfs = sim.live('inv-trfs', 1000, () => backend.listTransfers());
+  const trfs = sim.uiTransfers();
   const received = new Map<string, number>();
   for (const r of sim.runs.values()) for (const st of r.stops) if (st.received) received.set(st.mfcId, (received.get(st.mfcId) ?? 0) + st.received);
   const rows = MFCS.map((m) => {
@@ -365,7 +365,7 @@ function Stock() {
   // 고른 MFC 몫 — 할당(예약)·피킹·출고대기 박스
   const mfc = view.mfcFilter ? MFCS.find((m) => m.id === view.mfcFilter) : undefined;
   const mine = mfc ? sim.live(`mfc-stock-${mfc.id}`, 1000, () => {
-    const ts = backend.listTransfers().filter((x) => x.mfcId === mfc.id);
+    const ts = sim.uiTransfers().filter((x) => x.mfcId === mfc.id);
     const sum = (k: 'allocatedQty' | 'pickedQty' | 'departedQty') => ts.reduce((a, x) => a + x.progress.reduce((b, l) => b + l[k], 0), 0);
     return { alloc: sum('allocatedQty'), picked: sum('pickedQty'), departed: sum('departedQty'), staged: [...sim.staged.values()].flat().filter((b) => b.mfcId === mfc.id).reduce((a, b) => a + b.units, 0) };
   }) : undefined;

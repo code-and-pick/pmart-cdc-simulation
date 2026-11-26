@@ -249,13 +249,17 @@ export class MockBackend implements CdcOutboundPort {
   // ══ cdc-inbound 역할 — 선반 보충(MOV). 실서버 cdc-inventory move-postings 는 아직 501(백엔드 회신 2026-11-25) ══
 
   /** 아직 팔레트 랙에 있는 할당 예약 — 선반으로 보충해야 피킹할 수 있다 (MOCK 전용 조회, 보충 작업자가 본다) */
-  private needsCache: { ver: number; out: { sku: string; lot: string; from: string; to: string; qty: number }[] } | null = null;
-  replenishmentNeeds(): { sku: string; lot: string; from: string; to: string; qty: number }[] {
+  private needsCache: { ver: number; at: number; out: { sku: string; lot: string; from: string; to: string; qty: number }[] } | null = null;
+  /** maxAgeSec = 원장이 바뀌어도 이만큼(시뮬 초) 안이면 지난 계산을 써도 됨 — 시뮬·화면의 잦은 조회용. 기본 0(늘 최신) */
+  replenishmentNeeds(maxAgeSec = 0): { sku: string; lot: string; from: string; to: string; qty: number }[] {
     // 원장이 그대로면 지난 계산을 돌려준다(보충 작업자·패널이 자주 부름 — 성능). 예약·취소·출발은 모두 원장 거래라 version 이 바뀐다
     const ver = this.ledger.version;
-    if (this.needsCache?.ver === ver) return this.needsCache.out.map((x) => ({ ...x }));
+    // 원장이 그대로거나, 시뮬 시각 5초 안이면 지난 계산(보충 작업자 수십 명·알림·요약이 같은 순간 자주 부름 — 피킹마다 원장 version 이 올라 매번 다시 세던 것, 2026-11-26).
+    // 조금 늦은 목록이어도 보충 작업자는 집기 직전 수량을 다시 보고(qty 0 이면 넘어감) 맡은 칸은 claimed 로 막는다
+    const now = this.opt.now();
+    if (this.needsCache && (this.needsCache.ver === ver || now - this.needsCache.at < maxAgeSec)) return this.needsCache.out.map((x) => ({ ...x }));
     const out = this.computeNeeds();
-    this.needsCache = { ver, out };
+    this.needsCache = { ver, at: now, out };
     return out.map((x) => ({ ...x }));
   }
 
@@ -292,7 +296,12 @@ export class MockBackend implements CdcOutboundPort {
 
   /** 접수한 TRF 목록 (화면·Wave 편성용, MOCK 전용 조회) */
   listTransfers(): TransferIntake[] {
-    return [...this.trfs.values()].sort((a, b) => a.seq - b.seq).map((r) => this.view(r));
+    // 작업·LPN 을 TRF 별로 한 번에 나눠 둔다(TRF 마다 전체를 다시 훑지 않게)
+    const tb = new Map<string, Task[]>();
+    for (const t of this.tasks.values()) for (const id of t.trfIds) (tb.get(id) ?? tb.set(id, []).get(id)!).push(t);
+    const lb = new Map<string, LpnRec[]>();
+    for (const l of this.lpns.values()) (lb.get(l.trfId) ?? lb.set(l.trfId, []).get(l.trfId)!).push(l);
+    return [...this.trfs.values()].sort((a, b) => a.seq - b.seq).map((r) => this.view(r, tb.get(r.intake.trfId) ?? [], lb.get(r.intake.trfId) ?? []));
   }
 
   // ══ TMS 역할 (실서버에서는 transport-execution 이 TruckActuallyDeparted 로 부른다) ══════
@@ -413,23 +422,34 @@ export class MockBackend implements CdcOutboundPort {
   }
 
   // ══ 진행 계산 ═══════════════════════════════════════
-  private progress(rec: TrfRec): TransferProgressLine[] {
+  /** 진행(줄마다) — SKU 별 합을 한 번씩만 모은다(물량 30만: TRF 하나 250줄 × 작업 수천 개를 줄마다 다시 훑어 화면 요약이 프레임을 잡아먹던 것, 2026-11-26) */
+  private progress(rec: TrfRec, tasks: Task[] = this.tasksOf(rec.intake.trfId), lpns: LpnRec[] = [...this.lpns.values()].filter((l) => l.trfId === rec.intake.trfId)): TransferProgressLine[] {
     const alloc = rec.intake.allocationId ? this.ledger.getAllocation(rec.intake.allocationId) : undefined;
     const trfId = rec.intake.trfId;
-    const tasks = this.tasksOf(trfId);
-    const lpns = [...this.lpns.values()].filter((l) => l.trfId === trfId);
+    const add = (m: Map<string, number>, k: string, q: number) => m.set(k, (m.get(k) ?? 0) + q);
+    const picked = new Map<string, number>();
+    for (const t of tasks) for (const x of t.lines) for (const sh of x.shares) if (sh.trfId === trfId) add(picked, x.sku, sh.pickedQty);
+    const sorted = new Map<string, number>();
+    const inspected = new Map<string, number>();
+    const loaded = new Map<string, number>();
+    for (const l of lpns)
+      for (const c of l.comp.contents) {
+        add(sorted, c.sku, c.qty);
+        if (l.inspection === 'PASSED') add(inspected, c.sku, c.qty);
+        if (l.loaded) add(loaded, c.sku, c.qty);
+      }
+    const al = new Map((alloc?.lines ?? []).map((x) => [x.sku, x] as const));
     return rec.intake.lines.map((l) => {
-      const al = alloc?.lines.find((x) => x.sku === l.sku);
-      const sum = (ls: LpnRec[]) => ls.reduce((s, x) => s + x.comp.contents.filter((c) => c.sku === l.sku).reduce((a, c) => a + c.qty, 0), 0);
+      const a = al.get(l.sku);
       return {
         sku: l.sku,
         approvedQty: l.approvedQty,
-        allocatedQty: al ? al.allocatedQty - al.releasedQty + al.departedQty : 0,
-        pickedQty: tasks.reduce((s, t) => s + t.lines.filter((x) => x.sku === l.sku).reduce((a, x) => a + x.shares.filter((sh) => sh.trfId === trfId).reduce((b, sh) => b + sh.pickedQty, 0), 0), 0),
-        sortedQty: sum(lpns),
-        inspectedQty: sum(lpns.filter((x) => x.inspection === 'PASSED')),
-        loadedQty: sum(lpns.filter((x) => x.loaded)),
-        departedQty: al?.departedQty ?? 0,
+        allocatedQty: a ? a.allocatedQty - a.releasedQty + a.departedQty : 0,
+        pickedQty: picked.get(l.sku) ?? 0,
+        sortedQty: sorted.get(l.sku) ?? 0,
+        inspectedQty: inspected.get(l.sku) ?? 0,
+        loadedQty: loaded.get(l.sku) ?? 0,
+        departedQty: a?.departedQty ?? 0,
       };
     });
   }
@@ -450,8 +470,8 @@ export class MockBackend implements CdcOutboundPort {
     return 'PICKED';
   }
 
-  private view(rec: TrfRec): TransferIntake {
-    const p = this.progress(rec);
+  private view(rec: TrfRec, tasks?: Task[], lpns?: LpnRec[]): TransferIntake {
+    const p = this.progress(rec, tasks, lpns);
     return { ...structuredClone(rec.intake), state: this.stateOf(rec, p), progress: p, inventoryAsOf: { asOf: this.iso(), freshness: 'CURRENT' } };
   }
 
@@ -644,6 +664,17 @@ export class MockBackend implements CdcOutboundPort {
         .filter((t) => t.waveId === waveId && (!filter.state || t.state === filter.state) && (!filter.assigneeId || t.assigneeId === filter.assigneeId))
         .map((t) => this.publicTask(t)),
     );
+  }
+
+  /** 작업 수·끝난 수 — 복사 없이(화면 요약이 자주 부름) */
+  taskCounts(): { total: number; done: number } {
+    let total = 0;
+    let done = 0;
+    for (const t of this.tasks.values()) {
+      total++;
+      if (t.state === 'DONE' || t.state === 'PARTIAL') done++;
+    }
+    return { total, done };
   }
 
   /** 시뮬레이터가 모든 Wave 의 작업을 한 번에 본다 (MOCK 전용 조회) */

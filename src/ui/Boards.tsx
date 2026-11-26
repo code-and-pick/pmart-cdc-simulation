@@ -16,10 +16,10 @@ type Dot = 'done' | 'now' | 'wait';
 
 /** TRF 한 건의 단계 점(피킹 → 분류 → 검품 → 상차 → 출발 → 인계) */
 function useTrfRows() {
-  const { sim, backend } = useApp();
+  const { sim } = useApp();
   const handed = new Map<string, number>();
   for (const r of sim.runs.values()) for (const st of r.stops) if (st.handedAt !== undefined) for (const id of st.trfIds) handed.set(id, st.handedAt);
-  return sim.live('trfs', 700, () => backend.listTransfers()).map((t) => {
+  return sim.uiTransfers().map((t) => {
     const p = t.progress.reduce((a, x) => ({ ap: a.ap + x.approvedQty, pk: a.pk + x.pickedQty, so: a.so + x.sortedQty, ins: a.ins + x.inspectedQty, ld: a.ld + x.loadedQty, dp: a.dp + x.departedQty }), { ap: 0, pk: 0, so: 0, ins: 0, ld: 0, dp: 0 });
     const base = p.pk || p.ap;
     const dot = (v: number, b: number): Dot => (b > 0 && v >= b ? 'done' : v > 0 ? 'now' : 'wait');
@@ -183,8 +183,7 @@ export function AdminBoard() {
           </thead>
           <tbody>
             {backend
-              .allTasks()
-              .filter((t) => t.state !== 'DONE' && t.state !== 'PARTIAL' && t.state !== 'CANCELLED')
+              .findTasks((t) => t.state !== 'DONE' && t.state !== 'PARTIAL' && t.state !== 'CANCELLED')
               .filter((t) => match(t.taskId) || match(sim.no('TASK', t.taskId)) || t.trfIds.some((id) => match(id) || match(sim.no('TRF', id))))
               .slice(0, 200)
               .map((t) => (
@@ -342,7 +341,7 @@ export function MovesBoard() {
   const [kinds, setKinds] = useState<Set<string>>(new Set(['ALLOCATION', 'RELEASE', 'TOUT', 'RECEIPT_ACK']));
   const [picks, setPicks] = useState(false);
   const locShort = useMemo(() => new Map(layout.floors.flatMap((f) => [...f.locations, ...f.shelves, ...f.staging, ...f.docks]).map((l) => [l.code, l.short] as [string, string])), [layout]);
-  const trfMfc = new Map(backend.listTransfers().map((t) => [t.trfId, t.mfcId] as [string, string]));
+  const trfMfc = new Map(sim.uiTransfers().map((t) => [t.trfId, t.mfcId] as [string, string]));
   const all = backend.ledger.commitList();
   const count = new Map<string, number>();
   for (const c of all) count.set(c.postingKind, (count.get(c.postingKind) ?? 0) + 1);
