@@ -35,6 +35,8 @@ export class Agent {
   pos: P;
   at: WalkPoint;
   heading = 0;
+  /** 대기 자리(근무 밖일 때 돌아감) — 승강기 옆 */
+  home: WalkPoint | null = null;
   /** 가상 작업자 인원을 줄이면 지금 일을 마치고 빠진다(설정 → 가상 작업자) */
   retired = false;
   path: P[] = [];

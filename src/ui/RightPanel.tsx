@@ -250,6 +250,111 @@ function SiteFlow() {
 }
 
 /** 재고 — 층·구역별 칸·용량·현물·예약(원장). 줄을 누르면 그 구역으로 */
+/**
+ * 재고 한눈에(사용자 2026-11-26 "재고탭 누르면 전체 재고 관리와 MFC 로의 실시간 재고이동을 바로") —
+ * ① 전체: CDC 현물(보관·피킹 칸 / 출고대기)·예약·운송 중·MFC 수령, 원장 불변식
+ * ② MFC 별 흐름: 할당 → 피킹 → 상차 → 출발(운송 중) → 수령, 막대
+ * ③ 실시간 이동: 방금 일어난 피킹(→ 출고대기)·출발·수령 줄(원장 커밋)
+ */
+function StockOverview() {
+  const { backend, sim } = useApp();
+  useTick();
+  const t = backend.ledger.totals();
+  const v = sim.live('check', 2000, () => backend.ledger.check());
+  const stock = sim.live('stock', 500, () => backend.ledger.onHandByLocation());
+  let staged = 0;
+  for (const [code, q] of stock) if (code.split('-')[3] === '91') staged += q;
+  const trfs = sim.live('inv-trfs', 1000, () => backend.listTransfers());
+  const received = new Map<string, number>();
+  for (const r of sim.runs.values()) for (const st of r.stops) if (st.received) received.set(st.mfcId, (received.get(st.mfcId) ?? 0) + st.received);
+  const rows = MFCS.map((m) => {
+    const ts = trfs.filter((x) => x.mfcId === m.id);
+    const sum = (k: 'approvedQty' | 'allocatedQty' | 'pickedQty' | 'loadedQty' | 'departedQty') => ts.reduce((a, x) => a + x.progress.reduce((b, l) => b + l[k], 0), 0);
+    return { m, ap: sum('approvedQty'), al: sum('allocatedQty'), pk: sum('pickedQty'), ld: sum('loadedQty'), dp: sum('departedQty'), rc: received.get(m.id) ?? 0 };
+  });
+  // 실시간 이동 — 최근 원장 커밋 중 피킹(→ 91)·출발·수령
+  const mfcOfStagingBay = (code: string) => {
+    const bay = Number(code.split('-')[4]);
+    return MFCS.find((m) => m.staging === bay);
+  };
+  const feed = backend.ledger
+    .commitList()
+    .slice(-400)
+    .filter((c) => c.postingKind === 'TOUT' || c.postingKind === 'RECEIPT_ACK' || (c.postingKind === 'MOVE' && !(c.sourceRef ?? '').startsWith('REPL:')))
+    .slice(-14)
+    .reverse()
+    .map((c) => {
+      const qty = c.deltas.filter((d) => d.delta > 0).reduce((a, d) => a + d.delta, 0) || c.deltas.filter((d) => d.delta < 0).reduce((a, d) => a - d.delta, 0);
+      if (c.postingKind === 'MOVE') {
+        const to = c.deltas.find((d) => d.delta > 0 && d.locationCode)?.locationCode ?? '';
+        const m = mfcOfStagingBay(to);
+        return { c, what: '피킹 → 출고대기', who: m ? m.name.replace(/^\d호점 /, '') : '', qty };
+      }
+      if (c.postingKind === 'TOUT') return { c, what: '출발 (운송 중으로)', who: '', qty };
+      return { c, what: 'MFC 수령', who: '', qty };
+    });
+  const maxAp = Math.max(1, ...rows.map((r) => r.ap));
+  return (
+    <>
+      <div className="tiles3" style={{ marginBottom: 8 }}>
+        <Tile v={t.onHand.toLocaleString()} k="CDC 현물" />
+        <Tile v={t.reserved.toLocaleString()} k="예약(할당)" />
+        <Tile v={staged.toLocaleString()} k="출고대기(91)" />
+        <Tile v={t.transit.toLocaleString()} k="운송 중" />
+        <Tile v={t.acked.toLocaleString()} k="MFC 수령" />
+        <Tile v={v.length ? `${v.length}건` : '없음'} k="원장 불변식 위반" tone={v.length ? 'bad' : undefined} />
+      </div>
+      <section className="sec">
+        <h4>
+          MFC 로 가는 재고 <span>할당 → 피킹 → 상차 → 출발 → 수령</span>
+        </h4>
+        <table className="inv">
+          <thead>
+            <tr>
+              <th>MFC</th>
+              <th>할당</th>
+              <th>피킹</th>
+              <th>상차</th>
+              <th>운송 중</th>
+              <th>수령</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.m.id}>
+                <td>
+                  {r.m.name.replace(/^\d호점 /, '')}
+                  <Meter value={r.ap} max={maxAp} tone="muted" title={`승인 ${r.ap.toLocaleString()}`} />
+                </td>
+                <td>{r.al.toLocaleString()}</td>
+                <td>{r.pk.toLocaleString()}</td>
+                <td>{r.ld.toLocaleString()}</td>
+                <td>{Math.max(0, r.dp - r.rc).toLocaleString()}</td>
+                <td>{r.rc.toLocaleString()}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </section>
+      <section className="sec">
+        <h4>
+          실시간 재고 이동 <span>{feed.length ? '최근 원장 기록' : '13:00 피킹부터'}</span>
+        </h4>
+        {feed.map(({ c, what, who, qty }) => (
+          <div key={c.commitId} className="row">
+            <span className="t">{c.appliedAt.slice(11, 16)}</span>
+            <span className="ev">{what}</span>
+            <span>
+              {who && `${who} · `}
+              {qty.toLocaleString()}개
+            </span>
+          </div>
+        ))}
+      </section>
+    </>
+  );
+}
+
 function Stock() {
   const { layout, backend, sim } = useApp();
   const view = useView();
@@ -332,6 +437,7 @@ function LogBody({ tab }: { tab: RightView }): ReactNode {
   if (tab === 'inventory')
     return (
       <>
+        <StockOverview />
         <StockSearch />
         <Stock />
       </>

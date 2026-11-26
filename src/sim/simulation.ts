@@ -347,7 +347,9 @@ export class Simulation implements DutyClock {
         while (used.has(no)) no++;
         used.add(no);
         const id = `${role.toLowerCase()}-${fl}-${String(no).padStart(2, '0')}`;
-        const a = new Agent(id, `${ROLE_KO[role]} ${fl}F-${String(no).padStart(2, '0')}`, role, fl, shift, this.sites.get(fl)!.homeSpot(this.agents.filter((x) => x.floor === fl && (x.role === 'REPL') === (role === 'REPL')).length, role === 'REPL'), this);
+        const spot = this.sites.get(fl)!.homeSpot(this.agents.filter((x) => x.floor === fl && (x.role === 'REPL') === (role === 'REPL')).length, role === 'REPL');
+        const a = new Agent(id, `${ROLE_KO[role]} ${fl}F-${String(no).padStart(2, '0')}`, role, fl, shift, spot, this);
+        a.home = spot;
         this.agents.push(a);
         void this.run(a);
       }
@@ -364,7 +366,10 @@ export class Simulation implements DutyClock {
         const id = `${role.toLowerCase()}-${fl}-${no}`;
         // 대기 자리 — 승강기 옆(문 앞은 비움), 지게차는 따로 한 줄
         const k = this.agents.filter((x) => x.floor === fl && (x.role === 'REPL') === (role === 'REPL')).length;
-        this.agents.push(new Agent(id, `${ROLE_KO[role]} ${fl}F-${no}`, role, fl, shift, site.homeSpot(k, role === 'REPL'), this));
+        const spot = site.homeSpot(k, role === 'REPL');
+        const ag = new Agent(id, `${ROLE_KO[role]} ${fl}F-${no}`, role, fl, shift, spot, this);
+        ag.home = spot;
+        this.agents.push(ag);
       }
     };
     add('REPL', 'DAY', w.replDay);
@@ -689,6 +694,14 @@ export class Simulation implements DutyClock {
         return;
       }
       try {
+        // 근무 밖이면 대기 자리(승강기 옆)로 돌아가 선다 — 일하던 자리·승강기 앞에 남지 않게(사용자 2026-11-26)
+        if (!this.onDuty(a) && a.home && Math.abs(a.pos.x - a.home.x) + Math.abs(a.pos.z - a.home.z) > 0.5) {
+          a.carrying = null;
+          a.parked = null;
+          a.pda = null;
+          await this.go(a, a.home, WORK.walk, '대기 자리로');
+          a.heading = Math.PI;
+        }
         await a.untilDuty();
         if (a.role === 'REPL') await this.replenishOnce(a);
         else if (a.role === 'FC') await this.pickOnce(a);
