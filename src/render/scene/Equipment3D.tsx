@@ -917,16 +917,17 @@ function Office({ e }: { e: Equip }) {
         </mesh>
       ))}
       {/* 직원 4인용 책상 묶음 넷 — 책상 넷을 정사각형으로 붙여(둘씩 마주 봄) 묶음 사이 2.4m(사용자 2026-11-26 "사무실 늘려서 4인용 책상 4개, 간격 잘") */}
-      {[0, 1, 2, 3].map((i) => r.z0 + 3.0 + i * 5.2).map((pz) => (
-        <group key={pz}>
+      {/* 묶음 4개 — 방이 깊으면 남북 한 줄, 얕으면 2 × 2(사무실이 7F 앞쪽 띠로 옮겨 넓고 얕아짐) */}
+      {[0, 1, 2, 3].map((i) => (d >= 23 ? { px: cx + 0.4, pz: r.z0 + 3.0 + i * 5.2 } : { px: r.x0 + w * (i % 2 ? 0.72 : 0.3), pz: r.z0 + 3.0 + Math.floor(i / 2) * 5.2 })).map(({ px, pz }) => (
+        <group key={`${px}-${pz}`}>
           {[-0.7, 0.7].map((dz) => (
             <group key={dz}>
-              <Desk x={cx + 0.4 - 0.375} z={pz + dz} />
-              <Desk x={cx + 0.4 + 0.375} z={pz + dz} rot={Math.PI} />
+              <Desk x={px - 0.375} z={pz + dz} />
+              <Desk x={px + 0.375} z={pz + dz} rot={Math.PI} />
             </group>
           ))}
           {/* 가운데 칸막이 */}
-          <mesh position={[cx + 0.4, 0.98, pz]}>
+          <mesh position={[px, 0.98, pz]}>
             <boxGeometry args={[0.04, 0.42, 2.8]} />
             <meshStandardMaterial color={0x9fb3c8} />
           </mesh>

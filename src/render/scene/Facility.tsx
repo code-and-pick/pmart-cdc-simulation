@@ -422,10 +422,20 @@ export function zoneCards(f: FloorLayout): Card[] {
   }
   // 블록들이 붙어 있으면(같은 x 범위가 겹침) 묶은 범위 가운데, 떨어져 있으면(7F E 서쪽·동쪽) 가장 큰 블록 가운데 — 사이에 다른 구역(DAS)이 있어 그 위에 뜨던 것
   const area = (q: Rect) => (q.x1 - q.x0) * (q.z1 - q.z0);
-  const shelfRect = (rs: Rect[]): Rect => (rs.every((q) => q.x0 < rs[0].x1 && q.x1 > rs[0].x0) ? union(rs) : rs.reduce((p, q) => (area(q) > area(p) ? q : p)));
+  // 북쪽 벽에 닿는 블록이 있으면(5F 냉동 전실 H — 벽 카드 자리는 DPS 컨베이어 몫) 큰 블록 기준
+  const shelfRect = (rs: Rect[]): Rect => (rs.every((q) => q.x0 < rs[0].x1 && q.x1 > rs[0].x0) && !rs.some((q) => q.z0 < f.walk.northZ) ? union(rs) : rs.reduce((p, q) => (area(q) > area(p) ? q : p)));
   for (const [letter, zs] of byLetter) {
     const n = f.shelves.filter((l) => l.zone === letter && !l.bin).length;
     if (!n) continue;
+    // DAS 양옆으로 떨어진 서쪽·동쪽 블록(6F D · 7F E)은 블록마다 카드(사용자 2026-11-26 "피킹 구역 없어졌잖아")
+    const apart = zs.length === 2 && zs.every((q) => q.id.endsWith('-W') || q.id.endsWith('-E')) && !zs.some((q) => q.rect.z0 < f.walk.northZ);
+    if (apart) {
+      for (const q of zs) {
+        const k = f.shelves.filter((l) => l.zone === letter && !l.bin && l.pos.x >= q.rect.x0 && l.pos.x <= q.rect.x1 && l.pos.z >= q.rect.z0 && l.pos.z <= q.rect.z1).length;
+        specs.push({ id: `${q.id}-CARD`, title: `피킹 선반 ${letter}`, sub: `${k.toLocaleString()}칸`, style: zoneStyle(q), r: q.rect });
+      }
+      continue;
+    }
     specs.push({ id: `${f.floor}-${letter}-SHELVES`, title: `피킹 선반 ${letter}`, sub: `${n.toLocaleString()}칸`, style: zoneStyle(zs[0]), r: shelfRect(zs.map((q) => q.rect)) });
   }
   // 같은 넓이: 가장 넓은 카드에 맞춘다
@@ -441,7 +451,7 @@ export function zoneCards(f: FloorLayout): Card[] {
   //  ② 띠 구역 북쪽 끝 바로 위(낮게) — DAS·피킹 선반·입고 검수·분배. 벽으로 올리면 출고대기·도크 너머라 어느 구역 카드인지 안 보였음
   //  ③ 아래쪽 넓은 구역(랙·냉장 선반·야채 레인·사무실)·오토스토어 — 북쪽 끝 가운데, 랙 위 높이
   const kind = (sp: Spec): 'wall' | 'edge' | 'low' => {
-    if (/WHEEL_SORTER|-DPS$/.test(sp.id) || sp.r.z0 < f.walk.northZ) return 'wall';
+    if (/WHEEL_SORTER|-DPS$/.test(sp.id) || sp.r.z1 < f.walk.northZ) return 'wall'; // 통째로 북쪽 통로선 북쪽인 구역만(7F 입고 검수)
     if (sp.r.z0 < f.walk.roomZ - 1 && !sp.id.endsWith('AUTOSTORE')) return 'edge';
     return 'low';
   };

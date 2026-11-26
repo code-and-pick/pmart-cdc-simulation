@@ -6,7 +6,7 @@
 // 운송(§12 ⑦): 22:00 배차(고정 노선 × 온도대, MockTms) → 출차 30분 전 상차(방문 역순) → 노선별 출차 → 주행 → MFC 도착·하차(동시 3대)·인계 → 복귀.
 // React·three 에 의존하지 않는다(시험이 화면 없이 하루를 돌린다).
 
-import { AUTOSTORE, DOCK_FLOOR, DOCKS, FLOW, CENTER_ID, INBOUND, MFCS, SHELF, OUTBOUND, SHIFT, SIM_START, SUPPLY, TMS, WORK, WORKFORCE } from '../config';
+import { AUTOSTORE, dockFloorFor, DOCKS, FLOW, CENTER_ID, INBOUND, MFCS, SHELF, OUTBOUND, SHIFT, SIM_START, SUPPLY, TMS, WORK, WORKFORCE } from '../config';
 // 시간표 근거: 정본 CDC-8(PR #447) — 21:30 WMS 완료 · 22:00 R/T 카운팅 · 22:30 상차 · 23:00~ 출차
 import type { MockBackend } from '../backend/mock/MockBackend';
 import type { ApiCallRecord, DomainEventRecord } from '../backend/port';
@@ -516,22 +516,27 @@ export class Simulation implements DutyClock {
     const rtByTrf = new Map<string, number>();
     const boxes = [...[...this.staged.values()].flat(), ...this.atDock.flatMap((r) => r.boxes)];
     for (const t of this.backend.listTransfers()) rtByTrf.set(t.trfId, Math.ceil(boxes.filter((b) => b.trfId === t.trfId).length / OUTBOUND.boxesPerRt));
-    const plans = this.tms.planDay(this.backend.listTransfers(), 0, rtByTrf);
-    const docksByTemp: Record<TemperatureZone, Location[]> = {
-      FROZEN: this.layout.docks.filter((d) => d.temp === 'FROZEN'),
-      CHILLED: this.layout.docks.filter((d) => d.temp === 'CHILLED'),
-      AMBIENT: this.layout.docks.filter((d) => d.temp === 'AMBIENT'),
-    };
-    const used: Record<TemperatureZone, number> = { FROZEN: 0, CHILLED: 0, AMBIENT: 0 };
+    // TRF 마다 실을 도크 층 — 그 TRF 상품이 있는 층(상온은 6F·7F 로 나뉜 TRF)의 그 온도 도크 층
+    const floorByTrf = new Map<string, number>();
+    for (const t of this.backend.listTransfers()) {
+      const sku = this.catalog.bySku.get(t.lines[0]?.sku ?? '');
+      if (sku) floorByTrf.set(t.trfId, dockFloorFor(sku.temp, sku.floor));
+    }
+    const plans = this.tms.planDay(this.backend.listTransfers(), 0, rtByTrf, floorByTrf);
+    // 도크 — 온도대 × 층(상온은 6F·7F 각각)
+    const used = new Map<string, number>();
     for (const plan of plans) {
       const v = this.tms.vehicles.find((x) => x.vehicleId === plan.vehicleId)!;
       const d = this.tms.drivers.find((x) => x.driverId === plan.driverId)!;
-      const docks = docksByTemp[plan.temp];
+      const dk = `${plan.temp}@${plan.dockFloor ?? ''}`;
+      const docks = this.layout.docks.filter((x) => x.temp === plan.temp && (plan.dockFloor === undefined || x.floor === plan.dockFloor));
+      const k = used.get(dk) ?? 0;
+      used.set(dk, k + 1);
       const run: TripRun = {
         plan,
         plateNo: v.plateNo,
         driverName: d.displayName,
-        dock: docks[used[plan.temp]++ % docks.length],
+        dock: docks[k % docks.length],
         loaded: [],
         state: 'PLANNED',
         stops: plan.stops.map((st) => ({ mfcId: st.mfcId, trfIds: st.trfIds })),
@@ -837,13 +842,15 @@ export class Simulation implements DutyClock {
     }
     let task: Task;
     try {
-      if (a.floor === 5) {
-        // 5F FC 는 상온 C·D·E·F 만(냉동 A 는 DPS 컨베이어) — 다음 작업 받기 구역 거르기(계약 그대로)
+      const fzones = this.floorOf(a).spec.zones;
+      if (fzones.some((z) => z.letter === 'H')) {
+        // 냉동 H 가 있는 층(5F)의 FC — 다음 작업 받기 구역 거르기(계약 그대로)
         let got: Task | null = null;
         let last: unknown = null;
-        for (const z of ['A', 'B', 'C', 'D']) {
+        // 냉동 H 는 랙 1단 박스 피킹(BOX_PICK = REGION_BATCH)만 — DPS(DISCRETE)는 DPS 구역 작업자(사용자 2026-11-26 냉동 큰 상자 박스 피킹)
+        for (const z of fzones.map((x) => x.letter)) {
           try {
-            got = (await this.backend.pullNextTask(CENTER_ID, a.id, { kind: 'PICK', floor: '5', zone: z }, newId('next'))).task;
+            got = (await this.backend.pullNextTask(CENTER_ID, a.id, { kind: 'PICK', floor: String(a.floor), zone: z, ...(z === 'H' ? { pickMode: 'REGION_BATCH' as const } : {}) }, newId('next'))).task;
             break;
           } catch (e) {
             last = e;
@@ -1647,8 +1654,8 @@ export class Simulation implements DutyClock {
     const first = arr.find((b) => b.state === 'PASSED')!;
     const boxes = arr.filter((b) => b.state === 'PASSED' && b.trfId === first.trfId).slice(0, OUTBOUND.boxesPerRt);
     for (const b of boxes) b.state = 'MOVING';
-    // 그 온도 도크 층으로 — 같은 층이면 도크 앞에 바로, 아니면(5F 상온 → 7F) 승강기로 [사용자 2026-11-26 층마다 도크]
-    const dockFl = DOCK_FLOOR[ready.temp as 'FROZEN' | 'CHILLED' | 'AMBIENT'];
+    // 그 온도 도크 층으로 — 이 층에 그 온도 도크가 있으면 도크 앞에 바로, 없으면 승강기로 [층마다 도크, 사용자 2026-11-26]
+    const dockFl = dockFloorFor(ready.temp as 'FROZEN' | 'CHILLED' | 'AMBIENT', fl);
     const lift = (MFCS.find((x) => x.id === boxes[0].mfcId)?.staging ?? 1) % f.lifts.length || f.lifts.length;
     a.pda = { title: '자키 — 도크로', step: dockFl === fl ? `${ready.short} 롤테이너 → 도크 앞` : `${ready.short} 롤테이너 → 승강기 ${lift} → ${dockFl}F 도크`, rows: [['박스', `${boxes.length}`], ['MFC', MFCS.find((x) => x.id === boxes[0].mfcId)?.name ?? '']] };
     await this.go(a, site.front(ready), WORK.walk, `출고대기로 (${ready.short})`);

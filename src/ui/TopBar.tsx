@@ -14,8 +14,8 @@ const LABEL_MODES: { mode: LabelMode; text: string }[] = [
 ];
 const VIEW_KO: Record<RightView, string> = { logs: '현장 흐름', trf: 'TRF', transport: '운송', admin: '관리', api: 'API', events: '이벤트', inventory: '재고', moves: '재고 변동', barcode: '바코드' };
 const FLOORS: { key: FloorKey; text: string }[] = [
-  { key: 5, text: '5F 상온·냉동' },
-  { key: 6, text: '6F 냉장' },
+  { key: 5, text: '5F 냉장·냉동' },
+  { key: 6, text: '6F 상온' },
   { key: 7, text: '7F 생활용품' },
 ];
 

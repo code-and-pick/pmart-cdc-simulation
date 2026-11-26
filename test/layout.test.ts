@@ -1,7 +1,7 @@
 // 칠곡 DC 배치 — 통로·칸 수, 온도 방, 용량·SKU 자리 계산, 위치 코드 계약 패턴 (사용자 2026-11-25 지시문 §1~§5).
 import { describe, expect, it } from 'vitest';
-import { AUTOSTORE, BUILDING, CHILLED_RACK, PYEONG_M2, RACK, SKU_TARGET } from '../src/config';
-import { buildLayout, LOCATION_CODE_PATTERN, skuQuota, type Rect } from '../src/domain/layout';
+import { AUTOSTORE, BUILDING, PYEONG_M2, RACK, RACK_BUNDLE_BAYS, SKU_TARGET } from '../src/config';
+import { buildLayout, LOCATION_CODE_PATTERN, skuQuota, type Rect , chilledRackAisles } from '../src/domain/layout';
 
 const L = buildLayout();
 const all = L.floors.flatMap((f) => f.locations);
@@ -24,46 +24,35 @@ describe('기준값 [사용자 §1]', () => {
 });
 
 describe('층 배치 [사용자 §3]', () => {
-  it('5F·7F 보관 방(팔레트 랙) = 문서 보관 평수', () => {
-    for (const f of [F(5), F(7)]) for (const r of f.rooms) expect(((r.rect.x1 - r.rect.x0) * (r.rect.z1 - r.rect.z0)) / PYEONG_M2).toBeCloseTo(f.spec.docPyeong.storage[r.key], 6);
+  it('6F·7F 상온 보관 방(팔레트 랙) = 문서 보관 평수', () => {
+    for (const f of [F(6), F(7)]) for (const r of f.rooms) expect(Math.round(((r.rect.x1 - r.rect.x0) * (r.rect.z1 - r.rect.z0)) / PYEONG_M2)).toBe(f.spec.docPyeong.storage[r.key]); // 평 단위 반올림
   });
 
-  it('5F: 냉동 피킹 선반·DPS 박스 컨베이어는 냉동 랙 앞(같은 x) 전실 — 냉동 방 안, 휠소터·상온 입고 검수는 상온 랙 앞, 냉동 입고 검수는 B1', () => {
+  it('5F 저온(사용자 2026-11-26 "5F 냉장+냉동"): 냉장 방(서) — 랙(3일치)·선반·분배·야채 레인·DAS, 냉동 방(동, ㄱ자) — 랙·전실 DPS 선반·입고 검수, 출고대기는 방 밖', () => {
     const f = F(5);
-    const frz = f.coldRooms.find((r) => r.temp === 'FROZEN')!;
-    const frzRack = f.rooms.find((r) => r.temp === 'FROZEN')!.rect;
-    for (const l of f.shelves.filter((s) => s.zone === 'H')) {
-      expect(inRects(l.pos.x, l.pos.z, frz.rects)).toBe(true);
-      expect(l.pos.x > frzRack.x0 && l.pos.x < frzRack.x1).toBe(true);
-    }
-    const amb = f.rooms.find((r) => r.temp === 'AMBIENT')!.rect;
-    const s = f.equipment.find((x) => x.kind === 'WHEEL_SORTER' && x.temp === 'AMBIENT')!;
-    expect(s.rect.x0 >= amb.x0 && s.rect.x1 <= amb.x1).toBe(true);
-    // 냉동 입고 검수 — 냉동 전실 안(검수가 오래 걸려 콜드체인)
-    const inb = f.equipment.find((e) => e.kind === 'INBOUND' && e.temp === 'FROZEN')!;
-    expect(inRects((inb.rect.x0 + inb.rect.x1) / 2, (inb.rect.z0 + inb.rect.z1) / 2, frz.rects)).toBe(true);
-    for (const l of f.shelves) expect(inRects(l.pos.x, l.pos.z, [inb.rect])).toBe(false);
-    const dps = f.equipment.find((x) => x.kind === 'DPS')!;
-    expect(inRects((dps.rect.x0 + dps.rect.x1) / 2, (dps.rect.z0 + dps.rect.z1) / 2, frz.rects)).toBe(true);
-    expect(frz.doors.map((d) => d.kind).sort()).toEqual(['AIR_CURTAIN', 'ANTEROOM', 'FORKLIFT', 'FORKLIFT']); // 서쪽 벽 셋 + 전실↔보관 칸막이 지게차 문
-    // 같은 벽의 문끼리 겹치지 않는다
-    for (const a of frz.doors) for (const b of frz.doors) if (a !== b && a.x0 === a.x1 && b.x0 === b.x1 && a.x0 === b.x0) expect(a.z1 <= b.z0 || b.z1 <= a.z0).toBe(true);
-  });
-
-  it('6F: 승강기·출고대기 줄을 뺀 층 전체가 냉장 방, 동쪽 라인 → 분배 → 야채 레인, 랙 통로는 출발 10 에서 팔레트 하한으로 늘림', () => {
-    const f = F(6);
     const ch = f.coldRooms.find((r) => r.temp === 'CHILLED')!;
-    for (const l of [...f.locations, ...f.shelves]) expect(inRects(l.pos.x, l.pos.z, ch.rects)).toBe(true);
-    for (const s of f.staging) expect(inRects(s.pos.x, s.pos.z, ch.rects)).toBe(false);
-    for (const k of ['DAS', 'SPLIT', 'VEG_LANES', 'INBOUND'] as const) {
+    const frz = f.coldRooms.find((r) => r.temp === 'FROZEN')!;
+    for (const l of [...f.locations, ...f.shelves]) expect(inRects(l.pos.x, l.pos.z, l.temp === 'FROZEN' ? frz.rects : ch.rects)).toBe(true);
+    for (const st of f.staging) expect(inRects(st.pos.x, st.pos.z, [...ch.rects, ...frz.rects])).toBe(false);
+    for (const k of ['DAS', 'SPLIT', 'VEG_LANES'] as const) {
       const e = f.equipment.find((x) => x.kind === k)!;
       expect(inRects((e.rect.x0 + e.rect.x1) / 2, (e.rect.z0 + e.rect.z1) / 2, ch.rects)).toBe(true);
     }
+    for (const e of f.equipment.filter((x) => x.kind === 'DPS' || (x.kind === 'INBOUND' && x.temp === 'FROZEN'))) expect(inRects((e.rect.x0 + e.rect.x1) / 2, (e.rect.z0 + e.rect.z1) / 2, frz.rects)).toBe(true);
     const split = f.equipment.find((x) => x.kind === 'SPLIT')!.rect;
     const lanes = f.equipment.find((x) => x.kind === 'VEG_LANES')!.rect;
     expect(split.z1 <= lanes.z0).toBe(true); // 분배 → 야채 레인(남)
-    expect(f.aisles.length).toBe(CHILLED_RACK.aisles); // 냉장 랙은 며칠치만(사용자 2026-11-26)
-    expect(f.shelves.filter((l) => l.lane).length).toBeGreaterThanOrEqual(300);
+    expect(f.aisles.filter((a) => a.zone === 'G').length).toBe(chilledRackAisles()); // 냉장 랙은 3일치 계산
+    expect(frz.doors.map((d) => d.kind).sort()).toEqual(['AIR_CURTAIN', 'ANTEROOM', 'FORKLIFT', 'FORKLIFT']);
+    for (const a of frz.doors) for (const b of frz.doors) if (a !== b && a.x0 === a.x1 && b.x0 === b.x1 && a.x0 === b.x0) expect(a.z1 <= b.z0 || b.z1 <= a.z0).toBe(true);
+  });
+
+  it('6F 상온: 랙 A~D 가 건물 끝까지, 출고 띠에 휠소터·DAS·선반 C·D·입고 검수', () => {
+    const f = F(6);
+    expect(f.coldRooms).toHaveLength(0);
+    expect(Math.max(...f.rooms.map((r) => r.rect.x1))).toBeCloseTo(L.width, 1);
+    for (const k of ['WHEEL_SORTER', 'DAS', 'INBOUND'] as const) expect(f.equipment.some((e) => e.kind === k && e.temp === 'AMBIENT')).toBe(true);
+    expect(new Set(f.shelves.map((l) => l.zone))).toEqual(new Set(['C', 'D']));
   });
 
   it('7F: 오토스토어 = 그린 면적에 통이 다 들어가고, 바닥 하중 확인 값이 있다', () => {
@@ -75,30 +64,29 @@ describe('층 배치 [사용자 §3]', () => {
     expect(F(5).equipment.some((e) => e.kind === 'AUTOSTORE')).toBe(false);
   });
 
-  it('랙 묶음 = 12개 × 양면 24개, 묶음 사이 지게차 통로 3.0m', () => {
+  it('랙 묶음 = 층마다 칸 수(5F 12 · 6F·7F 10, RACK_BUNDLE_BAYS) × 양면, 묶음 사이 지게차 통로 3.0m', () => {
     for (const f of L.floors) {
-      for (const r of f.rows) expect((r.z1 - r.z0) / RACK.bayW).toBeCloseTo(RACK.bundleBays, 6);
+      for (const r of f.rows) expect((r.z1 - r.z0) / RACK.bayW).toBeCloseTo(RACK_BUNDLE_BAYS[f.floor as 5 | 6 | 7], 6);
       for (const r of f.rows) expect(f.rows.filter((o) => o !== r && o.z0 === r.z0 && Math.abs(Math.abs(o.cx - r.cx) - RACK.depth) < 1e-6)).toHaveLength(1);
     }
   });
 });
 
 describe('도크 [사용자 2026-11-26 — 기사 사진 도크 문 "4-16" = 층-번호]', () => {
-  it('층마다 북쪽 벽 도크 — 냉동 5F·냉장 6F·상온 7F, 문 번호 = 층-번호, 위치 코드 90 DOCK, 지하 B1 없음', () => {
-    expect(L.docks.length).toBeGreaterThan(0);
+  it('층마다 북쪽 벽 도크 — 층마다 4 — 5F 냉장 2·냉동 2, 6F 상온 4, 7F 상온 4, 문 번호 = 층-번호, 위치 코드 90 DOCK', () => {
+    expect(L.docks.length).toBe(12);
+    for (const f of L.floors) expect(f.docks).toHaveLength(4);
     for (const d of L.docks) {
       expect(d.type).toBe('DOCK');
       expect(d.aisle).toBe(90);
       expect(d.short.startsWith(`${d.floor}-`)).toBe(true);
-      expect(d.floor).toBe(({ FROZEN: 5, CHILLED: 6, AMBIENT: 7 } as const)[d.temp]);
+      expect(d.temp === 'AMBIENT' ? [6, 7].includes(d.floor as number) : d.floor === 5).toBe(true);
       expect(d.pos.z).toBeLessThan(1); // 북쪽 벽
     }
     for (const f of L.floors) {
-      // 출고대기 동쪽, 자리가 없으면(5F — 냉동 방 벽) 승강기와 출고대기 사이 — 출고대기·승강기와 겹치지 않음
-      const st0 = Math.min(...f.staging.map((s) => s.pos.x));
+      // 출고대기 동쪽 — 출고대기·승강기 옆 대기 자리와 겹치지 않음
       const st1 = Math.max(...f.staging.map((s) => s.pos.x));
-      const liftX1 = Math.max(...f.lifts.map((l) => l.rect.x1));
-      for (const d of f.docks) expect(d.pos.x > st1 || (d.pos.x > liftX1 && d.pos.x < st0)).toBe(true);
+      for (const d of f.docks) expect(d.pos.x > st1).toBe(true);
     }
   });
 });
@@ -143,7 +131,7 @@ describe('위치 코드 [정본 CDC-3·5]', () => {
     expect(new Set(codes).size).toBe(codes.length);
   });
 
-  it('랙 1단 박스 피킹면(5F C·D, 7F G)은 PICK_FACE, 그 밖 팔레트(H 는 오토스토어 보충용 보관)는 RESERVE', () => {
-    for (const l of all) expect(l.type).toBe(['A', 'B', 'E'].includes(l.zone) && l.level === 1 ? 'PICK_FACE' : 'RESERVE');
+  it('랙 1단 박스 피킹면(6F A·B, 7F E, 5F 냉동 H 큰 상자)은 PICK_FACE, 그 밖 팔레트는 RESERVE', () => {
+    for (const l of all) expect(l.type).toBe(['A', 'B', 'E', 'H'].includes(l.zone) && l.level === 1 ? 'PICK_FACE' : 'RESERVE');
   });
 });

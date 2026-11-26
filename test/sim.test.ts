@@ -48,7 +48,7 @@ describe('하루 돌리기', () => {
     const initial = backend.ledger.totals();
 
     await runUntil(sim, 12.9);
-    expect(backend.listTransfers().filter((t) => !isEtc(t.mfcId))).toHaveLength(15); // MFC 5곳 × 온도대 3 (TMS D-10)
+    expect(backend.listTransfers().filter((t) => !isEtc(t.mfcId))).toHaveLength(20); // MFC 5곳 × (냉장 · 냉동 · 상온 6F · 상온 7F) — 상온은 상품 층마다 TRF
     expect(backend.listTransfers().some((t) => isEtc(t.mfcId))).toBe(true); // 기타 센터(물량 30만)
     expect(backend.replenishmentNeeds()).toEqual([]); // 주간조가 13시 전에 보충을 끝냄
     expect(sim.agents.filter((a) => a.role === 'REPL' && a.shift === 'DAY').some((a) => a.done > 0)).toBe(true);

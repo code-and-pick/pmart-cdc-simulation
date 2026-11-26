@@ -33,21 +33,25 @@ export function makeTransfers(catalog: Catalog, baseDate: string, seed: number, 
     const lines = [...picked].sort((a, b) => a - b).map((i) => ({ sku: catalog.skus[i].sku, temp: catalog.skus[i].temp, approvedQty: rng.int(SUPPLY.qty[0], SUPPLY.qty[1]) }));
     // 기타 센터는 묶인 피패킹센터마다 TRF 하나(품목 etcLinesPerTrf 개씩) — TRF 하나가 차 한 대를 넘지 않게(단일 출발)
     const per = isEtc(m.id) ? Math.max(1, Math.round((linesPerMfc * SUPPLY.etcLinesPerTrf) / SUPPLY.linesPerMfc)) : Infinity;
+    // 상온은 상품 층(6F A~D · 7F E·F)마다 TRF 를 나눈다 — 한 TRF 는 한 차·한 층 도크에서 싣는다(단일 출발, 층 구성 재설계 사용자 2026-11-26) [시뮬]
+    const floorOf = new Map(catalog.skus.map((x) => [x.sku, x.floor] as [string, number]));
     return TEMPS.flatMap((temp) => {
-      const ls = lines.filter((l) => l.temp === temp);
-      const parts: { temp: TemperatureZone; ls: typeof ls; part: number }[] = [];
-      for (let i = 0, k = 1; i < ls.length; i += per === Infinity ? ls.length : per, k++) parts.push({ temp, ls: ls.slice(i, i + (per === Infinity ? ls.length : per)), part: per === Infinity ? 0 : k });
+      const all = lines.filter((l) => l.temp === temp);
+      const groups = temp === 'AMBIENT' ? [...new Set(all.map((l) => floorOf.get(l.sku) ?? 0))].sort().map((fl) => ({ fl, ls: all.filter((l) => (floorOf.get(l.sku) ?? 0) === fl) })) : [{ fl: 0, ls: all }];
+      const parts: { temp: TemperatureZone; ls: typeof all; part: number; fl: number }[] = [];
+      for (const g of groups)
+        for (let i = 0, k = 1; i < g.ls.length; i += per === Infinity ? g.ls.length : per, k++) parts.push({ temp, ls: g.ls.slice(i, i + (per === Infinity ? g.ls.length : per)), part: per === Infinity ? 0 : k, fl: temp === 'AMBIENT' ? g.fl : 0 });
       return parts;
     })
       .filter((g) => g.ls.length > 0)
       .map(
         (g) =>
           ({
-            trfId: `TRF-${day}-${mfcShort(m.id)}-${TEMP_SUFFIX[g.temp]}${g.part ? `-P${g.part}` : ''}`,
+            trfId: `TRF-${day}-${mfcShort(m.id)}-${TEMP_SUFFIX[g.temp]}${g.fl ? `-F${g.fl}` : ''}${g.part ? `-P${g.part}` : ''}`,
             trfVersion: 1,
             cdcId: CENTER_ID,
             mfcId: m.id,
-            approvalRef: `APR-${day}-${m.staging}-${TEMP_SUFFIX[g.temp]}${g.part ? `-P${g.part}` : ''}`,
+            approvalRef: `APR-${day}-${m.staging}-${TEMP_SUFFIX[g.temp]}${g.fl ? `-F${g.fl}` : ''}${g.part ? `-P${g.part}` : ''}`,
             deadlineMeaning: 'ARRIVAL',
             dueAt: nextDayIso(baseDate, SUPPLY.dueNextDayMin),
             conditions: [{ kind: 'TEMPERATURE_ZONE', value: g.temp }],

@@ -57,7 +57,7 @@ export class FloorSite {
 
   /** 분류 자리(분배·라인·DAS·DPS·휠소터 앞) — FC 가 카트를 내려놓고 분류 작업자가 일하는 곳 */
   station(): WalkPoint {
-    const pref = this.floor === 6 ? 'DAS' : this.floor === 5 ? 'WHEEL_SORTER' : 'AUTOSTORE';
+    const pref = this.f.equipment.some((e) => e.kind === 'SPLIT') ? 'DAS' : this.f.equipment.some((e) => e.kind === 'AUTOSTORE') ? 'AUTOSTORE' : 'WHEEL_SORTER';
     const e = this.f.equipment.find((x) => x.kind === pref) ?? this.f.equipment[0];
     if (!e) return this.home();
     if (e.rect.z0 >= this.layout.bandDepth) return { x: e.rect.x0 + 2, z: this.f.walk.roomZ, lane: 'S' };
@@ -94,7 +94,8 @@ export class FloorSite {
     const r = rows[k % rows.length];
     const sx = (m: number) => r.slots[mfcSlotIndex(m, r.slots.length)];
     return {
-      stand: { x: r.cx - r.len / 2 + 0.8, z: r.z - 0.9, lane: 'R' as const },
+      // 한 줄에 여럿이면(5F DAS 한 줄) 서쪽 끝부터 1.2m 씩 옆으로
+      stand: { x: r.cx - r.len / 2 + 0.8 + Math.floor(k / rows.length) * 1.2, z: r.z - 0.9, lane: 'R' as const },
       slot: (m: number): WalkPoint => ({ x: sx(m), z: r.z - 0.9, lane: 'R' }),
       light: (m: number) => ({ x: sx(m), y: 2.45, z: r.z + 0.83 }),
     };

@@ -4,7 +4,7 @@ import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { useEffect, useMemo, useRef , lazy, Suspense } from 'react';
 import * as THREE from 'three';
 import { AppContext, useApp, useTick, useView, type AppCtx } from '../../app/context';
-import { OUTBOUND, RACK, SHELF, TMS, BUILDING, MFCS } from '../../config';
+import { OUTBOUND, RACK, SHELF, TMS, BUILDING, MFCS, STAGING_ROWS } from '../../config';
 import { TEMP_KO } from '../../sim/simulation';
 import { stagingCells, type FloorLayout, type Location } from '../../domain/layout';
 import { SCENE, zoneBoxColor } from '../colors';
@@ -85,13 +85,15 @@ function Racks({ f }: { f: FloorLayout }) {
   const posts = useRef<THREE.InstancedMesh>(null);
   const beams = useRef<THREE.InstancedMesh>(null);
   const braces = useRef<THREE.InstancedMesh>(null);
-  const uprights = RACK.bundleBays + 1; // 줄(RackRow) 하나 = 묶음 한쪽 12개
+  // 줄(RackRow) 하나의 기둥 수 = 칸 수 + 1 — 층마다 묶음 칸 수가 다름(5F 12 · 6F·7F 10, RACK_BUNDLE_BAYS). 고정 12 로 그려 6F·7F 랙이 남쪽 벽을 뚫던 것(사용자 2026-11-26)
+  const uprightsOf = (r: { z0: number; z1: number }) => Math.round((r.z1 - r.z0) / RACK.bayW) + 1;
   const panels = Math.round(RACK.height / BRACE_STEP);
   const counts = useMemo(() => {
     let b = 0;
     for (const r of f.rows) b += r.levels * 2;
-    return { p: f.rows.length * uprights * 2, b, br: f.rows.length * uprights * panels };
-  }, [f, uprights, panels]);
+    const u = f.rows.reduce((n, r) => n + uprightsOf(r), 0);
+    return { p: u * 2, b, br: u * panels };
+  }, [f, panels]);
   useEffect(() => {
     let i = 0;
     let j = 0;
@@ -99,7 +101,7 @@ function Racks({ f }: { f: FloorLayout }) {
     const diag = Math.hypot(RACK.depth, BRACE_STEP);
     const ang = Math.atan2(RACK.depth, BRACE_STEP);
     for (const r of f.rows) {
-      for (let k = 0; k < uprights; k++) {
+      for (let k = 0; k < uprightsOf(r); k++) {
         const z = r.z0 + k * RACK.bayW;
         for (const dx of [-RACK.depth / 2, RACK.depth / 2]) {
           tmp.position.set(r.cx + dx, RACK.height / 2, z);
@@ -131,7 +133,7 @@ function Racks({ f }: { f: FloorLayout }) {
     posts.current!.instanceMatrix.needsUpdate = true;
     beams.current!.instanceMatrix.needsUpdate = true;
     braces.current!.instanceMatrix.needsUpdate = true;
-  }, [f, uprights, panels]);
+  }, [f, panels]);
   return (
     <>
       <instancedMesh ref={posts} args={[undefined, undefined, counts.p]} frustumCulled={false}>
@@ -259,7 +261,7 @@ function Staging({ f }: { f: FloorLayout }) {
     <>
       {letters.map((letter) => {
         const slots = f.staging.filter((s) => s.zone === letter).sort((p, q) => p.bay - q.bay);
-        const cells = stagingCells(slots.length);
+        const cells = stagingCells(slots.length, STAGING_ROWS[f.floor]);
         const cold = slots[0]?.temp !== 'AMBIENT';
         return MFCS.map((m, mi) => {
           const block = slots.filter((s) => cells[s.bay - 1]?.mfc === mi);
@@ -308,7 +310,7 @@ function Staging({ f }: { f: FloorLayout }) {
       {f.staging
         .filter((s) => {
           const n = f.staging.filter((x) => x.zone === s.zone).length;
-          return stagingCells(n)[s.bay - 1]?.mfc === -1;
+          return stagingCells(n, STAGING_ROWS[f.floor])[s.bay - 1]?.mfc === -1;
         })
         .map((s) => (
           <mesh key={s.code} rotation-x={-Math.PI / 2} position={[s.pos.x, 0.01, s.pos.z]} visible={!pick}>

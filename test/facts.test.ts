@@ -19,7 +19,7 @@ describe('칠곡 DC 고정값 [고정]', () => {
     for (const p of v) expect(Math.abs(p - CDC_FACTS.areaPyeong / 3)).toBeLessThan(1);
   });
 
-  it('층별 문서 면적(보관 + 도크·분류)이 층 면적과 같고, 구역 합이 개념도와 같다 [정본 CDC-2]', () => {
+  it('층별 문서 면적(보관 + 도크·분류)이 층 면적과 같다 — 보관 합은 물량 30만 층 재설계(사용자 2026-11-26, 개념도 CDC-2 에서 바뀜 → 백엔드 R-25)', () => {
     let dt = 0;
     const storage: Record<string, number> = {};
     for (const f of CHILGOK_FLOORS) {
@@ -28,8 +28,8 @@ describe('칠곡 DC 고정값 [고정]', () => {
       dt += f.docPyeong.dt;
       for (const [k, n] of Object.entries(f.docPyeong.storage)) storage[k] = (storage[k] ?? 0) + n;
     }
-    expect(dt).toBe(2600);
-    expect(storage).toEqual({ 상온: 3300, 냉동: 1000, 냉장: 1700 });
+    expect(dt).toBe(633 + 959 + 959); // 6F·7F 랙 묶음 10칸 → 앞쪽 띠가 깊음(건물은 그대로)
+    expect(storage).toEqual({ 상온: 1908 * 2, 냉동: 1593, 냉장: 640 });
   });
 
   it('공급 대상 MFC 5곳(출고대기 01~05) [정본 CDC-6] + 권역별 기타 센터 4곳(06~09, 물량 30만 — 사용자 2026-11-26)', () => {

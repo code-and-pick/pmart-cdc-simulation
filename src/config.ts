@@ -69,18 +69,44 @@ export const LIFTS_PER_FLOOR = 2;
  * 수 [가정] — 같은 시각에 나가는 차가 온도대마다 2대(목포·춘천 01:00, 세종·부산 03:00), 위치 코드 90 DOCK.
  */
 export const DOCKS: { temp: 'FROZEN' | 'CHILLED' | 'AMBIENT'; floor: 5 | 6 | 7; count: number }[] = [
+  // 물량 30만 재설계(사용자 2026-11-26): 5F 저온(냉장 3 · 냉동 2 — 냉동은 냉동 방 북쪽 벽), 상온은 6F 2 · 7F 4(층마다 자기 상품)
+  // 층마다 4개로 같게(사용자 2026-11-26 "층별 도크 개수가 다 같아야") — 5F 냉장 2 · 냉동 2, 6F·7F 상온 4
+  { temp: 'CHILLED', floor: 5, count: 2 },
   { temp: 'FROZEN', floor: 5, count: 2 },
-  { temp: 'CHILLED', floor: 6, count: 3 },
+  { temp: 'AMBIENT', floor: 6, count: 4 },
   { temp: 'AMBIENT', floor: 7, count: 4 },
 ];
 /** 온도대 → 도크 층 */
-export const DOCK_FLOOR: Record<'FROZEN' | 'CHILLED' | 'AMBIENT', 5 | 6 | 7> = { FROZEN: 5, CHILLED: 6, AMBIENT: 7 };
+/** 그 온도대 R/T 를 실을 도크 층 — 지금 층에 그 온도 도크가 있으면 그 층, 없으면 그 온도 도크가 있는 첫 층(승강기로) */
+export const dockFloorFor = (temp: 'FROZEN' | 'CHILLED' | 'AMBIENT', from: 5 | 6 | 7): 5 | 6 | 7 => (DOCKS.some((d) => d.temp === temp && d.floor === from) ? from : DOCKS.find((d) => d.temp === temp)!.floor);
 /** 도크 문 간격(m) [가정] */
-export const DOCK_PITCH = 4.5;
+export const DOCK_PITCH = 4.2; // 문 3.0m + 기둥·볼라드 — 5F 에 도크 5개(냉장 3 · 냉동 2)와 냉동 전실이 들어가게 4.5 → 4.2(2026-11-26)
 /** 북쪽 띠 출고대기 시작 x(m) — 승강기 4대 시절 자리 그대로, 그 서쪽 빈자리는 도크 [가정] */
 export const STAGING_X0 = 23;
 /** 층별 출고대기 롤테이너 자리(91) — 개념도 PPC-01~30 [개념도], 01~05 는 MFC 기본 배정 [정본 CDC-5] */
 export const STAGING_SLOTS = 30;
+/**
+ * 층마다 랙 묶음 칸 수(한 줄) — 5F 12칸(사용자 랙 규격 "12개 × 양면 24개"), 6F·7F 상온은 10칸으로 남쪽을 줄여 북쪽 띠를 넓힘
+ * (사용자 2026-11-26 "상온 구역 팔레트랙을 조금 남쪽으로 줄이고 북쪽 좁은 곳을 늘려 — 층마다 다르게") → 6F·7F 띠 20.3 → 30.7m.
+ */
+/** 층마다 오토스토어 포트·로봇 [시뮬] — 7F 생활용품 F(SKU 2,400) · 6F 상온 C 소형(SKU 630, 사용자 2026-11-26 "6층에도 오토스토어") */
+export const AUTOSTORE_PORTS: Record<number, number> = { 6: 4, 7: 8 };
+export const AUTOSTORE_ROBOTS: Record<number, number> = { 6: 12, 7: 30 };
+/** 7F 사무실 폭(m) — 예전 크기 그대로(사용자 2026-11-26 "사무실 크기는 줄이지 마") */
+export const OFFICE_W = 13.8;
+/** 오토스토어 폭(m) — 6F·7F 같게, 예전 폭 그대로이고 깊이만 띠 남쪽 끝까지(사용자 2026-11-26) [시뮬] */
+export const AUTOSTORE_W = 19.2;
+export const RACK_BUNDLE_BAYS: Record<5 | 6 | 7, number> = { 5: 12, 6: 10, 7: 10 };
+/**
+ * 출고대기 줄 수 · 한 줄 칸 수(한 글자 층) [시뮬] — 6F·7F 상온은 앞쪽 띠를 넓혀(사용자 2026-11-26 "상온 앞부분 비좁다, 공간 더 확보·설비 크기도") 3줄 × 15칸 = 45칸.
+ * 하루 R/T 약 370대(물량 30만)라 목적지별 대기 칸을 늘림. 5F 는 2줄(글자마다 목적지 9곳 × 2칸).
+ */
+export const STAGING_ROWS: Record<5 | 6 | 7, number> = { 5: 2, 6: 3, 7: 3 };
+export const STAGING_COLS = 15;
+/** DAS 존 줄 수(줄마다 R/T 목적지 9곳) [시뮬] — 7F 생활용품은 3줄(라인 9명), 5F 냉장 2줄, 6F 상온 2줄 */
+/** 5F 휠소터 줄(냉장·냉동)을 남쪽으로 민 거리(m) — DAS 존을 한 줄로 가로로 길게 해 생긴 자리만큼 조금, 도크 앞 짐 내릴 자리 확보(사용자 2026-11-26) [시뮬] */
+export const SORTER_SHIFT_5F = 2.0;
+export const DAS_ROWS: Record<5 | 6 | 7, number> = { 5: 1, 6: 3, 7: 3 }; // 6F 북쪽 띠도 7F 와 같게(사용자 2026-11-26)
 
 /**
  * 보관 용량 [가정] — 칸마다 유닛을 정하고 총 용량은 칸 용량 합(계산값, layout.capacity). CDC_FACTS.capacityUnits(520만)는 목표로 대조한다.
@@ -141,13 +167,17 @@ export const SKU_PLACE = {
   chilledShelfSpare: 1.2,
   /** 5F E·F 선반 SKU(구역마다) [가정] — 5F 띠 공간에 들어가는 만큼 */
   efShelf: 630,
+  /** 6F 상온 — C 소형은 오토스토어 · D 인기상품은 선반 SKU [시뮬, 사용자 2026-11-26 "6층 북쪽도 7층처럼, 6층에도 오토스토어" — 상온 SKU 를 6F·7F 에 고르게] */
+  autostore6: 1_200,
+  dShelf: 1_500,
   /**
    * 7F H 오토스토어 SKU [가정] — H 는 소형 비식재 = 오토스토어(설계 §5, 사용자 2026-11-25 "H 소형 = 오토스토어 설계대로").
    * 전엔 1,500 + H 랙 1단 대용량 피킹면 816 이었는데, H 피킹면을 없애고 그 SKU 를 오토스토어로(2,400).
    */
   autostore: 2_400,
   /** 랙 1단이 박스 피킹면(PICK_FACE)인 구역 [가정] — 5F C·D 무거운 상자, 7F G 대용량 생활용품. H 랙은 오토스토어 보충용 보관(RESERVE)만 */
-  faceZones: ['A', 'B', 'E'] as readonly string[],
+  // H 냉동 큰 상자도 랙 1단 박스 피킹(사용자 2026-11-26 — 5F 냉장+냉동 폭이 모자라 DPS 선반은 작은 상품만)
+  faceZones: ['A', 'B', 'E', 'H'] as readonly string[],
 };
 
 /** 6F 냉장 바닥 적치 레인 위치 코드 통로 [가정 — 백엔드 확인 필요] · 레인 모양 */
@@ -158,9 +188,10 @@ export const VEG_LANES = { aisle: 93, laneW: 1.2, gap: 1.0, posLen: 1.3 } as con
  * 6F 냉장 팔레트 랙 — 냉장 재고 며칠치만 [시뮬 계산, 사용자 2026-11-26].
  * 전엔 "팔레트 칸 18,000 이상"으로 읽어 냉장 랙을 12통로(4,224칸, 랙만 약 22일치)로 늘렸는데, 18,000 은 팔레트가 아니라 SKU 18,000 개를 둘 자리(사용자 확인)
  * → SKU 자리는 피킹 선반·랙 1단 피킹면·야채 레인·오토스토어로 이미 넘는다(layout capacity.skuSlots).
- * 냉장 유통기한 6~25일, 하루 냉장 출고 약 24,500 유닛(실규모 하루 측정) → 랙 2통로(통로 1개로는 랙이 생기지 않음 — 묶음이 양면 통로 단위) + 선반·레인. 며칠치인지는 capacity 로 확인.
+ * 물량 30만(사용자 2026-11-26)이면 하루 냉장 출고 약 90,000 유닛(MFC 5곳 때 24,500 의 약 3.7배) → 랙 3일치 = 90,000 × 3 ÷ (칸 180 × 채움 0.85) ≈ 1,765칸 ÷ 통로당 약 346칸(묶음 기준 — 10통로 3,456칸에서 잼) → 6통로.
+ * 냉장 유통기한 6~25일이라 3일치 [시뮬]. layout 이 coverDays·dailyUnits 로 통로 수를 계산한다.
  */
-export const CHILLED_RACK = { aisles: 2, dailyUnits: 24_500 } as const;
+export const CHILLED_RACK = { dailyUnits: 90_000, coverDays: 3, cellsPerAisle: 346, fill: 0.85 } as const;
 
 /**
  * 오토스토어(7F H) [사용자 2026-11-25 §5 — 현실적인 범위]. 설치비는 통·로봇·포트 수에 비례 → 셋 다 설정값.
@@ -242,6 +273,8 @@ export const CATALOG = {
   reserveFill: [0.7, 1.0] as const,
   /** 냉장 선반(보관 기둥 없는 상품) 시작 채움 [시뮬] — 냉장 랙을 며칠치로 줄여(CHILLED_RACK) 느린 상품은 선반 재고만 쓰므로, 아침 입고로 채워 둔 상태 */
   chilledShelfFill: [0.75, 1.0] as const,
+  /** 잘 나가는 상품 보관 기둥 수(나머지 상품은 1) [시뮬 — 물량 30만에서 인기 상품이 목적지 9곳 몫을 감당하게] */
+  popularColumns: 6,
   /** 한 칸 시작 재고 합의 최대 채움(칸 용량 대비) [시뮬] — 여러 SKU 가 한 보관 칸을 나눠 써도 넘치지 않게 */
   maxFill: 0.95,
   /** 유통기한(일) 범위 [가정] — 시작일 기준, 피킹면 LOT 이 리저브 LOT 보다 먼저 끝난다(FEFO 가 피킹면부터 고르게) */
@@ -289,7 +322,7 @@ export const SHELF = {
   levels: 5,
   slots: 3,
   /** 선반 사이 걷는 통로 폭 [가정] */
-  aisleW: 1.6,
+  aisleW: 2.0, // 물량 30만 — 카트끼리 엇갈려 지나가게 1.6 → 2.0(사용자 2026-11-26)
   /** 선반 통로 첫 번호 [시뮬 R-13] — 랙 01~, 비랙 90~ 와 겹치지 않게 */
   aisleBase: 61,
   /** 선반 칸 하나 용량(유닛) [가정] — 박스를 뜯어 낱개로 진열 */
@@ -318,7 +351,7 @@ export const FLOW = {
   divertSec: 4,
   /** 층별 DAS 라인 작업자(나머지 분류 인원은 분배) · 한 줄 사람 수 [가정] */
   // 라인(DAS) 작업자 — 5F 상온 DAS 존·6F 냉장 라인·7F 생활용품 DAS 존(기사 "상온·냉장·냉동 모두 휠소터를 이용한 DAS")
-  lineWorkers: { 5: 2, 6: 6, 7: 6 } as Record<5 | 6 | 7, number>,
+  lineWorkers: { 5: 6, 6: 9, 7: 9 } as Record<5 | 6 | 7, number>,
   /** DPS(5F 냉동 전실) — 구역 수 · 구역당 작업자 · 컨베이어 속도(m/s) · 동시에 도는 박스 · 구역에서 박스 미는 시간(s) [가정] */
   dps: { zones: 5, workersPerZone: 3, conveyorSpeed: 0.4, maxBoxes: 60, zoneDwellSec: 3 }, // 물량 30만: 구역당 1 → 3명, 동시 박스 20 → 60(2026-11-26)
 };
@@ -329,9 +362,10 @@ export const WORKFORCE: Record<5 | 6 | 7, { fc: number; sort: number; jockey: nu
   // 2026-11-25 가동률 분석으로 다시 배분(사용자 "유휴 인원 — 병목인지 인원 과다인지"): 5F·6F FC·자키는 가동 5~32%(일이 적음), 7F FC 는 91%(오토스토어 SKU 2,400 으로 늘어 병목) → 5F FC 6→3·자키 3→2, 6F FC 5→4·자키 3→2, 7F FC 7→10·자키 4→3
   // 2026-11-25 다시(사용자 "인원 과다 고쳐"): 상온 DAS 없앰 → 5F·7F 분류 0, 5F FC 3→2 · 6F FC 4→3, 자키 줄임, 6F 라인 2명(+분배 2명, 사용자 "라인 2~3명·분배 2명"). 보충은 13:00 전에 끝나야 해 5명 그대로(3명이면 배포가 늦어 출차 4대 늦음), DPS 도 구역당 2명 그대로(1명이면 마지막 피킹 21:45)
   // 2026-11-26 물량 30만(사용자 "1번" — 지금의 약 3.7배)에 맞춰 다시 [시뮬 계산, 하루 돌려 맞춤]: FC·자키·보충 약 3.7배, 분류 = DAS 라인(줄 2 × 3명) + 6F 분배
-  5: { fc: 7, sort: 2, jockey: 4, replDay: 16, replEve: 3 },
+  // 층 구성 재설계(사용자 2026-11-26): 5F 저온 = 예전 6F 냉장 인원 + 냉동 자키·보충, 6F 상온 = 예전 5F 상온 인원. (DPS 구역 작업자는 FLOW.dps)
+  5: { fc: 11, sort: 13, jockey: 8, replDay: 20, replEve: 3 },
   // 6F: 라인 6명(줄 3개에 2명씩 — 한 줄에서 색으로 내 몫 구분) + 분배 2명, 자키 3명(라인에 상품 박스 공급) [사용자 2026-11-25 "라인 2~3명·분배 2명", "라인 줄 수에 맞게"]
-  6: { fc: 11, sort: 13, jockey: 7, replDay: 16, replEve: 3 },
+  6: { fc: 7, sort: 9, jockey: 4, replDay: 14, replEve: 3 },
   7: { fc: 26, sort: 6, jockey: 7, replDay: 16, replEve: 3 },
 };
 
@@ -541,5 +575,6 @@ export const INBOUND = {
    * (사용자 2026-11-26 결정 "7F 에서 검수 → 승강기로 5F"). 5F 도크 2개는 냉동용, 5F 북쪽은 출고대기·승강기·휠소터로 참.
    */
   ambientFloor: 7 as const,
-  ambientAlsoFor: 5 as const,
+  // 층 구성 재설계(사용자 2026-11-26): 6F 상온도 자기 층 입고 검수 → 7F 에서 다른 층 몫을 받지 않음(같은 층)
+  ambientAlsoFor: 7 as const,
 } as const;

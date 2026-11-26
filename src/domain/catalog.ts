@@ -105,7 +105,7 @@ export function buildCatalog(layout: Layout, baseDate: string): Catalog {
         if (arr.length < n) throw new Error(`구역 ${z} 피킹 칸 ${arr.length} < SKU ${n}`);
         for (const loc of arr.slice(0, n)) places.push({ loc, alt: [], handling, words });
       };
-      for (const loc of faces) places.push({ loc, alt: [], handling: z === 'A' || z === 'B' ? 'BOX' : 'FC', words: WORDS[`${z}_FACE`] ?? WORDS[z] });
+      for (const loc of faces) places.push({ loc, alt: [], handling: z === 'A' || z === 'B' || z === 'H' ? 'BOX' : 'FC', words: WORDS[`${z}_FACE`] ?? WORDS[z] });
       const n = (quota.get(z) ?? 0) - faces.length;
       if (z === 'H') take(shelves, n, 'DPS', WORDS.H);
       else if (z === 'G') {
@@ -123,12 +123,12 @@ export function buildCatalog(layout: Layout, baseDate: string): Catalog {
               if ((base + i) % step === 0 && e < extra.length) pl.alt.push(extra[e++]);
             });
         }
-      } else if (z === 'F') {
+      } else if (comps.length > 0) {
         // 오토스토어: SKU 하나 = 서로 다른 통의 칸 AUTOSTORE.compartmentsPerSku 개
         const per = AUTOSTORE.compartmentsPerSku;
         const k = Math.floor(comps.length / per);
         if (k < n) throw new Error(`오토스토어 칸 ${comps.length} 으로 SKU ${n} 못 둠`);
-        for (let i = 0; i < n; i++) places.push({ loc: comps[i], alt: Array.from({ length: per - 1 }, (_, j) => comps[i + (j + 1) * k]), handling: 'PORT', words: WORDS.F });
+        for (let i = 0; i < n; i++) places.push({ loc: comps[i], alt: Array.from({ length: per - 1 }, (_, j) => comps[i + (j + 1) * k]), handling: 'PORT', words: WORDS[z] ?? WORDS.F });
       } else if (n > 0) take(shelves, n, 'FC', WORDS[z] ?? ['상품']);
 
       // 보충 출발지 — 그 구역 보관 칸(RESERVE) 기둥(같은 통로·베이·슬롯), 피킹면 구역은 2~4단
@@ -137,11 +137,20 @@ export function buildCatalog(layout: Layout, baseDate: string): Catalog {
       // 나머지 냉장 상품은 피킹 선반 재고만(현장: 빠른 상품만 팔레트 보관, 느린 상품은 선반) [시뮬, 사용자 2026-11-26]
       const start = skus.length;
       const popularStep = Math.max(1, Math.round(1 / SUPPLY.popularPool));
-      const reserveOnlyPopular = places[0]?.loc.temp === 'CHILLED';
-      const gets = (p: Place, i: number) => p.handling !== 'SPLIT' && (!reserveOnlyPopular || (start + i) % popularStep === 0);
-      const cnt = places.filter((p, i) => gets(p, i)).length;
-      const share = Math.max(1, Math.ceil(cnt / Math.max(1, bases.length)));
-      let ri = 0;
+      // 냉장 랙을 물량 30만의 3일치로 다시 계산해(config CHILLED_RACK) 냉장도 모든 상품에 보관 몫(인기 상품은 더) — 랙이 2통로였을 때만 인기 상품만 줬음
+      const reserveOnlyPopular = false;
+      const isFace = (p: Place) => p.loc.type === 'PICK_FACE' && p.loc.aisle < SHELF.aisleBase;
+      const gets = (p: Place, i: number) => p.handling !== 'SPLIT' && !isFace(p) && (!reserveOnlyPopular || (start + i) % popularStep === 0);
+      // 보관 기둥 — 잘 나가는 상품(목적지 9곳이 같이 요청, 하루 최대 약 430개)은 기둥 CATALOG.popularColumns 개를 혼자 쓰고(나눠 쓰지 않음),
+      // 나머지 상품은 남은 기둥을 나눠 쓴다(현장: 빠른 상품은 팔레트째, 물량 30만 — 사용자 2026-11-26)
+      const isPop = (i: number) => (start + i) % popularStep === 0;
+      const popIdx = places.map((p, i) => (gets(p, i) && isPop(i) ? i : -1)).filter((i) => i >= 0);
+      const popCols = Math.min(Math.floor(bases.length / 2), popIdx.length * CATALOG.popularColumns);
+      const perPop = popIdx.length ? Math.max(1, Math.floor(popCols / popIdx.length)) : 0;
+      const restBases = bases.slice(perPop * popIdx.length);
+      const restCnt = places.filter((p, i) => gets(p, i) && !isPop(i)).length;
+      const share = Math.max(1, Math.ceil(restCnt / Math.max(1, restBases.length)));
+      let cursor = 0;
       places.forEach((p, i) => {
         let column: Location[] = [];
         if (p.loc.type === 'PICK_FACE' && p.loc.aisle < SHELF.aisleBase) {
@@ -152,13 +161,15 @@ export function buildCatalog(layout: Layout, baseDate: string): Catalog {
             column.push(loc);
           }
         } else if (gets(p, i) && bases.length) {
-          const base = bases[Math.floor((ri++ * bases.length) / Math.max(1, cnt - (reserveOnlyPopular ? 0 : faces.length)))] ?? bases[ri % bases.length];
-          for (let lv = base.level; ; lv++) {
-            const loc = byCode.get(base.code.replace(/-(\d+)-(\d)$/, `-${lv}-$2`));
-            if (!loc) break;
-            column.push(loc);
-          }
+          const mine = isPop(i) && perPop ? bases.slice(popIdx.indexOf(i) * perPop, popIdx.indexOf(i) * perPop + perPop) : restBases.length ? [restBases[Math.min(restBases.length - 1, Math.floor((cursor++ * restBases.length) / Math.max(1, restCnt)))]] : [];
+          for (const base of mine)
+            for (let lv = base.level; ; lv++) {
+              const loc = byCode.get(base.code.replace(/-(\d+)-(\d)$/, `-${lv}-$2`));
+              if (!loc) break;
+              column.push(loc);
+            }
         }
+        const skuShare = isPop(i) && perPop ? 1 : share;
         serial += 1;
         const word = p.words[i % p.words.length];
         const sku = `E-${pad(10_000_000 + serial * 37, 8)}`;
@@ -191,7 +202,7 @@ export function buildCatalog(layout: Layout, baseDate: string): Catalog {
               lot: loc.level <= 2 ? lot1 : lot2,
               expiresAt: loc.level <= 2 ? e1 : e2,
               locationCode: loc.code,
-              qty: Math.max(1, Math.round((loc.capacity * fill(CATALOG.reserveFill)) / (p.loc.aisle < SHELF.aisleBase ? 1 : share))),
+              qty: Math.max(1, Math.round((loc.capacity * fill(CATALOG.reserveFill)) / (p.loc.aisle < SHELF.aisleBase ? 1 : skuShare))),
             })),
           ],
         });

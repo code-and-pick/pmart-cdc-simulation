@@ -40,6 +40,8 @@ export interface TripPlan {
   plannedReturnMin: number;
   /** 정차 순서대로 MFC 와 TRF */
   stops: { mfcId: string; trfIds: string[] }[];
+  /** 실을 도크 층(상온은 6F·7F 각각 — 층마다 차를 나눈다) [시뮬] */
+  dockFloor?: number;
 }
 
 export interface MockTmsOptions {
@@ -186,7 +188,7 @@ export class MockTms {
     return out;
   }
 
-  planDay(trfs: TransferIntake[], dayStartMin = 0, rtByTrf?: Map<string, number>): TripPlan[] {
+  planDay(trfs: TransferIntake[], dayStartMin = 0, rtByTrf?: Map<string, number>, floorByTrf?: Map<string, number>): TripPlan[] {
     return this.run('POST', '/assignments', 202, () => {
       const out: TripPlan[] = [];
       let vi = 0;
@@ -198,22 +200,27 @@ export class MockTms {
           const stopsAll = r.stops.map((mfcId) => ({ mfcId, trfIds: trfs.filter((t) => t.mfcId === mfcId && trfTemp(t) === temp && t.state !== 'CANCELLED').map((t) => t.trfId) })).filter((s) => s.trfIds.length);
           if (!stopsAll.length) continue; // 결행
           // 차 나누기 — TRF 는 통째로(단일 출발), 방문 순서대로 R/T 20 까지 담고 넘치면 다음 차(R/T 카운팅 값, 모르면 1)
-          const loads: { mfcId: string; trfIds: string[] }[][] = [[]];
-          let used = 0;
-          for (const st of stopsAll)
-            for (const id of st.trfIds) {
-              const need = Math.max(1, rtByTrf?.get(id) ?? 1);
-              if (used > 0 && used + need > TMS.vehicle.maxRt && loads.length < pool.length) {
-                loads.push([]);
-                used = 0;
+          // 도크 층마다 따로(상온은 6F·7F — 한 차는 한 층 도크에서만 싣는다)
+          const floors = [...new Set(stopsAll.flatMap((st) => st.trfIds.map((id) => floorByTrf?.get(id) ?? -1)))];
+          const loads: { stops: { mfcId: string; trfIds: string[] }[]; floor: number }[] = [];
+          for (const fl of floors) {
+            let cur: { stops: { mfcId: string; trfIds: string[] }[]; floor: number } | null = null;
+            let used = 0;
+            for (const st of stopsAll)
+              for (const id of st.trfIds.filter((x) => (floorByTrf?.get(x) ?? -1) === fl)) {
+                const need = Math.max(1, rtByTrf?.get(id) ?? 1);
+                if (!cur || (used > 0 && used + need > TMS.vehicle.maxRt && loads.length < pool.length)) {
+                  cur = { stops: [], floor: fl };
+                  loads.push(cur);
+                  used = 0;
+                }
+                const last = cur.stops[cur.stops.length - 1];
+                if (last && last.mfcId === st.mfcId) last.trfIds.push(id);
+                else cur.stops.push({ mfcId: st.mfcId, trfIds: [id] });
+                used += need;
               }
-              const cur = loads[loads.length - 1];
-              const last = cur[cur.length - 1];
-              if (last && last.mfcId === st.mfcId) last.trfIds.push(id);
-              else cur.push({ mfcId: st.mfcId, trfIds: [id] });
-              used += need;
-            }
-          loads.forEach((stops, li) => {
+          }
+          loads.forEach(({ stops, floor: dockFloor }, li) => {
           const vehicle = pool[li];
           const driver = drivers[li];
           const rt = stops.reduce((a, st) => a + st.trfIds.reduce((b, id) => b + (rtByTrf?.get(id) ?? 0), 0), 0);
@@ -229,7 +236,7 @@ export class MockTms {
           }
           const back = TMS.travelMin[`${stops[stops.length - 1].mfcId}>${CENTER_ID}`] ?? travel[0];
           const tripId = this.id('TRIP');
-          const plan: TripPlan = { tripId, routeId: r.routeId, region: r.region, temp, vehicleId: vehicle.vehicleId, driverId: driver.driverId, plannedDepartMin: depart, plannedArriveMin: arrive, plannedReturnMin: t + back, stops };
+          const plan: TripPlan = { tripId, routeId: r.routeId, region: r.region, temp, vehicleId: vehicle.vehicleId, driverId: driver.driverId, plannedDepartMin: depart, plannedArriveMin: arrive, plannedReturnMin: t + back, stops, ...(dockFloor >= 0 ? { dockFloor } : {}) };
           this.plans.set(tripId, plan);
           this.trips.set(tripId, {
             tripId,

@@ -41,47 +41,48 @@ export interface FloorSpec {
 
 const amb = (letter: RackZoneSpec['letter'], label: string, shelfShare?: number): RackZoneSpec => ({ letter, temp: 'AMBIENT', label, share: 1, shelfShare, levels: RACK.levels });
 
+// 층 구성(사용자 2026-11-26 물량 30만 재설계 — "5F 냉장+냉동, 6F·7F 상온", 구역 글자는 그대로 층만 이동):
+//  5F 저온 — 냉장 G(서쪽: 랙 · 피킹 선반 · 분배 · 야채 레인 · DAS) + 냉동 H(동쪽 방: 랙 · DPS 전실)
+//  6F 상온 A~D(A·B 무거운 상자 · C · D 인기상품) · 7F 생활용품 E·F(오토스토어). 상온 입고 검수·도크는 6F·7F 각각.
+// 문서 면적(평, 보관 방 = 랙 방): 5F 냉장 랙 3일치 + 냉동 랙 약 7일치(물량 30만 계산), 6F·7F 상온 2,067 [시뮬 — CDC-2 정본에서 바뀜, 백엔드 요청 R-25]
 export const CHILGOK_FLOORS: FloorSpec[] = [
   {
     floor: 5,
-    label: '5F 상온·냉동',
+    label: '5F 냉장·냉동',
     zones: [
-      amb('A', '상온 A (무거운 상자)', 0),
-      amb('B', '상온 B (무거운 상자)', 0),
-      amb('C', '상온 C', 0),
-      amb('D', '상온 D (인기상품)', 0),
+      { letter: 'G', temp: 'CHILLED', label: '냉장 G', share: 1, levels: RACK.levels },
       { letter: 'H', temp: 'FROZEN', label: '냉동 H', share: 1, levels: RACK.levels },
     ],
-    docPyeong: { storage: { 상온: 1233, 냉동: 1000 }, dt: 633 },
-    stagingLetters: ['A', 'H'],
-    liftLetter: 'A',
+    // 건물 크기는 그대로(보관 방 합 2,233평 — 예전 5F 상온 1,233 + 냉동 1,000이 건물 폭). 냉장 랙은 3일치 계산, 나머지 냉동 쪽(전실·입고 검수 포함)
+    docPyeong: { storage: { 냉장: 640, 냉동: 1593 }, dt: 633 },
+    stagingLetters: ['G', 'H'],
+    liftLetter: 'G',
     equipment: [
-      { kind: 'WHEEL_SORTER', label: '1차 고속분류기(휠소터) (C·D 박스 → MFC 롤테이너)', where: 'band', weight: 1.3 },
-      // DPS 피킹은 냉동 선반에서 — 여기는 MFC 빈 박스가 오가는 컨베이어만(사용자 2026-11-25)
-      { kind: 'DPS', label: 'DPS 박스 컨베이어 (냉동)', where: 'band', weight: 0.55 },
-      // 오토스토어는 7F 비식재만(사용자 2026-11-25) — 5F E·F 는 FC 선반 피킹
-      { kind: 'INBOUND', label: '입고 검수 (상온)', where: 'band', temp: 'AMBIENT', maxW: 14 },
+      { kind: 'INBOUND', label: '입고 검수 (냉장)', where: 'band', temp: 'CHILLED', maxW: 14 },
       { kind: 'INBOUND', label: '입고 검수 (냉동)', where: 'band', temp: 'FROZEN', maxW: 14 },
+      { kind: 'DAS', label: '라인 (DAS)', where: 'east' },
+      { kind: 'SPLIT', label: '분배 (야채 크레이트)', where: 'east' },
+      { kind: 'DPS', label: 'DPS 박스 컨베이어 (냉동)', where: 'band', weight: 0.55 },
     ],
   },
   {
     floor: 6,
-    label: '6F 냉장',
-    zones: [{ letter: 'G', temp: 'CHILLED', label: '냉장 G', share: 1, levels: RACK.levels }],
-    docPyeong: { storage: { 냉장: 1700 }, dt: 1167 },
-    stagingLetters: ['G'],
-    liftLetter: 'G',
+    label: '6F 상온',
+    zones: [amb('A', '상온 A (무거운 상자)', 0), amb('B', '상온 B (무거운 상자)', 0), { ...amb('C', '상온 C (소형 — 오토스토어)', 0), bins: true }, amb('D', '상온 D (인기상품)', 0)],
+    // 상온 랙은 건물 폭 끝까지, 묶음 10칸(RACK_BUNDLE_BAYS)이라 남쪽으로 짧아 북쪽 띠가 넓음 — 보관 방 = 건물 폭 × 랙 깊이(사용자 2026-11-26 "건물은 그대로, 상온 팔레트 랙을 남쪽으로 줄이고 북쪽을 늘려")
+    docPyeong: { storage: { 상온: 1908 }, dt: 959 },
+    stagingLetters: ['A'],
+    liftLetter: 'A',
     equipment: [
-      { kind: 'INBOUND', label: '입고 검수 (냉장)', where: 'band', temp: 'CHILLED', maxW: 14 },
-      { kind: 'DAS', label: '라인 (DAS)', where: 'east' },
-      { kind: 'SPLIT', label: '분배 (야채 크레이트)', where: 'east' },
+      { kind: 'WHEEL_SORTER', label: '1차 고속분류기(휠소터) (A·B 박스 → MFC 롤테이너)', where: 'band', weight: 1.3 },
+      { kind: 'INBOUND', label: '입고 검수 (상온)', where: 'band', temp: 'AMBIENT', maxW: 14 },
     ],
   },
   {
     floor: 7,
     label: '7F 생활용품',
     zones: [amb('E', '생활용품 E'), { ...amb('F', '생활용품 F (비식재 소형)'), bins: true }],
-    docPyeong: { storage: { 상온: 2067 }, dt: 800 },
+    docPyeong: { storage: { 상온: 1908 }, dt: 959 },
     stagingLetters: ['E'],
     liftLetter: 'E',
     equipment: [
