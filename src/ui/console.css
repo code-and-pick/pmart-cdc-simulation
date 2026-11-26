@@ -1508,3 +1508,13 @@ details.sec > summary h4 { justify-content: flex-start; gap: 6px; }
 .as-port-h span { font-variant-numeric: tabular-nums; color: var(--muted); }
 .as-port small { font-size: 10.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .as-port.on small { color: inherit; }
+
+/* 이상 알림 펼치기(IssueBar) — 사용자 2026-11-26 "클릭도 안 돼" */
+.ib-card.sel { outline: 2px solid currentColor; outline-offset: -2px; }
+.ib-detail { flex-basis: 100%; margin-top: 6px; padding: 8px 10px; border-radius: 10px; background: var(--panel); border: 1px solid var(--line); color: var(--ink, inherit); font-size: 12.5px; display: grid; gap: 4px; }
+.ib-detail p { margin: 0; }
+.ib-detail p.why { color: var(--muted); }
+.ib-detail div { display: flex; gap: 6px; margin-top: 2px; }
+.ib-detail button { font-size: 12px; padding: 4px 10px; border-radius: 8px; border: 1px solid var(--line); background: transparent; color: inherit; cursor: pointer; }
+.ib-detail button:first-child { background: #2f80ed; border-color: #2f80ed; color: #fff; }
+.ib-bad, .ib-warn { flex-wrap: wrap; }

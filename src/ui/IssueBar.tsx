@@ -8,6 +8,8 @@ export function IssueBar() {
   const view = useView();
   useTick();
   const [open, setOpen] = useState(false);
+  /** 펼친 카드(눌러서 왜·어디를 볼지) — 전엔 누르면 이미 열린 탭이라 아무 일도 없고 글이 잘려 읽을 수 없었음(사용자 2026-11-26) */
+  const [sel, setSel] = useState<string | null>(null);
   const issues = collectIssues(sim, backend);
   if (!issues.length) return <div className="ib ib-ok">● 이상 없음 — 지금 확인할 일이 없어요</div>;
   const bad = issues.filter((i) => i.level === 'bad').length;
@@ -36,7 +38,7 @@ export function IssueBar() {
       <ul className="ib-cards">
         {shown.map((i) => (
           <li key={i.key}>
-            <button className={`ib-card ${i.level}`} onClick={() => go(i)} disabled={!i.go} title={i.go ? '눌러서 보기' : undefined}>
+            <button className={`ib-card ${i.level}${sel === i.key ? ' sel' : ''}`} onClick={() => setSel(sel === i.key ? null : i.key)} title="눌러서 자세히">
               <span className="ib-card-1">
                 <span aria-hidden>{i.icon}</span> {i.title}
               </span>
@@ -45,6 +47,25 @@ export function IssueBar() {
           </li>
         ))}
       </ul>
+      {(() => {
+        const d = issues.find((x) => x.key === sel);
+        if (!d) return null;
+        return (
+          <div className="ib-detail">
+            <b>
+              {d.icon} {d.title}
+            </b>
+            <p>{d.what}</p>
+            {d.why && <p className="why">{d.why}</p>}
+            <div>
+              {d.go && (
+                <button onClick={() => go(d)}>그 화면 보기</button>
+              )}
+              <button onClick={() => setSel(null)}>닫기</button>
+            </div>
+          </div>
+        );
+      })()}
       {issues.length > ISSUES.shown && (
         <button className="ib-more" onClick={() => setOpen(!open)}>
           {open ? '접기' : `${issues.length - ISSUES.shown}건 더`}

@@ -291,6 +291,8 @@ export class Simulation implements DutyClock {
   /** MFC 하차면(동시 3대) — 비는 시각들 */
   private readonly bays = new Map<string, number[]>();
   private readonly claimed = new Set<string>();
+  /** 방금 끝낸 보충(키 → 시각) — 보충 목록을 몇 초 재사용하는 동안 끝난 칸을 또 고르지 않게(헛걸음, 2026-11-26 브라우저에서만 보충이 늦던 원인) */
+  private readonly replDone = new Map<string, number>();
   /** 지금 싣고 있는 R/T 수(운행 별) — 다 싣기 전에 출차하지 않게 */
   private readonly loading = new Map<string, number>();
   private readonly locs = new Map<string, Location>();
@@ -419,13 +421,38 @@ export class Simulation implements DutyClock {
 
   // ── 시계 ───────────────────────────────────────────
   /** 화면 프레임마다 — 실제 경과 초 × 배속 */
+  /** 화면 프레임이 맡긴, 아직 진행하지 않은 시뮬 시간(초) */
+  private pending = 0;
+  private pumping = false;
+
+  /**
+   * 화면 프레임마다 — 배속만큼 진행할 시간을 쌓고, 따로 도는 펌프가 1초씩 나아가며 단계마다 작업자의 다음 일(약속)을 풀어 준다.
+   * 전엔 한 프레임 안에서 step 을 몰아 돌려(느린 화면 × 120배속이면 한 번에 120초) 그동안 작업자 다음 일이 프레임 끝까지 미뤄져
+   * 브라우저에서만 일이 덜 되고 보충·Wave 배포가 늦었다(사용자 2026-11-26 "냉장 Wave 배포 지연·보충 밀림"). 화면 없는 하루 돌리기(day-report)와 같은 방식.
+   * 한 번에 12ms 까지만 계산하고 화면에 넘긴다(긴 작업 줄이기). 밀린 시간은 최대 30초어치만 들고 간다(화면이 아주 느리면 배속이 덜 나옴).
+   */
   advance(realDt: number) {
-    if (this.speed <= 0) return;
-    let left = realDt * this.speed;
-    while (left > 0) {
-      const d = Math.min(1, left);
-      this.step(d);
-      left -= d;
+    if (this.speed <= 0 || this.skipping !== null) return;
+    this.pending = Math.min(30, this.pending + realDt * this.speed);
+    if (!this.pumping) void this.pump();
+  }
+
+  private async pump() {
+    this.pumping = true;
+    try {
+      while (this.pending > 0 && this.speed > 0) {
+        const until = performance.now() + 12;
+        while (this.pending > 0 && performance.now() < until) {
+          const d = Math.min(1, this.pending);
+          this.step(d);
+          this.pending -= d;
+          for (let i = 0; i < 40; i++) await Promise.resolve();
+        }
+        if (this.pending > 0) await new Promise((r) => setTimeout(r, 0));
+      }
+    } finally {
+      this.pumping = false;
+      if (this.speed <= 0) this.pending = 0;
     }
   }
 
@@ -836,7 +863,10 @@ export class Simulation implements DutyClock {
     const site = this.floorSite(a);
     // 5F 는 냉장·냉동 두 방 — 보충 요청이 위치 코드 순(G 먼저)이라 오전 내내 냉장만 하고 냉동 방엔 아무도 없었음(사용자 2026-11-26 "냉동에도 작업하는 사람이 없고").
     // 냉동 전담 지게차를 더 둔다: 5F 주간 보충 마지막 WORK.frozenRepl 명은 냉동(H) 먼저, 나머지는 냉장(G) 먼저 — 자기 방 일이 없으면 다른 방도 한다(냉장 인원을 빼면 냉장 배포가 늦음)
-    const open = this.backend.replenishmentNeeds(5).filter((n) => Number(n.from.split('-')[2]) === a.floor && !this.claimed.has(`${n.sku}|${n.lot}|${n.from}`));
+    const open = this.backend.replenishmentNeeds(5).filter((n) => {
+      const k = `${n.sku}|${n.lot}|${n.from}`;
+      return Number(n.from.split('-')[2]) === a.floor && !this.claimed.has(k) && !((this.replDone.get(k) ?? -1e9) > this.time - 10);
+    });
     const mine = a.floor === 5 ? (a.shift === 'DAY' && Number(a.id.slice(-2)) > WORKFORCE[5].replDay - WORK.frozenRepl ? 'H' : 'G') : null;
     const need = (mine && open.find((n) => n.from.split('-')[1] === mine)) || open[0];
     if (!need) {
@@ -845,6 +875,12 @@ export class Simulation implements DutyClock {
       return;
     }
     const k = `${need.sku}|${need.lot}|${need.from}`;
+    // 몇 초 지난 목록에서 골랐으니, 떠나기 전에 지금도 남은 보충인지 한 번 확인(아니면 다음 차례에 다시 고름)
+    if (!this.backend.replenishmentNeeds().some((n) => `${n.sku}|${n.lot}|${n.from}` === k)) {
+      this.replDone.set(k, this.time);
+      await a.wait(1, '보충 대기');
+      return;
+    }
     this.claimed.add(k);
     try {
       const name = this.catalog.bySku.get(need.sku)?.name ?? need.sku;
@@ -882,6 +918,7 @@ export class Simulation implements DutyClock {
       }
       if (qty > 0) {
         this.backend.replenishMove({ sku: need.sku, lot: need.lot, fromLocationCode: need.from, toLocationCode: need.to, qty, workerId: a.id }, newId('move'));
+        this.replDone.set(k, this.time);
         a.done += 1;
       }
     } finally {

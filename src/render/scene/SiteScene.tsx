@@ -20,7 +20,7 @@ import { BEAM_H, beamY, LOAD_MAX } from '../rackGeom';
 
 export function SiteScene({ app }: { app: AppCtx }) {
   return (
-    <Canvas shadows={false} flat dpr={[1, 2]} gl={{ antialias: true }} camera={{ fov: 45, near: 0.1, far: 900, position: [60, 120, 140] }}>
+    <Canvas shadows={false} flat dpr={[1, 2]} gl={{ antialias: true, powerPreference: 'high-performance' }} camera={{ fov: 45, near: 0.1, far: 900, position: [60, 120, 140] }}>
       <AppContext.Provider value={app}>
         <Backdrop />
         <Lights />
