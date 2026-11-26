@@ -174,7 +174,7 @@ export function LanTrfFlow({ open = true }: { open?: boolean }) {
         })
         .then((r) => {
           if (!on) return;
-          const sims = (r.body.items ?? []).filter((x) => x.trfId.startsWith('TRF-SIM-') && x.state !== 'CANCELLED').sort((a, b) => (b.updatedAt ?? '').localeCompare(a.updatedAt ?? ''));
+          const sims = (r.body.items ?? []).filter((x) => /^TRF-(SIM|SR)-/.test(x.trfId) && x.state !== 'CANCELLED').sort((a, b) => (b.updatedAt ?? '').localeCompare(a.updatedAt ?? ''));
           setRecent(sims.slice(0, 6));
           if (!useLanRunSnapshot().trfId && sims[0]) setLanRun({ trfId: sims[0].trfId });
         })
@@ -557,7 +557,7 @@ export function LanTransport() {
       {trips && !list.length && <div className="note">운행이 없습니다</div>}
       {list.map((tr) => {
         const trfs = tr.stops.flatMap((s) => s.trfIds ?? []);
-        const sim = trfs.find((x) => x.startsWith('TRF-SIM-'));
+        const sim = trfs.find((x) => /^TRF-(SIM|SR)-/.test(x));
         const mine = trfs.includes(viewing ?? '');
         return (
           <div key={tr.tripId} className={`lt-trip${mine ? ' on' : ''}`} onClick={() => sim && setLanRun({ trfId: sim })} role={sim ? 'button' : undefined}>

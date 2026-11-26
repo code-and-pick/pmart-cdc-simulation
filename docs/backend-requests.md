@@ -40,6 +40,7 @@ MockBackend 가 계약 의미를 흉내 내며 정한 값. 백엔드가 다르�
 
 | 값 | 내용 | 근거 |
 |---|---|---|
+| 공급 요청 → TRF 임시 다리(R-27 전) | 실서버 설정 탭 "MFC 입고 신청 받기"(기본 꺼짐, 사용자가 켬)가 10초마다 claude-mfc-sup 로 `GET /supply-requests?mfcId&state=APPROVED` → TRF 없는 것만 `/internal/transfer-intakes`. trfId = `TRF-SR-{supplyRequestId}`(64자 자름), Idempotency-Key = `sim-bridge-{supplyRequestId}`, approvalRef = supplyRequestId, 승인 0 줄 뺌, 온도대 = 첫 줄 SKU 의 CDC 재고 위치 구역(G 냉장·H 냉동·그 밖 상온), 출고일 = 희망 사용준비 시각 −30시간 날(오늘 전이면 오늘)부터 그 MFC·온도대 지시서가 안 닫힌 첫 날, dueAt = 출고일 다음 날 06:00 KST. 한계: MFC 쪽 RCV-SR 초기 입고는 EXPECTED 로 남음, claude-mfc-sup 가 읽는 MFC 만(LAN 확인: MFC-BJG-01 200, MFC-SMN-01 403) | 사용자 결정(mfc 시뮬 세션 전달 2026-11-26) · R-27 |
 | 피킹 작업 나눔 | (0.9.0 PR #484 기준) 목은 통로 방식(AISLE_PICK_METHOD)으로 DISCRETE·REGION_BATCH·SKU_BATCH 를 만들고 위치 코드 순으로 20줄씩 자름(서버 batch-max-lines 기본값 없음과 다름), DPS 는 컨베이어 구역 경계에서도 자름(R-20). 내주는 순서는 계약대로 작업 기한 → 만든 순 | 계약 0.9.0 + 시뮬 |
 | 칠곡 통로 피킹 방식 | 5F A 선반 = DPS · 랙 1단 박스 피킹면(5F C·D, 7F G) = BOX_PICK · 6F 야채 레인 93 = DISTRIBUTION · LINE = 6F B 선반 + 5F F·7F G 선반(2026-11-26 — 상온 DAS 로 가는 인기 상품을 모든 MFC 몫으로 묶어 집게) · 5F E 선반·오토스토어(7F H 61~62) = FC — 백엔드 시드 PR #502 반영(80통로: DPS 26·BOX_PICK 16·DISTRIBUTION 1·LINE 31·FC 6) | cdc-location 0.5.0 aisle-pick-methods 를 배치로 정함 [시뮬] |
 | 상품 수·요청 | SKU 11,660 = 선반 목표 칸(칸 하나 = SKU 하나, B-1), 5F C~F 각 190. MFC 요청 600줄 중 35% 를 잘 나가는 상품 2% 묶음에서(모든 MFC 공통) — 라인에서 한 상품이 여러 MFC 칸으로 | 실서버 SKU·요청은 백엔드 — LAN 시작 재고는 실제 LAN 상품(약 504개)만, 기둥 하나 = SKU 하나(섞인 팔레트 없음, 백엔드 회신) |

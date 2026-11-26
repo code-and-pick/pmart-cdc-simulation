@@ -4,7 +4,10 @@
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useApp, type AppCtx } from '../app/context';
+import { HttpClient } from '../backend/http/client';
 import { runLanOne } from '../backend/http/lanRun';
+import { bridgeOnce } from '../backend/http/supplyBridge';
+import { TokenSource } from '../backend/http/tokens';
 import { MFCS } from '../config';
 import { lanRunSnapshot, setLanRun, useLanRun } from './lanRunStore';
 
@@ -41,7 +44,24 @@ const seen = (): string[] => JSON.parse(sessionStorage.getItem(SEEN) ?? '[]') as
 
 export function LanIncoming() {
   const { real } = useApp();
-  const { busy } = useLanRun();
+  const { busy, bridgeOn } = useLanRun();
+  // 임시 다리 — 켜져 있으면 10초마다 APPROVED 공급 요청을 TRF 로(MFC 계정으로 읽기)
+  useEffect(() => {
+    if (!real || !bridgeOn) return;
+    let on = true;
+    const mfcTokens = new TokenSource('claude-mfc-sup', 90);
+    const mfcGateway = new HttpClient({ baseUrl: '/api/v1', token: () => mfcTokens.get(), sourceSystem: 'pmart-cdc-simulation', now: () => 0, timeoutMs: 8000, retries: 2 });
+    const tick = () =>
+      bridgeOnce({ mfcGateway, gateway: real.backend.client, internal: real.internal }, MFCS.filter((m) => !m.id.startsWith('ETC-')).map((m) => m.id))
+        .then((r) => on && setLanRun({ bridgeLog: r, bridgeAt: Date.now() }))
+        .catch(() => undefined);
+    void tick();
+    const t = setInterval(tick, 10_000);
+    return () => {
+      on = false;
+      clearInterval(t);
+    };
+  }, [real, bridgeOn]);
   const [rows, setRows] = useState<Row[]>([]);
   const [, bump] = useState(0);
   useEffect(() => {
@@ -76,7 +96,7 @@ export function LanIncoming() {
     <div className="lan-in" role="alert">
       <div className="lan-in-h">
         <i>●</i>
-        <b>새 TRF 들어옴</b>
+        <b>{x.trfId.startsWith('TRF-SR-') ? 'MFC 입고 신청 → 새 TRF' : '새 TRF 들어옴'}</b>
         <span>{list.length > 1 ? `외 ${list.length - 1}건` : ''}</span>
       </div>
       <div className="lan-in-b">

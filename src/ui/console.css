@@ -1836,3 +1836,12 @@ tr.ex td { color: var(--muted); font-style: italic; }
 .lan-in-a button.ghost { background: transparent; border: 1px solid var(--line); color: var(--muted); font-weight: 500; padding: 0 8px; }
 .lan-in-a button:disabled { opacity: .5; cursor: default; }
 @keyframes lanInBlink { 50% { opacity: .3; } }
+/* MFC 입고 신청 받기(임시 다리) */
+.lr-bridge { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 10px; border: 1px dashed var(--line); border-radius: 10px; }
+.lr-bridge > div { display: grid; gap: 2px; min-width: 0; }
+.lr-bridge b { font-size: 12.5px; }
+.lr-bridge small { color: var(--muted); font-size: 11px; }
+.lr-bridge button { height: 28px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--line); background: transparent; color: var(--muted); font-weight: 700; font-size: 12px; cursor: pointer; }
+.lr-bridge button.on { background: #27ae60; border-color: #27ae60; color: #fff; }
+.lr-bridge-log { margin: 0; padding: 0 0 0 14px; font-size: 11px; color: var(--muted); display: grid; gap: 2px; }
+.lr-bridge-log li.bad { color: #eb5757; }

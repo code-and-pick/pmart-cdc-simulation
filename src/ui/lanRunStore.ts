@@ -2,6 +2,7 @@
 // 진행 단계·PDA 코드 팝업이 함께 사라지던 것(사용자 2026-11-26 "화면 누르니까 팝업창이 없어졌어"). 돌던 실행은 그대로 이어지고 화면만 다시 붙는다.
 import { useSyncExternalStore } from 'react';
 import type { RunStep } from '../backend/http/lanRun';
+import type { BridgeResult } from '../backend/http/supplyBridge';
 
 export interface LanRunState {
   steps: RunStep[] | null;
@@ -13,11 +14,15 @@ export interface LanRunState {
   lastStep?: string;
   /** 오른쪽 탭에 흐름을 보일 TRF(실서버) */
   trfId?: string;
+  /** MFC 공급 요청 → DC TRF 임시 다리(R-27 전까지) — 사용자가 켬, 기본 끔 */
+  bridgeOn: boolean;
+  bridgeLog: BridgeResult[];
+  bridgeAt?: number;
 }
 
 const KEEP = 'cdc-sim-lan-trf';
 const kept = typeof sessionStorage === 'undefined' ? null : sessionStorage.getItem(KEEP);
-let state: LanRunState = { steps: null, busy: false, mfcId: 'MFC-BJG-01', mode: 'pda', hideScan: false, ...(kept ? { trfId: kept } : {}) };
+let state: LanRunState = { steps: null, busy: false, mfcId: 'MFC-BJG-01', mode: 'pda', hideScan: false, bridgeOn: typeof sessionStorage !== 'undefined' && sessionStorage.getItem('cdc-sim-supply-bridge') === '1', bridgeLog: [], ...(kept ? { trfId: kept } : {}) };
 const subs = new Set<() => void>();
 
 export function setLanRun(p: Partial<LanRunState>) {
@@ -29,6 +34,7 @@ export function setLanRun(p: Partial<LanRunState>) {
   }
   state = next;
   // 보던 TRF 는 새로고침해도 남김(사용자 2026-11-26 "도착 보내기 단추가 있던 탭이 없어졌어")
+  if ('bridgeOn' in p && typeof sessionStorage !== 'undefined') sessionStorage.setItem('cdc-sim-supply-bridge', next.bridgeOn ? '1' : '0');
   if ('trfId' in p && typeof sessionStorage !== 'undefined') {
     if (next.trfId) sessionStorage.setItem(KEEP, next.trfId);
     else sessionStorage.removeItem(KEEP);

@@ -719,7 +719,7 @@ function CellCard() {
 function LanRun() {
   const { real } = useApp();
   // 상태는 패널 밖(lanRunStore) — 탭이 바뀌어도 진행·팝업이 남는다
-  const { mfcId, mode, steps, busy, hideScan } = useLanRun();
+  const { mfcId, mode, steps, busy, hideScan, bridgeOn, bridgeLog, bridgeAt } = useLanRun();
   if (!real) return null;
   // 새 TRF 로 시작 · 이어 하기(PDA) — 새 TRF 알림과 같은 시작 함수(LanIncoming.startLanRun)
   const go = (resumeTrfId?: string) => startLanRun(real, { mfcId, pda: mode === 'pda' || !!resumeTrfId, ...(resumeTrfId ? { resumeTrfId } : {}) });
@@ -771,6 +771,27 @@ function LanRun() {
           찍을 코드 {scanCodes.length}개 보기
         </button>
       )}
+      {/* MFC 입고 신청 받기 — 임시 다리(백엔드 R-27 전까지). 켜면 LAN 에 TRF 를 씀 */}
+      <div className="lr-bridge">
+        <div>
+          <b>MFC 입고 신청 받기</b>
+          <small>승인된 공급 요청을 TRF-SR-… 로 인수(임시 다리 · R-27 전까지){bridgeAt ? ` · ${new Date(bridgeAt).toLocaleTimeString('ko-KR', { hour12: false })} 확인` : ''}</small>
+        </div>
+        <button className={bridgeOn ? 'on' : ''} onClick={() => setLanRun({ bridgeOn: !bridgeOn })}>
+          {bridgeOn ? '켜짐' : '꺼짐'}
+        </button>
+      </div>
+      {bridgeOn && bridgeLog.filter((x) => x.state !== 'EXISTS').length > 0 && (
+        <ul className="lr-bridge-log">
+          {bridgeLog
+            .filter((x) => x.state !== 'EXISTS')
+            .map((x) => (
+              <li key={x.supplyRequestId} className={x.state === 'FAILED' ? 'bad' : ''}>
+                {x.mfcId} · {x.trfId} · {x.state === 'CREATED' ? '인수함' : x.state === 'SKIPPED' ? '건너뜀' : '실패'} — {x.detail}
+              </li>
+            ))}
+        </ul>
+      )}
       <LanOpenTrfs onResume={go} busy={busy} />
       {steps && steps.length > 0 && (
         <ol className="lr-steps">
@@ -802,7 +823,7 @@ function LanOpenTrfs({ onResume, busy }: { onResume: (trfId: string) => void; bu
       real.backend.client
         .call<{ items?: { trfId: string; trfNumber?: string; state: string; mfcId: string; pickedQty: number; allocatedQty: number; updatedAt?: string }[] }>('GET', '/cdcs/CDC01/transfers', { query: { size: '50' } })
         // 출발한 것도 오늘 것은 남김(도착·인계를 이어 봄) — 단추는 [흐름]만
-        .then((r) => on && setRows((r.body.items ?? []).filter((x) => x.trfId.startsWith('TRF-SIM-') && (['IN_WAVE', 'PICKED', 'SORTED', 'INSPECTED', 'LOADED'].includes(x.state) || (x.state === 'DEPARTED' && Date.now() - new Date(x.updatedAt ?? 0).getTime() < 24 * 3600_000))).reverse()))
+        .then((r) => on && setRows((r.body.items ?? []).filter((x) => /^TRF-(SIM|SR)-/.test(x.trfId) && (['IN_WAVE', 'PICKED', 'SORTED', 'INSPECTED', 'LOADED'].includes(x.state) || (x.state === 'DEPARTED' && Date.now() - new Date(x.updatedAt ?? 0).getTime() < 24 * 3600_000))).reverse()))
         .catch(() => undefined);
     void load();
     const t = setInterval(load, 10_000);
