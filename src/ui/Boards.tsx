@@ -186,7 +186,7 @@ export function TrfBoard() {
     <div className="sfl">
       <div className="pick-row">
         <MfcPick />
-        <input className="search" placeholder="TRF·LPN 번호 검색" value={q} onChange={(e) => setQ(e.target.value)} style={{ flex: 1 }} />
+        <input className="search" placeholder="TRF·LPN 번호" value={q} onChange={(e) => setQ(e.target.value)} style={{ flex: 1 }} />
       </div>
       {!rows.length && <div className="note">{q ? '찾는 TRF·LPN 이 없습니다.' : '08:00 에 TRF 도착'}</div>}
       {rows.map(({ t, p, dots, handedAt }) => {
@@ -470,7 +470,7 @@ export function StockSearch() {
   const kind = (l: Location) => (l.bin ? '오토스토어 칸' : l.lane ? '야채 레인' : l.type === 'PICK_FACE' ? (l.aisle < 61 ? '랙 1단 피킹면' : '피킹 선반') : '팔레트 보관');
   return (
     <div>
-      <input className="search" placeholder="상품 이름·SKU 검색(2글자 이상)" value={q} onChange={(e) => setQ(e.target.value)} style={{ width: '100%', marginBottom: 8 }} />
+      <input className="search" placeholder="상품 이름·SKU (2글자 이상)" value={q} onChange={(e) => setQ(e.target.value)} style={{ width: '100%', marginBottom: 8 }} />
       {hits.map((s) => {
         const locs = [s.shelf, ...s.alt, ...s.column];
         return (

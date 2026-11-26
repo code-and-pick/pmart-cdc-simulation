@@ -1707,3 +1707,25 @@ tr.ex td { color: var(--muted); font-style: italic; }
 .mv-kind.receipt_ack { background: rgba(39,174,96,.16); color: #27ae60; }
 .mv-who { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mv-row b { font-variant-numeric: tabular-nums; }
+
+/* 검색 칸 공통(.search · 패널 안 맨 입력) — 사용자 2026-11-26 "검색창 UI 또 이러네": 기본 모양이 없어 브라우저 흰 테두리로 나왔음 */
+.search,
+.panel input[type='text']:not([class]),
+.panel input:not([type]):not([class]) {
+  height: 32px;
+  padding: 0 10px 0 30px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--line) 30%, transparent) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%238a93a3' stroke-width='2.4' stroke-linecap='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='m20 20-3.5-3.5'/%3E%3C/svg%3E") no-repeat 10px center;
+  color: inherit;
+  font: inherit;
+  font-size: 12.5px;
+  outline: 0;
+  box-sizing: border-box;
+  min-width: 0;
+}
+.search { width: 100%; }
+.search::placeholder { color: var(--muted); }
+.search:focus { border-color: #2f80ed; }
+.pick-row .search { width: auto; flex: 1; }
+.wk-find .search { padding-left: 30px; }
