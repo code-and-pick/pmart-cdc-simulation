@@ -45,3 +45,8 @@ export function useLanRun(): LanRunState {
     () => state,
   );
 }
+
+/** 지금 값(훅 밖) */
+export function lanRunSnapshot(): LanRunState {
+  return state;
+}
