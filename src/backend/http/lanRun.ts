@@ -211,19 +211,27 @@ export async function runLanOne(
           for (;;) {
             const t = await deps.internal.getTransferIntake(trfId);
             const live = steps[steps.length - 1];
+            live.trfId = trfId;
+            // 끝났으면 코드를 다시 읽지 않고 바로 다음 단계로 — 팝업이 곧장 다음 작업으로 바뀜(사용자 2026-11-26 "피킹 끝나면 자동으로 QR 닫고 분배패킹 팝업 바로")
+            if (done(t)) {
+              live.scan = [];
+              return { v: t, detail: `${t.state} · ${show(t)}` };
+            }
             live.detail = `${hint} · 지금 ${t.state} · ${show(t)}`;
             if (codes) live.scan = await codes().catch(() => live.scan);
-            live.trfId = trfId;
             onStep([...steps]);
-            if (done(t)) return { v: t, detail: `${t.state} · ${show(t)}` };
             if (Date.now() > until) throw new Error(`${opt.pdaWaitMin ?? 60}분 안에 끝나지 않음 — ${t.state}`);
-            await wait(3000);
+            await wait(2000);
           }
         });
       const TERM = ['DONE', 'PARTIAL', 'CANCELLED', 'EXCEPTION'];
       // 피킹 — 남은 작업의 지역 카드(지역 묶음) · 줄마다 위치·상품
+      // 작업이 다 끝남(부족 보고로 끝난 PARTIAL 포함) — 집음 수가 할당보다 적어도 피킹 단계는 끝
+      let pickTasksDone = false;
       const pickCodes = async () => {
-        const ts = (await deps.backend.listTasks(wave.waveId)).filter((x) => !TERM.includes(x.state));
+        const all = await deps.backend.listTasks(wave.waveId);
+        const ts = all.filter((x) => !TERM.includes(x.state));
+        pickTasksDone = all.length > 0 && ts.length === 0;
         const out: { label: string; value: string }[] = [];
         for (const x of ts) {
           if (x.regionCode) out.push({ label: `지역 카드 ${x.regionCode}`, value: x.regionCode });
@@ -247,7 +255,7 @@ export async function runLanOne(
         const stage = loc ? [{ label: '출고대기 자리(먼저)', value: stagingCodeFor(loc, mfcNo) }] : [];
         return [...stage, ...(await lpnCodes('검품할 박스', (x) => !x.inspection))];
       };
-      await waitStage('PDA 피킹', 'DC 업무 → 피킹 → 다음 작업 받기 → 칸·상품 스캔', (t) => sum(t, 'allocatedQty') > 0 && sum(t, 'pickedQty') >= sum(t, 'allocatedQty'), (t) => `집음 ${sum(t, 'pickedQty')}/${sum(t, 'allocatedQty')}`, pickCodes);
+      await waitStage('PDA 피킹', 'DC 업무 → 피킹 → 다음 작업 받기 → 칸·상품 스캔', (t) => (sum(t, 'allocatedQty') > 0 && sum(t, 'pickedQty') >= sum(t, 'allocatedQty')) || (pickTasksDone && t.state !== 'IN_WAVE'), (t) => `집음 ${sum(t, 'pickedQty')}/${sum(t, 'allocatedQty')}`, pickCodes);
       await waitStage('PDA 분배·패킹', 'DC 업무 → 분배 → 박스(LPN) 닫기', (t) => sum(t, 'pickedQty') > 0 && sum(t, 'sortedQty') >= sum(t, 'pickedQty'), (t) => `박스에 담음 ${sum(t, 'sortedQty')}/${sum(t, 'pickedQty')}`, async () => [...picks.map((_, i) => ({ label: `새 박스(LPN) ${i + 1} — 박스 찍으라 할 때만`, value: `${box.replace(/-1$/, '')}-${i + 1}` })), ...t0Items()]);
       await waitStage('PDA 검품', 'DC 업무 → 검품 → 출고대기 박스 스캔', (t) => sum(t, 'sortedQty') > 0 && sum(t, 'inspectedQty') >= sum(t, 'sortedQty'), (t) => `합격 ${sum(t, 'inspectedQty')}/${sum(t, 'sortedQty')}`, inspectCodes);
       await step('PDA 상차 — 도크 스캔 → 운행 → 박스 스캔 → 상차완료', async () => {
