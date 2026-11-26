@@ -1845,3 +1845,16 @@ tr.ex td { color: var(--muted); font-style: italic; }
 .lr-bridge button.on { background: #27ae60; border-color: #27ae60; color: #fff; }
 .lr-bridge-log { margin: 0; padding: 0 0 0 14px; font-size: 11px; color: var(--muted); display: grid; gap: 2px; }
 .lr-bridge-log li.bad { color: #eb5757; }
+/* PDA 코드 팝업 — 한 번에 QR 하나(옆 QR 오인식 방지) */
+.scan-pop-one { display: grid; gap: 8px; padding: 12px 14px 8px; border-bottom: 1px solid var(--line); }
+.scan-pop-step { justify-self: center; font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.scan-pop-nav { display: grid; grid-template-columns: auto 1fr; gap: 6px; }
+.scan-pop-nav button { height: 34px; border-radius: 8px; border: 1px solid var(--line); background: transparent; color: inherit; font-size: 12.5px; cursor: pointer; padding: 0 12px; }
+.scan-pop-nav button:last-child { background: #2f80ed; border-color: #2f80ed; color: #fff; font-weight: 700; }
+.scan-pop-nav button:disabled { opacity: .4; cursor: default; }
+.scan-pop-rest { list-style: none; margin: 0; padding: 6px 8px 10px; overflow: auto; display: grid; gap: 2px; }
+.scan-pop-rest button { width: 100%; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 6px 8px; border: 0; border-radius: 7px; background: transparent; color: inherit; text-align: left; cursor: pointer; font-size: 12px; }
+.scan-pop-rest span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.scan-pop-rest code { color: var(--muted); font-size: 11px; }
+.scan-pop-rest li.on button { background: color-mix(in srgb, #2f80ed 14%, transparent); }
+.scan-pop-rest li.on code { color: #2f80ed; }

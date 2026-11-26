@@ -857,7 +857,12 @@ export function LanScanPopup() {
   const { steps, busy, hideScan } = useLanRun();
   const cur = steps?.at(-1);
   const codes = busy && cur?.state === 'run' && cur.scan?.length ? cur.scan : null;
+  // 한 번에 QR 하나만 크게 — 여러 QR 이 한 화면에 있으면 카메라가 옆 QR 을 읽음(사용자 2026-11-26 "BOX-… 인식이 안돼", "문제 해결해").
+  // 고른 코드는 값으로 기억(목록이 바뀌어도 그대로), 없어지면 첫 코드
+  const [pick, setPick] = useState<string | null>(null);
   if (!codes) return null;
+  const selIdx = Math.max(0, codes.findIndex((c) => c.value === pick));
+  const sel = codes[selIdx];
   const title = cur?.name.replace(/^PDA /, 'PDA · ').split(' — ')[0];
   const now = cur?.detail.split(' · ').slice(-1)[0];
   // 접으면 위쪽 가운데 작은 띠(제목·진행·코드 수), 누르면 다시 펼침 — 사용자 2026-11-26 "접었다 펼 수 있게"
@@ -879,11 +884,30 @@ export function LanScanPopup() {
           ▴
         </button>
       </div>
-      <div className="scan-pop-list">
-        {codes.map((c) => (
-          <Barcode key={c.label + c.value} value={c.value} caption={c.label} />
-        ))}
+      <div className="scan-pop-one">
+        <div className="scan-pop-step">
+          {selIdx + 1} / {codes.length}
+        </div>
+        <Barcode key={sel.value} value={sel.value} caption={sel.label} />
+        <div className="scan-pop-nav">
+          <button disabled={selIdx === 0} onClick={() => setPick(codes[selIdx - 1].value)}>
+            ◀ 앞
+          </button>
+          <button disabled={selIdx === codes.length - 1} onClick={() => setPick(codes[selIdx + 1].value)}>
+            다음 코드 ▶
+          </button>
+        </div>
       </div>
+      <ol className="scan-pop-rest">
+        {codes.map((c, i) => (
+          <li key={c.label + c.value} className={i === selIdx ? 'on' : ''}>
+            <button onClick={() => setPick(c.value)}>
+              <span>{c.label}</span>
+              <code>{c.value}</code>
+            </button>
+          </li>
+        ))}
+      </ol>
     </div>,
     document.body,
   );
