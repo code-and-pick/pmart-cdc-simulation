@@ -19,6 +19,8 @@ const FLOORS: { key: FloorKey; text: string }[] = [
   { key: 7, text: '7F 생활용품' },
 ];
 
+const clockOf = (sec: number) => `${String(Math.floor(sec / 3600) % 24).padStart(2, '0')}:${String(Math.floor(sec / 60) % 60).padStart(2, '0')}`;
+
 export function TopBar() {
   const { settings, restart, sim, ticker } = useApp();
   const view = useView();
@@ -50,6 +52,22 @@ export function TopBar() {
         <span className={`live ${sim.speed === 0 ? 'paused' : ''}`} />
         {sim.clockText()}
       </div>
+      {/* 시각 건너뛰기 — 오전(보충만)·석간 피킹을 빨리 넘긴다(사용자 2026-11-26) */}
+      {sim.skipping !== null ? (
+        <div className="seg skip">
+          <button className="on" onClick={() => sim.cancelSkip()} title="멈추면 지금 시각에서 이어 갑니다">
+            {clockOf(sim.skipping)} 로 건너뛰는 중 · 멈추기
+          </button>
+        </div>
+      ) : (
+        <div className="seg skip">
+          {[13, 22].map((h) => (
+            <button key={h} onClick={() => void sim.skipTo(h).then(() => ticker.bump())} title={h === 13 ? '석간 피킹 시작(13:00)으로' : '배차·하강·상차(22:00)로'}>
+              {h}:00 ▶
+            </button>
+          ))}
+        </div>
+      )}
       {/* 좁은 창(약 1,000px 아래)에서는 배속 버튼 대신 고르기 상자(사용자 2026-11-25 "836px 에서 30×~120× 가 화면 밖") */}
       <select
         className="speed-select"

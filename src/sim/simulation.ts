@@ -424,6 +424,42 @@ export class Simulation implements DutyClock {
     }
   }
 
+  /** 건너뛰는 중이면 목표 시각(초) — 화면이 진행을 보여 준다 */
+  skipping: number | null = null;
+  private skipCancel = false;
+
+  /**
+   * 다음 h 시(오늘 지났으면 내일)까지 빨리 돌린다 — 사용자 2026-11-26 "13시, 22시로 바로 넘어가는 버튼".
+   * 화면 없이 도는 하루 돌리기(scripts/day-report.ts)와 같은 방식: 5초씩 나아가며 작업자 다음 일(약속)을 풀어 준다. 화면이 멈추지 않게 잘게 나눠 쉰다.
+   */
+  async skipTo(h: number): Promise<void> {
+    if (this.skipping !== null) return;
+    const day = Math.floor(this.time / 86_400);
+    let target = day * 86_400 + h * 3600;
+    if (target <= this.time + 1) target += 86_400;
+    const speed = this.speed;
+    this.speed = 0;
+    this.skipping = target;
+    this.skipCancel = false;
+    try {
+      while (this.time < target && !this.skipCancel) {
+        const until = performance.now() + 150; // 한 번에 150ms 계산하고 화면에 넘김(진행 표시는 보이고, 그리기 몫이 적게)
+        while (this.time < target && performance.now() < until) {
+          this.step(Math.min(5, target - this.time));
+          for (let i = 0; i < 40; i++) await Promise.resolve();
+        }
+        await new Promise((r) => setTimeout(r, 0));
+      }
+    } finally {
+      this.skipping = null;
+      this.speed = speed || 15;
+    }
+  }
+
+  cancelSkip() {
+    this.skipCancel = true;
+  }
+
   step(dt: number) {
     this.time += dt;
     this.coordinate();
