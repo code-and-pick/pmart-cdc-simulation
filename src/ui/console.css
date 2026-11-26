@@ -1800,3 +1800,5 @@ tr.ex td { color: var(--muted); font-style: italic; }
 .lr { grid-template-columns: minmax(0, 1fr); }
 .lr-form { grid-template-columns: 34px minmax(0, 1fr); }
 .lr-sel { min-width: 0; width: 100%; }
+/* 실서버 TRF 흐름 카드 — 보라 테두리 빼고 다른 카드와 같은 테두리(사용자 2026-11-26 "보라 형광테두리 별론데") */
+.sec.wflow.lan-trf { border-color: var(--line); box-shadow: none; }
