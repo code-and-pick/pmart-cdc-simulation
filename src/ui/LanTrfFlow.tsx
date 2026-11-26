@@ -151,12 +151,17 @@ const EV_KO: Record<string, string> = {
   TASK_COMPLETED: '피킹 끝',
 };
 
-export function LanTrfFlow() {
+/** open = 이 탭에서 펼쳐 둘지(TRF 탭만 펼침, 다른 탭(운송 포함)은 접힌 띠 — 사용자 2026-11-26 "다른 탭 눌러도 운송탭만 떠 있어") */
+export function LanTrfFlow({ open = true }: { open?: boolean }) {
   const { real } = useApp();
   const { trfId } = useLanRun();
   const [d, setD] = useState<Data | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  const [fold, setFold] = useState(false);
+  // 탭이 바뀌면 그 탭 기본값으로 — 직접 접거나 펼친 건 그 탭 안에서만
+  const [mine, setMine] = useState<boolean | null>(null);
+  useEffect(() => setMine(null), [open]);
+  const fold = mine ?? !open;
+  const setFold = (v: boolean) => setMine(v);
   const [recent, setRecent] = useState<Recent[]>([]);
   // 늘 보이게 — 고른 TRF 가 없으면 가장 최근 시험 TRF 를 고름, 고를 수 있게 최근 시험 TRF 목록(사용자 2026-11-26 "이 UI 좋았는데 계속 볼 수 있게")
   useEffect(() => {

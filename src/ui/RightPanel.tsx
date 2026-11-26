@@ -697,7 +697,7 @@ export function RightPanel() {
     <div className="panel right">
       {/* 고른 작업자의 흐름·실시간 자리 — 맨 위(사용자 2026-11-26) */}
       {/* 실서버 TRF 흐름(PDA 로 하는 TRF) — 맨 위(사용자 2026-11-26) */}
-      <LanTrfFlow />
+      <LanTrfFlow open={!view.rightView || view.rightView === 'trf'} />
       <WorkerFlow />
       {view.rightView && (
         <>
