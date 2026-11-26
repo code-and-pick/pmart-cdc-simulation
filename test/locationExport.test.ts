@@ -10,7 +10,7 @@ describe('위치 목록 내보내기 [CDC-7, cdc-location 0.2.0]', () => {
     // 18,000 = SKU 자리(사용자 2026-11-26 — 팔레트 칸 수가 아님). 피킹 자리(PICK_FACE)가 SKU 18,000 을 넘고, 보관(RESERVE)은 냉장 랙을 며칠치로 줄여 12,768
     expect(ex.counts.PICK_FACE).toBeGreaterThanOrEqual(18_000);
     expect(ex.counts.RESERVE).toBe(12_768);
-    expect(ex.counts.STAGING).toBe(28 + 30 * 2 + 2 * 3); // 출고대기 5F 14 × 2 · 6F·7F 30 + 승강기 문 2 × 3층(도크가 층마다 생겨 승강기 4 → 2)
+    expect(ex.counts.STAGING).toBe(36 + 30 * 2 + 2 * 3); // 출고대기 5F 목적지 9곳 × 2칸 × 2글자 · 6F·7F 30 + 승강기 문 2 × 3층
     expect(ex.counts.DOCK).toBe(2 + 3 + 4); // 냉동 5F 2 · 냉장 6F 3 · 상온 7F 4
     expect(new Set(ex.items.map((i) => i.locationCode)).size).toBe(ex.items.length);
     for (const i of ex.items) {

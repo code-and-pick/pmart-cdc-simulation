@@ -251,7 +251,9 @@ export function dasRows(r: Rect): DasRow[] {
 }
 /** MFC m(0~)이 쓰는 칸 번호 — 줄 앞쪽부터 띄엄띄엄 */
 export function mfcSlotIndex(m: number, n: number): number {
-  return Math.min(n - 1, 2 + m * Math.max(1, Math.floor((n - 4) / MFCS.length)));
+  const M = MFCS.length;
+  if (n - 4 < M) return Math.min(n - 1, Math.floor(((m + 0.5) * n) / M)); // 줄이 짧으면 고르게(목적지 9곳)
+  return Math.min(n - 1, 2 + m * Math.max(1, Math.floor((n - 4) / M)));
 }
 
 /** 오토스토어 포트 x 들 — 북쪽(통로 쪽) 면에 둘. 화면(AutoStore)과 같은 계산 */

@@ -1,6 +1,6 @@
 // 사용자 고정값(CLAUDE.md "절대 바꾸지 않는다")과 층 면적 — 바뀌면 이 시험이 깨진다.
 import { describe, expect, it } from 'vitest';
-import { CDC_FACTS, FLOOR_PYEONG, MFCS } from '../src/config';
+import { CDC_FACTS, FLOOR_PYEONG, MFCS, isEtc } from '../src/config';
 import { CHILGOK_FLOORS } from '../src/domain/sites/chilgok';
 
 describe('칠곡 DC 고정값 [고정]', () => {
@@ -32,8 +32,9 @@ describe('칠곡 DC 고정값 [고정]', () => {
     expect(storage).toEqual({ 상온: 3300, 냉동: 1000, 냉장: 1700 });
   });
 
-  it('공급 대상 MFC 5곳, 출고대기 01~05 [정본 CDC-6]', () => {
-    expect(MFCS.map((m) => m.id)).toEqual(['MFC-BJG-01', 'MFC-BNG-01', 'MFC-MOKPO-01', 'MFC-SEJ-01', 'MFC-CHC-01']);
-    expect(MFCS.map((m) => m.staging)).toEqual([1, 2, 3, 4, 5]);
+  it('공급 대상 MFC 5곳(출고대기 01~05) [정본 CDC-6] + 권역별 기타 센터 4곳(06~09, 물량 30만 — 사용자 2026-11-26)', () => {
+    expect(MFCS.filter((m) => !isEtc(m.id)).map((m) => m.id)).toEqual(['MFC-BJG-01', 'MFC-BNG-01', 'MFC-MOKPO-01', 'MFC-SEJ-01', 'MFC-CHC-01']);
+    expect(MFCS.map((m) => m.staging)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    expect(MFCS.filter((m) => isEtc(m.id)).map((m) => m.region)).toEqual(['부산권', '호남권', '충청권', '강원권']);
   });
 });

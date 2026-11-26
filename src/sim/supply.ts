@@ -3,7 +3,7 @@
 // 이관요청서는 (DC, MFC, 출고일, 온도대) 단위로 1건 — 요청서 1건 = 차량 1대, 나누지 않는다 [정본 TMS 2.2 D-10].
 // 그래서 MFC 마다 하루 TRF 를 온도대별로 만든다(1요청·1이관·1출발).
 
-import { CENTER_ID, MFCS, SUPPLY } from '../config';
+import { CENTER_ID, isEtc, MFCS, SUPPLY } from '../config';
 import type { Catalog } from '../domain/catalog';
 import type { TemperatureZone, TransferIntakeInput } from '../domain/contract';
 import { Rng } from '../util/rng';
@@ -23,23 +23,31 @@ export function makeTransfers(catalog: Catalog, baseDate: string, seed: number, 
   const day = baseDate.replace(/-/g, '').slice(2);
   return MFCS.flatMap((m) => {
     const picked = new Set<number>();
-    const want = Math.min(linesPerMfc, catalog.skus.length);
+    // 기타 센터는 MFC 한 곳의 etcLines/linesPerMfc 배(시험에서 linesPerMfc 를 줄이면 같이 줄어든다)
+    const want = Math.min(isEtc(m.id) ? Math.round((linesPerMfc * SUPPLY.etcLines) / SUPPLY.linesPerMfc) : linesPerMfc, catalog.skus.length);
     // 잘 나가는 상품(모든 MFC 가 같이 요청) — 카탈로그 33번째마다(약 3%)
     const step = Math.max(1, Math.round(1 / SUPPLY.popularPool));
     const pool = catalog.skus.map((_, i) => i).filter((i) => i % step === 0);
     while (picked.size < Math.min(Math.round(want * SUPPLY.popularShare), pool.length)) picked.add(pool[rng.int(0, pool.length - 1)]);
     while (picked.size < want) picked.add(rng.int(0, catalog.skus.length - 1));
     const lines = [...picked].sort((a, b) => a - b).map((i) => ({ sku: catalog.skus[i].sku, temp: catalog.skus[i].temp, approvedQty: rng.int(SUPPLY.qty[0], SUPPLY.qty[1]) }));
-    return TEMPS.map((temp) => ({ temp, ls: lines.filter((l) => l.temp === temp) }))
+    // 기타 센터는 묶인 피패킹센터마다 TRF 하나(품목 etcLinesPerTrf 개씩) — TRF 하나가 차 한 대를 넘지 않게(단일 출발)
+    const per = isEtc(m.id) ? Math.max(1, Math.round((linesPerMfc * SUPPLY.etcLinesPerTrf) / SUPPLY.linesPerMfc)) : Infinity;
+    return TEMPS.flatMap((temp) => {
+      const ls = lines.filter((l) => l.temp === temp);
+      const parts: { temp: TemperatureZone; ls: typeof ls; part: number }[] = [];
+      for (let i = 0, k = 1; i < ls.length; i += per === Infinity ? ls.length : per, k++) parts.push({ temp, ls: ls.slice(i, i + (per === Infinity ? ls.length : per)), part: per === Infinity ? 0 : k });
+      return parts;
+    })
       .filter((g) => g.ls.length > 0)
       .map(
         (g) =>
           ({
-            trfId: `TRF-${day}-${mfcShort(m.id)}-${TEMP_SUFFIX[g.temp]}`,
+            trfId: `TRF-${day}-${mfcShort(m.id)}-${TEMP_SUFFIX[g.temp]}${g.part ? `-P${g.part}` : ''}`,
             trfVersion: 1,
             cdcId: CENTER_ID,
             mfcId: m.id,
-            approvalRef: `APR-${day}-${m.staging}-${TEMP_SUFFIX[g.temp]}`,
+            approvalRef: `APR-${day}-${m.staging}-${TEMP_SUFFIX[g.temp]}${g.part ? `-P${g.part}` : ''}`,
             deadlineMeaning: 'ARRIVAL',
             dueAt: nextDayIso(baseDate, SUPPLY.dueNextDayMin),
             conditions: [{ kind: 'TEMPERATURE_ZONE', value: g.temp }],

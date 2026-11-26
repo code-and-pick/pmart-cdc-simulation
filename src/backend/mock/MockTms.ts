@@ -62,10 +62,11 @@ export class MockTms {
   private seq = 0;
 
   constructor(private readonly opt: MockTmsOptions) {
-    // 정규차: 노선 × 온도대 한 대씩 [시뮬 — fleet 등록 API 없음(R-14)]
+    // 정규차: 노선 × 온도대 × 최대 TMS.vehiclesPerRouteTemp 대 [시뮬 — fleet 등록 API 없음(R-14), 물량 30만(사용자 2026-11-26)]
     let n = 0;
     for (const r of TMS.routes) {
-      for (const temp of ['AMBIENT', 'CHILLED', 'FROZEN'] as const) {
+      for (const temp of ['AMBIENT', 'CHILLED', 'FROZEN'] as const)
+      for (let v = 0; v < TMS.vehiclesPerRouteTemp; v++) {
         n += 1;
         const no = String(n).padStart(2, '0');
         this.vehicles.push({
@@ -168,7 +169,7 @@ export class MockTms {
       for (const temp of ['AMBIENT', 'CHILLED', 'FROZEN'] as const) {
         const v = this.vehicles[vi];
         const d = this.drivers[vi];
-        vi += 1;
+        vi += TMS.vehiclesPerRouteTemp;
         const legs = [`${CENTER_ID}>${r.stops[0]}`, ...r.stops.slice(1).map((s, i) => `${r.stops[i]}>${s}`)];
         const travel = legs.map((k) => TMS.travelMin[k] ?? 120);
         const depart = Math.max(dayStartMin + 23 * 60, dayStartMin + TMS.firstArrivalTarget - travel[0]);
@@ -191,14 +192,30 @@ export class MockTms {
       let vi = 0;
       for (const r of TMS.routes) {
         for (const temp of ['AMBIENT', 'CHILLED', 'FROZEN'] as const) {
-          const vehicle0 = this.vehicles[vi];
-          const driver0 = this.drivers[vi];
-          vi += 1;
-          const allStops = r.stops.map((mfcId) => ({ mfcId, trfIds: trfs.filter((t) => t.mfcId === mfcId && trfTemp(t) === temp && t.state !== 'CANCELLED').map((t) => t.trfId) })).filter((s) => s.trfIds.length);
-          if (!allStops.length) continue; // 결행
-          const stops = allStops;
-          const vehicle = vehicle0;
-          const driver = driver0;
+          const pool = this.vehicles.slice(vi, vi + TMS.vehiclesPerRouteTemp);
+          const drivers = this.drivers.slice(vi, vi + TMS.vehiclesPerRouteTemp);
+          vi += TMS.vehiclesPerRouteTemp;
+          const stopsAll = r.stops.map((mfcId) => ({ mfcId, trfIds: trfs.filter((t) => t.mfcId === mfcId && trfTemp(t) === temp && t.state !== 'CANCELLED').map((t) => t.trfId) })).filter((s) => s.trfIds.length);
+          if (!stopsAll.length) continue; // 결행
+          // 차 나누기 — TRF 는 통째로(단일 출발), 방문 순서대로 R/T 20 까지 담고 넘치면 다음 차(R/T 카운팅 값, 모르면 1)
+          const loads: { mfcId: string; trfIds: string[] }[][] = [[]];
+          let used = 0;
+          for (const st of stopsAll)
+            for (const id of st.trfIds) {
+              const need = Math.max(1, rtByTrf?.get(id) ?? 1);
+              if (used > 0 && used + need > TMS.vehicle.maxRt && loads.length < pool.length) {
+                loads.push([]);
+                used = 0;
+              }
+              const cur = loads[loads.length - 1];
+              const last = cur[cur.length - 1];
+              if (last && last.mfcId === st.mfcId) last.trfIds.push(id);
+              else cur.push({ mfcId: st.mfcId, trfIds: [id] });
+              used += need;
+            }
+          loads.forEach((stops, li) => {
+          const vehicle = pool[li];
+          const driver = drivers[li];
           const rt = stops.reduce((a, st) => a + st.trfIds.reduce((b, id) => b + (rtByTrf?.get(id) ?? 0), 0), 0);
           const legs = [`${CENTER_ID}>${stops[0].mfcId}`, ...stops.slice(1).map((s, i) => `${stops[i].mfcId}>${s.mfcId}`)];
           const travel = legs.map((k) => TMS.travelMin[k] ?? 120);
@@ -242,6 +259,7 @@ export class MockTms {
           driver.status = 'RESERVED';
           out.push(structuredClone(plan));
           this.emit('TripAssigned', `${tripId} ${r.region} ${temp} ${vehicle.plateNo} · ${driver.displayName} · 출차 ${fmt(depart)}${rt > TMS.vehicle.maxRt ? ` · R/T ${rt}/${TMS.vehicle.maxRt} 넘침(정규차로 봄)` : ''}`);
+          });
         }
       }
       return out;

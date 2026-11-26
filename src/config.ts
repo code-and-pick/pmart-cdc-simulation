@@ -131,6 +131,14 @@ export const SKU_TARGET = { total: 18_000, FROZEN: 4_000, CHILLED: 5_500, AMBIEN
 export const SKU_PLACE = {
   /** 6F 야채(바닥 적치 → 분배) SKU [가정] */
   veg: 300,
+  /**
+   * 6F 냉장 자리 계산 [시뮬, 사용자 2026-11-26 "바닥 적치 레인이 너무 늘어난 거 아니야? 계산상 맞아? 피킹랙이 조금 더 늘어나야"]:
+   * 야채 레인 = (야채 SKU + 잘 나가는 야채 추가 자리 3칸씩) × 여유 1.1 — 전엔 랙을 줄인 빈 바닥을 레인으로 다 채워 1,620칸(약 1,300칸 빈 팔레트)
+   * 냉장 피킹 선반 = 라인 SKU × 여유 1.2(새 상품·보충 넘침용 빈 칸) — 전엔 SKU 수와 딱 같았음
+   */
+  vegExtraPerPopular: 3,
+  vegSpare: 1.1,
+  chilledShelfSpare: 1.2,
   /** 5F E·F 선반 SKU(구역마다) [가정] — 5F 띠 공간에 들어가는 만큼 */
   efShelf: 630,
   /**
@@ -198,7 +206,14 @@ export const MFCS = [
   { id: 'MFC-MOKPO-01', name: '2호점 목포', region: '호남권', staging: 3 },
   { id: 'MFC-SEJ-01', name: '3호점 세종', region: '충청권', staging: 4 },
   { id: 'MFC-CHC-01', name: '4호점 춘천', region: '강원권', staging: 5 },
+  // 기타 센터 — 권역마다 그 권역 다른 피패킹센터 몫을 묶은 목적지(사용자 2026-11-26 "물량 30만 · 권역별 기타 센터") [시뮬]
+  { id: 'ETC-BUSAN', name: '기타 부산권', region: '부산권', staging: 6 },
+  { id: 'ETC-HONAM', name: '기타 호남권', region: '호남권', staging: 7 },
+  { id: 'ETC-CHUNGCHEONG', name: '기타 충청권', region: '충청권', staging: 8 },
+  { id: 'ETC-GANGWON', name: '기타 강원권', region: '강원권', staging: 9 },
 ] as const;
+/** 기타 센터인지(묶음 목적지) */
+export const isEtc = (id: string) => id.startsWith('ETC-');
 
 /** 하루 시간표(분, 0시 기준) [현장] 알바몬 후기·우아한청년들 하루 일정 / [가정] 주간조 */
 export const SHIFT = {
@@ -248,6 +263,12 @@ export const SUPPLY = {
   popularPool: 0.02,
   /** MFC 한 곳의 하루 TRF 품목 수 [가정] — 고회전 2,000 SKU 의 30%, 석간 FC 16명이 저녁 내내 집는 양으로 맞춤 */
   linesPerMfc: 600,
+  /**
+   * 기타 센터 한 곳 하루 품목 수 · TRF 하나 품목 수 [시뮬 — 하루 약 30만(사용자 2026-11-26)]: MFC 5곳 합 약 8.1만 + 기타 4곳 × 약 5.5만.
+   * TRF 하나는 한 차로만 간다(WMS 단일 출발) → 기타 센터 몫을 여러 TRF(묶인 피패킹센터들)로 나눠 한 TRF 가 차 한 대(20 R/T)를 넘지 않게.
+   */
+  etcLines: 2_000,
+  etcLinesPerTrf: 250,
   /** 품목당 승인 수량 [가정] */
   qty: [6, 48] as const,
   /** MFC 도착 마감 — 다음 날 09:00 (MFC 오픈) [현장 하루 일정] */
@@ -428,7 +449,14 @@ export const TMS = {
     { routeId: 'RT-HONAM', region: '호남권', stops: ['MFC-MOKPO-01'] },
     { routeId: 'RT-CHUNGCHEONG', region: '충청권', stops: ['MFC-SEJ-01'] },
     { routeId: 'RT-GANGWON', region: '강원권', stops: ['MFC-CHC-01'] },
+    // 기타 센터 노선 — 권역 MFC 와 같은 주행시간 [가정, 사용자 노선표에서]
+    { routeId: 'RT-BUSAN-ETC', region: '부산권', stops: ['ETC-BUSAN'] },
+    { routeId: 'RT-HONAM-ETC', region: '호남권', stops: ['ETC-HONAM'] },
+    { routeId: 'RT-CHUNGCHEONG-ETC', region: '충청권', stops: ['ETC-CHUNGCHEONG'] },
+    { routeId: 'RT-GANGWON-ETC', region: '강원권', stops: ['ETC-GANGWON'] },
   ],
+  /** 노선 × 온도대마다 정규차 최대 대수 [시뮬 — 30만이면 기타 노선은 여러 대] */
+  vehiclesPerRouteTemp: 8,
   /**
    * 주행 시간(분) — 'CDC01' 은 칠곡 [사용자 2026-11-25 노선표]. 편도 = 칠곡 → 목포 4:30 · 세종 2:30 · 춘천 4:30 · 부산진구 2:30, 부산진구 → 부산남구 0:20.
    * 돌아오는 길은 같은 시간으로 본다(부산남구 → 칠곡 = 칠곡 → 부산진구 2:30) [가정]. 정차마다 하차·인계 30분(부산 통합 노선 작업 1시간 = 30분 × 2).
@@ -443,6 +471,14 @@ export const TMS = {
     'MFC-SEJ-01>CDC01': 150,
     'CDC01>MFC-CHC-01': 270,
     'MFC-CHC-01>CDC01': 270,
+    'CDC01>ETC-BUSAN': 150,
+    'ETC-BUSAN>CDC01': 150,
+    'CDC01>ETC-HONAM': 270,
+    'ETC-HONAM>CDC01': 270,
+    'CDC01>ETC-CHUNGCHEONG': 150,
+    'ETC-CHUNGCHEONG>CDC01': 150,
+    'CDC01>ETC-GANGWON': 270,
+    'ETC-GANGWON>CDC01': 270,
   } as Record<string, number>,
   /** 첫 MFC 도착 목표(분, D일 0시 기준 — 다음 날 05:30) [사용자 2026-11-25 "첫 MFC 도착 목표 05:30"] — 출차 = 05:30 − 첫 구간 주행 */
   firstArrivalTarget: 24 * 60 + 5 * 60 + 30,
@@ -476,10 +512,10 @@ export const AISLE_PICK_METHOD = {
  * 지역 ↔ MFC 대응표 처음 값 [확정 — cdc-outbound 0.9.0 `GET /cdcs/{cdcId}/regions` 칠곡 처음 값, chilgok-dc.md CDC-6]. 지역 코드 = PDA 지역 바코드 값.
  */
 export const REGIONS: { regionCode: string; regionName: string; mfcIds: string[] }[] = [
-  { regionCode: 'BUSAN', regionName: '부산권', mfcIds: ['MFC-BJG-01', 'MFC-BNG-01'] },
-  { regionCode: 'CHUNGCHEONG', regionName: '충청권', mfcIds: ['MFC-SEJ-01'] },
-  { regionCode: 'GANGWON', regionName: '강원권', mfcIds: ['MFC-CHC-01'] },
-  { regionCode: 'HONAM', regionName: '호남권', mfcIds: ['MFC-MOKPO-01'] },
+  { regionCode: 'BUSAN', regionName: '부산권', mfcIds: ['MFC-BJG-01', 'MFC-BNG-01', 'ETC-BUSAN'] },
+  { regionCode: 'CHUNGCHEONG', regionName: '충청권', mfcIds: ['MFC-SEJ-01', 'ETC-CHUNGCHEONG'] },
+  { regionCode: 'GANGWON', regionName: '강원권', mfcIds: ['MFC-CHC-01', 'ETC-GANGWON'] },
+  { regionCode: 'HONAM', regionName: '호남권', mfcIds: ['MFC-MOKPO-01', 'ETC-HONAM'] },
 ];
 
 /**

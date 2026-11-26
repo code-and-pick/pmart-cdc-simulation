@@ -6,7 +6,7 @@
 // 방 밖(승강기·출고대기)으로는 닫은 박스와 R/T 만 나간다(에어커튼). 7F H 작은 비식재는 오토스토어(§5).
 // 위치 코드 형식(CDC01-구역-층-통로-베이-단-슬롯)은 그대로 [정본 CDC-3].
 
-import { AISLE_PITCH, AUTOSTORE, BUILDING, FLOW, DOCK_PITCH, DOCKS, STAGING_X0, CAPACITY, CDC_FACTS, CENTER_ID, CHILLED_RACK, FLOOR_PYEONG, MFCS, LIFTS_PER_FLOOR, PYEONG_M2, RACK, SHELF, SKU_PLACE, SKU_TARGET, STAGING_SLOTS, STORE, VEG_LANES } from '../config';
+import { AISLE_PITCH, AUTOSTORE, BUILDING, FLOW, DOCK_PITCH, DOCKS, STAGING_X0, CAPACITY, CDC_FACTS, CENTER_ID, CHILLED_RACK, FLOOR_PYEONG, MFCS, LIFTS_PER_FLOOR, PYEONG_M2, RACK, SHELF, SKU_PLACE, SKU_TARGET, STAGING_SLOTS, STORE, SUPPLY, VEG_LANES } from '../config';
 import { CHILGOK_FLOORS, type EquipKind, type FloorNo, type FloorSpec, type RackZoneSpec, type Temp } from './sites/chilgok';
 
 export interface Rect {
@@ -512,13 +512,14 @@ class FloorBuilder {
       this.lifts.push({ no: i + 1, code: locationCode(this.spec.liftLetter, this.floor, 92, i + 1, 0, 1), rect: { x0: 1 + i * (liftW + 1), z0: 0.5, x1: 1 + i * (liftW + 1) + liftW, z1: 0.5 + liftW } });
     }
     const liftEnd = 1 + LIFTS_PER_FLOOR * (liftW + 1);
-    const slotW = 1.4;
+    const slotW = 1.2; // R/T 0.8m + 틈 — 목적지 9곳(MFC 5 + 기타 4)이 5F 에도 들어가게 1.4 → 1.2(사용자 2026-11-26 물량 30만)
     // 출고대기는 x 23 부터(승강기 4대 시절 자리 그대로 — 그 서쪽 빈자리는 도크) [사용자 2026-11-26 층마다 도크]
     let sx = Math.max(liftEnd + 2, STAGING_X0);
     this.spec.stagingLetters.forEach((letter, li) => {
       const temp: Temp = this.spec.zones.find((z) => z.letter === letter)?.temp ?? 'AMBIENT';
       // 출고대기를 두 글자로 나누는 층(5F 상온·냉동)은 짝수로 — 앞뒤 줄 칸 수가 같게(사용자 2026-11-26 "하나만 튀어나온 칸 없애")
-      const per = this.spec.stagingLetters.length > 1 ? Math.floor(STAGING_SLOTS / 4) * 2 : STAGING_SLOTS;
+      // 두 글자 층(5F)은 목적지마다 앞뒤 2칸(MFC 5 + 기타 4 = 9곳 → 18칸), 한 글자 층은 STAGING_SLOTS
+      const per = this.spec.stagingLetters.length > 1 ? MFCS.length * 2 : STAGING_SLOTS;
       // MFC 별 칸 묶음(사용자 2026-11-26 "MFC 별로 칸 묶음") — stagingCells: 01~05 = MFC 머리 칸(앞줄, 휠소터 슈트가 닿는 곳), 그 뒤 번호는 MFC 묶음의 나머지 칸, 남는 칸은 맨 끝
       const cells = stagingCells(per);
       for (let k = 1; k <= per; k++) {
@@ -538,7 +539,7 @@ class FloorBuilder {
           pos: { x: sx + col * slotW + slotW / 2, y: 0, z: 1.5 + row * 2.2 },
         });
       }
-      sx += Math.ceil(per / 2) * slotW + (li === 0 ? 3 : 0);
+      sx += Math.ceil(per / 2) * slotW + (li === 0 ? 1.4 : 0); // 글자 사이 틈 3 → 1.4m — 목적지 9곳 출고대기 동쪽에 5F 냉동 도크 2개가 들어가게(서쪽이면 승강기 옆 대기 자리와 겹침, 2026-11-26)
     });
     return sx;
   }
@@ -786,8 +787,8 @@ export function buildLayout(): Layout {
       { x0: shX0, z0: bandDepth + 0.6, x1: width - 22, z1: mid - 0.8 },
       { x0: shX0, z0: mid + 0.8, x1: width - 22, z1: depth - 1.2 },
     ],
-    SKU_TARGET.CHILLED - SKU_PLACE.veg,
-    '냉장 B 피킹 선반 (라인 상품)',
+    Math.ceil((SKU_TARGET.CHILLED - SKU_PLACE.veg) * SKU_PLACE.chilledShelfSpare),
+    '냉장 G 피킹 선반 (라인 상품)',
   );
   // 냉장 방 안, 출고대기 바로 앞: 휠소터 줄 → DAS 존(컨베이어로 상품이 들어옴 — 핸드자키 대신, 사용자 §9). 동쪽: 분배(크레이트) → 야채 바닥 레인
   const [b0, b1] = f6.stagingSpan('G');
@@ -799,7 +800,17 @@ export function buildLayout(): Layout {
   const splitZ0 = bandDepth + 0.6;
   const splitZ1 = splitZ0 + 9.2;
   f6.equip('SPLIT', '분배 (MFC 크레이트 — 출고 용기)', { x0: ex0, z0: splitZ0, x1: width - 1, z1: splitZ1 });
-  f6.vegLanes('G', { x0: ex0, z0: splitZ1 + 1, x1: width - 1, z1: depth - 1 }, SKU_PLACE.veg);
+  // 야채 레인은 필요한 만큼만(동쪽 벽 쪽) — 계산: (야채 SKU + 잘 나가는 야채 × 추가 자리) × 여유
+  {
+    const popularVeg = Math.ceil(SKU_PLACE.veg * SUPPLY.popularPool);
+    const needCells = Math.ceil((SKU_PLACE.veg + popularVeg * SKU_PLACE.vegExtraPerPopular) * SKU_PLACE.vegSpare);
+    const vz0 = splitZ1 + 1;
+    const vz1 = depth - 1;
+    const per = Math.floor((vz1 - vz0 - 1) / VEG_LANES.posLen);
+    const lanes = Math.ceil(needCells / per);
+    const vw = lanes * (VEG_LANES.laneW + VEG_LANES.gap);
+    f6.vegLanes('G', { x0: width - 1 - vw, z0: vz0, x1: width - 1, z1: vz1 }, SKU_PLACE.veg);
+  }
   f6.equip('INBOUND', '입고 검수 (냉장)', { x0: 2, z0: DAS_Z0, x1: Math.min(16, b0 - 1), z1: sz1 }, 'CHILLED');
   f6.coldRoom(
     'CHILLED',
@@ -830,7 +841,7 @@ export function buildLayout(): Layout {
 const FRZ_INBOUND_W = 4; // 전실 선반이 통로 단위라 남는 폭 약 4.5m — 4m × 약 10m(팔레트 6장 정도)
 
 /** MFC 출고대기 자리 수(PPC-01~05 — 휠소터 슈트) */
-const MFC_SLOTS = 5;
+const MFC_SLOTS = MFCS.length; // 목적지 머리 칸(MFC 5 + 기타 4)
 
 export function capacityReport(floors: FloorLayout[]): CapacityReport {
   const temps: Temp[] = ['FROZEN', 'CHILLED', 'AMBIENT'];

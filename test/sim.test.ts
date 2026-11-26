@@ -1,5 +1,6 @@
 // 하루 돌리기 — 화면 없이 08:00 ~ 22:30. 보충 → Wave 배포 → FC 피킹 → 분배·라인 → 자키 출고대기.
 import { describe, expect, it } from 'vitest';
+import { isEtc } from '../src/config';
 import { MockBackend } from '../src/backend/mock/MockBackend';
 import { buildCatalog } from '../src/domain/catalog';
 import { buildLayout } from '../src/domain/layout';
@@ -47,7 +48,8 @@ describe('하루 돌리기', () => {
     const initial = backend.ledger.totals();
 
     await runUntil(sim, 12.9);
-    expect(backend.listTransfers()).toHaveLength(15); // MFC 5곳 × 온도대 3 (TMS D-10)
+    expect(backend.listTransfers().filter((t) => !isEtc(t.mfcId))).toHaveLength(15); // MFC 5곳 × 온도대 3 (TMS D-10)
+    expect(backend.listTransfers().some((t) => isEtc(t.mfcId))).toBe(true); // 기타 센터(물량 30만)
     expect(backend.replenishmentNeeds()).toEqual([]); // 주간조가 13시 전에 보충을 끝냄
     expect(sim.agents.filter((a) => a.role === 'REPL' && a.shift === 'DAY').some((a) => a.done > 0)).toBe(true);
 
