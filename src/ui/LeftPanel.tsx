@@ -1,5 +1,6 @@
 // 왼쪽 패널 — 설정(센터 고정값·시간표) · 구역(층·칸 정보) · 도움말. MFC 시뮬레이터 LeftPanel 의 sec/srow 모양을 쓴다.
 import { Fragment, lazy, Suspense, useEffect, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { runLanOne, type RunStep } from '../backend/http/lanRun';
 import { checkReadiness, READINESS_KO, type ProbeResult } from '../backend/http/readiness';
 import { useApp, useTick, useView } from '../app/context';
@@ -773,7 +774,8 @@ function LanRun() {
         {busy ? (waitingPda ? `PDA 기다리는 중 — ${steps?.at(-1)?.name.replace(/^PDA /, '').split(' — ')[0]}` : '도는 중…') : '새 TRF 로 시작'}
       </button>
       {/* PDA 가 찍을 코드 — 기다리는 단계마다 팝업(사용자 2026-11-26 "지역 카드 찍으라는데 어딨어? 팝업으로") */}
-      {scanCodes && !hideScan && (
+      {/* 패널의 backdrop-filter 가 position:fixed 를 패널 안에 가둬 팝업이 안 보였음 — body 로 꺼내 그림 */}
+      {scanCodes && !hideScan && createPortal(
         <div className="scan-pop" role="dialog" aria-label="PDA 로 찍을 코드">
           <div className="scan-pop-h">
             <b>{cur?.name.replace(/^PDA /, 'PDA · ').split(' — ')[0]}</b>
@@ -787,7 +789,8 @@ function LanRun() {
               <Barcode key={c.label + c.value} value={c.value} caption={c.label} />
             ))}
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
       {scanCodes && hideScan && (
         <button className="scan-pop-open" onClick={() => setHideScan(false)}>
