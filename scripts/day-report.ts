@@ -34,3 +34,15 @@ console.log('DPS 구역 통과 평균(s)', sim.dps.pass.map((p) => (p.length ? M
 console.log('마지막 피킹', [5, 6, 7].map((f) => `${f}F ${((sim.lastPickAt.get(f as 5) ?? 0) / 3600).toFixed(2)}h`).join(' · '));
 console.log('runs', [...sim.runs.values()].map((r) => `${r.plan.routeId}/${r.plan.temp}:${r.state}/${r.result} 계획 ${(r.plan.plannedDepartMin / 60).toFixed(2)} 실제 ${((r.departedAt ?? 0) / 3600).toFixed(2)} R/T ${Math.ceil(r.loaded.length / 10)}`).join(' '));
 console.log('warns', sim.events.filter((e) => e.kind === 'warn' && !/결품|검품 불합격/.test(e.text)).map((e) => e.text).slice(-5).join(' | ') || '없음');
+// 출발 못 한 피킹분 — 하루 끝 출고대기(91)·승강기(92)에 남은 현물(층·구역별)
+{
+  const left = new Map<string, number>();
+  for (const [code, q] of backend.ledger.onHandByLocation()) {
+    const [, zone, fl, aisle] = code.split('-');
+    if (aisle !== '91' && aisle !== '92') continue;
+    const k = `${fl}F ${zone}-${aisle}`;
+    left.set(k, (left.get(k) ?? 0) + q);
+  }
+  console.log('출고대기에 남은 현물', [...left].sort().map(([k, q]) => `${k} ${q}`).join(' · ') || '없음');
+}
+console.log('오토스토어', sim.events.filter((e) => /오토스토어/.test(e.text)).map((e) => e.text).join(' | ') || '보고 없음', '· 층별 통', [...sim.autos].map(([f, s]) => `${f}F ${s.bins}`).join(' '));

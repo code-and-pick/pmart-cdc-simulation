@@ -365,8 +365,8 @@ export const WORKFORCE: Record<5 | 6 | 7, { fc: number; sort: number; jockey: nu
   // 층 구성 재설계(사용자 2026-11-26): 5F 저온 = 예전 6F 냉장 인원 + 냉동 자키·보충, 6F 상온 = 예전 5F 상온 인원. (DPS 구역 작업자는 FLOW.dps)
   5: { fc: 11, sort: 13, jockey: 8, replDay: 20, replEve: 3 },
   // 6F: 라인 6명(줄 3개에 2명씩 — 한 줄에서 색으로 내 몫 구분) + 분배 2명, 자키 3명(라인에 상품 박스 공급) [사용자 2026-11-25 "라인 2~3명·분배 2명", "라인 줄 수에 맞게"]
-  6: { fc: 7, sort: 9, jockey: 4, replDay: 14, replEve: 3 },
-  7: { fc: 26, sort: 6, jockey: 7, replDay: 16, replEve: 3 },
+  6: { fc: 14, sort: 9, jockey: 4, replDay: 14, replEve: 3 }, // 6F 상온 A~D·D 선반·C 오토스토어가 몰려 FC 7 → 14, 7F 26 → 19(같은 합 33, 2026-11-26 실규모 하루 6F 마지막 피킹 22:16)
+  7: { fc: 19, sort: 6, jockey: 7, replDay: 16, replEve: 3 },
 };
 
 /** 작업 시간·속도 [가정] — 라인 1인 하루 약 2만 걸음 [현장] 을 보정 목표로 */
