@@ -1,4 +1,5 @@
 // 머리줄·3D 위 보기 칩 — MFC 시뮬레이터 ui/TopBar.tsx 와 같은 모양. 구역 버튼 대신 층 버튼(5F·6F·7F)을 먼저 둔다(설계 §9).
+import { useState } from 'react';
 import { useApp, useTick, useView } from '../app/context';
 import { CDC_FACTS, SPEEDS } from '../config';
 import type { FloorKey, LabelMode, RightView } from '../render/controller';
@@ -115,47 +116,7 @@ export function ViewBar() {
             </button>
           ))}
         </div>
-        {(
-          // 구역 고르기 — 칩 줄이 길어 오른쪽 패널에 가려서 고르기 상자로(사용자 2026-11-25). 보관·피킹 선반·설비로 묶음
-          <label className="seg float zone-pick" id="zones">
-            <span>구역</span>
-            <select value={view.focusedZone} onChange={(e) => view.focusZone(e.target.value)} aria-label="구역">
-              {(() => {
-                const vs = view.zoneViews();
-                const all = vs.filter((v) => v.key === 'ALL');
-                const store = vs.filter((v) => /^\d-[A-Z]$/.test(v.key));
-                const shelf = vs.filter((v) => v.key.includes('SHELF'));
-                const equip = vs.filter((v) => !all.includes(v) && !store.includes(v) && !shelf.includes(v));
-                return (
-                  <>
-                    {all.map((v) => (
-                      <option key={v.key} value={v.key}>
-                        {v.label}
-                      </option>
-                    ))}
-                    {(
-                      [
-                        ['보관 (팔레트 랙)', store],
-                        ['피킹 선반', shelf],
-                        ['설비', equip],
-                      ] as const
-                    ).map(([g, list]) =>
-                      list.length ? (
-                        <optgroup key={g} label={g}>
-                          {list.map((v) => (
-                            <option key={v.key} value={v.key}>
-                              {v.label}
-                            </option>
-                          ))}
-                        </optgroup>
-                      ) : null,
-                    )}
-                  </>
-                );
-              })()}
-            </select>
-          </label>
-        )}
+        <ZonePicker />
       </div>
       <div className="seg float" title="랙 번호판은 늘, 칸 번호는 가까이 확대했을 때 보입니다">
         {LABEL_MODES.map((l) => (
@@ -170,6 +131,76 @@ export function ViewBar() {
           </button>
         ))}
       </div>
+    </div>
+  );
+}
+
+const ZONE_GROUPS: [string, string][] = [
+  ['RACK', '보관 랙'],
+  ['SHELF', '피킹 선반'],
+  ['EQUIP', '설비'],
+  ['BAND', '작업장'],
+];
+const zoneShort = (label: string) => label.replace(/\s*\((서쪽|동쪽)\)/, ' · $1').replace(/\s*\(.*\)$/, '');
+const zoneSub = (label: string) => /\((.*)\)$/.exec(label)?.[1] ?? '';
+
+/**
+ * 구역 고르기 — 고르기 상자(브라우저 기본 목록이 발표 자료처럼 보임, 사용자 2026-11-26 "PPT 로 만든 것 같다") 대신 펼침 판:
+ * 종류별(보관 랙·피킹 선반·설비·작업장) 카드, 짧은 이름 + 한 줄 설명 + 온도 점, 찾기.
+ */
+function ZonePicker() {
+  const view = useView();
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState('');
+  const f = view.floorLayout();
+  const cur = view.zoneViews().find((v) => v.key === view.focusedZone);
+  const views = view.zoneViews().filter((v) => v.key !== 'ALL');
+  const k = q.trim();
+  const pick = (key: string) => {
+    view.focusZone(key);
+    setOpen(false);
+    setQ('');
+  };
+  return (
+    <div className="zp" style={{ pointerEvents: 'auto' }}>
+      <button className={`zp-btn${open ? ' open' : ''}`} onClick={() => setOpen(!open)} aria-label="구역">
+        <span>구역</span>
+        <b>{cur ? (cur.key === 'ALL' ? '전체' : zoneShort(cur.label)) : '전체'}</b>
+        <i>▾</i>
+      </button>
+      {open && (
+        <div className="zp-panel" onMouseLeave={() => setOpen(false)}>
+          <div className="zp-top">
+            <input autoFocus placeholder="구역 찾기" value={q} onChange={(e) => setQ(e.target.value)} />
+            <button className={view.focusedZone === 'ALL' ? 'on' : ''} onClick={() => pick('ALL')}>
+              층 전체
+            </button>
+          </div>
+          {ZONE_GROUPS.map(([kind, title]) => {
+            const vs = views.filter((v) => (f?.zones.find((z) => z.id === v.key)?.kind ?? 'BAND') === kind && (!k || v.label.includes(k)));
+            if (!vs.length) return null;
+            return (
+              <div key={kind} className="zp-group">
+                <small>{title}</small>
+                <div className="zp-grid">
+                  {vs.map((v) => {
+                    const z = f?.zones.find((x) => x.id === v.key);
+                    return (
+                      <button key={v.key} className={v.key === view.focusedZone ? 'on' : ''} onClick={() => pick(v.key)} title={v.label}>
+                        <i className={`tdot ${(z?.temp ?? 'NONE').toLowerCase()}`} />
+                        <span>
+                          <b>{zoneShort(v.label)}</b>
+                          {zoneSub(v.label) && <small>{zoneSub(v.label)}</small>}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

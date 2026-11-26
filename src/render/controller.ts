@@ -93,7 +93,18 @@ export class ViewController extends Emitter {
     const all: ZoneView = { key: 'ALL', label: '전체', rect: { x0: 0, z0: 0, x1: L.width, z1: L.depth } };
     const f = this.floorLayout();
     if (!f) return [all];
-    return [all, ...f.zones.map((z) => ({ key: z.id, label: z.kind === 'BAND' && z.id.endsWith('-BAND') ? '출고대기·승강기' : z.label, rect: z.rect }))];
+    // 같은 이름 블록이 여럿이면(선반 블록 1·2 — 북쪽·남쪽) 이름 뒤에 블록 번호
+    const same = new Map<string, number>();
+    for (const z of f.zones) same.set(z.label, (same.get(z.label) ?? 0) + 1);
+    return [
+      all,
+      ...f.zones.map((z) => {
+        const blk = /-(\d+)$/.exec(z.id)?.[1];
+        const base = z.kind === 'BAND' && z.id.endsWith('-BAND') ? '출고대기·승강기' : z.label;
+        const label = (same.get(z.label) ?? 0) > 1 && blk ? base.replace(/(\s*\(.*\))?$/, (m) => ` ${blk}${m}`) : base;
+        return { key: z.id, label, rect: z.rect };
+      }),
+    ];
   }
 
   setFloor(fl: FloorKey) {

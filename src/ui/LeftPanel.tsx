@@ -793,15 +793,82 @@ function RealCheck() {
   );
 }
 
-const ROLE_ORDER: Role[] = ['FC', 'SORT', 'JOCKEY', 'INSPECT', 'REPL', 'INBOUND', 'LOADER'];
+const ROLE_ORDER: Role[] = ['FC', 'DPS', 'SORT', 'JOCKEY', 'INSPECT', 'REPL', 'INBOUND', 'LOADER'];
 
 /** 작업자 목록 — 누르면 그 층으로 가서 PDA 카드를 연다 */
 function Workers() {
   const { sim } = useApp();
   const view = useView();
   useTick();
+  // 찾기 — 층·역할·상태 버튼 + 검색(이름·번호·하는 일). 사용자 2026-11-26 "원하는 작업자를 보려면 한없이 스크롤 — 검색이나 작업자별 버튼"
+  const [q, setQ] = useState('');
+  const [fl, setFl] = useState<0 | 5 | 6 | 7>(view.floor as 5 | 6 | 7);
+  const [role, setRole] = useState<Role | null>(null);
+  const [st, setSt] = useState<'all' | 'busy' | 'idle' | 'off'>('all');
+  const stateOf = (a: (typeof sim.agents)[number]) => (/^근무 전|^퇴근|^점심|^휴식/.test(a.activity) ? 'off' : a.idle ? 'idle' : 'busy');
+  const k = q.trim();
+  const base = sim.agents.filter((a) => !fl || a.floor === fl);
+  const list = base
+    .filter((a) => (!role || a.role === role) && (st === 'all' || stateOf(a) === st) && (!k || a.name.includes(k) || a.activity.includes(k) || ROLE_KO[a.role].includes(k)))
+    .sort((a, b) => a.floor - b.floor || ROLE_ORDER.indexOf(a.role) - ROLE_ORDER.indexOf(b.role) || a.name.localeCompare(b.name));
+  const roles = ROLE_ORDER.filter((r) => base.some((a) => a.role === r));
   return (
     <>
+      <section className="sec wk-find">
+        <input className="search" placeholder="작업자 찾기 — 이름·번호·하는 일 (예: 5F-07, 지게차, 상차)" value={q} onChange={(e) => setQ(e.target.value)} />
+        <div className="wk-chips">
+          {([0, 5, 6, 7] as const).map((x) => (
+            <button key={x} className={fl === x ? 'on' : ''} onClick={() => setFl(x)}>
+              {x ? `${x}F` : '전체 층'}
+            </button>
+          ))}
+        </div>
+        <div className="wk-chips">
+          <button className={!role ? 'on' : ''} onClick={() => setRole(null)}>
+            모든 역할 <small>{base.length}</small>
+          </button>
+          {roles.map((r) => (
+            <button key={r} className={role === r ? 'on' : ''} onClick={() => setRole(role === r ? null : r)}>
+              {ROLE_KO[r]} <small>{base.filter((a) => a.role === r).length}</small>
+            </button>
+          ))}
+        </div>
+        <div className="wk-chips">
+          {(
+            [
+              ['all', '모두'],
+              ['busy', '일하는 중'],
+              ['idle', '기다리는 중'],
+              ['off', '근무 밖'],
+            ] as const
+          ).map(([v, t]) => (
+            <button key={v} className={st === v ? 'on' : ''} onClick={() => setSt(v)}>
+              {t} <small>{v === 'all' ? base.filter((a) => !role || a.role === role).length : base.filter((a) => (!role || a.role === role) && stateOf(a) === v).length}</small>
+            </button>
+          ))}
+        </div>
+      </section>
+      <section className="sec wk-list">
+        <h4>
+          {list.length}명 <span>누르면 그 사람을 따라 오른쪽에 흐름</span>
+        </h4>
+        {list.slice(0, 200).map((a) => {
+          const s = stateOf(a);
+          return (
+            <button key={a.id} className={`wk-row${view.selectedWorker === a.id ? ' on' : ''}`} onClick={() => view.selectWorker(a.id, a.floor)} title={`${a.name} · ${a.activity}`}>
+              <i className={`wk-dot ${s}`} />
+              <span className="wk-name">
+                {ROLE_KO[a.role]} <b>{a.name.replace(/^.* /, '')}</b>
+              </span>
+              <span className="wk-act">{a.activity}</span>
+              {a.onDutySeconds > 60 && <span className="wk-util">{Math.round(a.utilization * 100)}%</span>}
+            </button>
+          );
+        })}
+        {list.length > 200 && <div className="note">200명까지 보입니다 — 층·역할로 좁혀 주세요</div>}
+      </section>
+      <details className="wk-floors">
+        <summary>층별 자세히(예전 목록)</summary>
       {([5, 6, 7] as const).map((fl) => {
         const people = sim.agents.filter((a) => a.floor === fl).sort((a, b) => ROLE_ORDER.indexOf(a.role) - ROLE_ORDER.indexOf(b.role));
         const busy = people.filter((a) => !a.idle).length;
@@ -831,6 +898,7 @@ function Workers() {
           </Sec>
         );
       })}
+      </details>
     </>
   );
 }

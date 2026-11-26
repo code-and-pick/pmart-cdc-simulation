@@ -2004,7 +2004,7 @@ export class Simulation implements DutyClock {
    */
   /** 화면이 쓰는 이관 목록 — 1초 캐시(모든 패널 공용) */
   uiTransfers() {
-    return this.live('ui-trfs', 1000, () => this.backend.listTransfers());
+    return this.live('ui-trfs', 2000, () => this.backend.listTransfers());
   }
 
   live<T>(key: string, ms: number, f: () => T): T {

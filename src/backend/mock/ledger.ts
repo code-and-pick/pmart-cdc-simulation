@@ -43,6 +43,8 @@ export interface LedgerOptions {
 }
 
 const key = (sku: string, lot: string, loc: string) => `${sku}|${lot}|${loc}`;
+/** 칸 키 → [sku, lot, 위치] (쪼갠 값 기억) */
+const keyParts = new Map<string, [string, string, string]>();
 const aisleOf = (code: string) => Number(code.split('-')[3]);
 /** 보관·피킹 칸 — 팔레트 랙 01~ · 피킹 선반·오토스토어 61~89 · 야채 바닥 레인(VEG_LANES.aisle). 할당 후보. 90 접안·91 출고대기·92 승강기는 아니다 */
 export const isRackLocation = (code: string) => aisleOf(code) < 90 || aisleOf(code) === VEG_LANES.aisle;
@@ -347,12 +349,15 @@ export class CdcLedger {
   /** 할당이 잡고 있는 칸별 예약 (0 보다 큰 것만) */
   holdingsOf(allocationId: string): { sku: string; lot: string; locationCode: string; qty: number }[] {
     const rec = this.mustAlloc(allocationId);
-    return [...rec.holdings.entries()]
-      .filter(([, q]) => q > 0)
-      .map(([k, qty]) => {
-        const [sku, lot, locationCode] = k.split("|");
-        return { sku, lot, locationCode, qty };
-      });
+    // 키 쪼개기는 한 번만(보충 목록·후속 작업이 자주 불러 화면이 끊기던 곳, 2026-11-26)
+    const out: { sku: string; lot: string; locationCode: string; qty: number }[] = [];
+    for (const [k, qty] of rec.holdings) {
+      if (qty <= 0) continue;
+      let p = keyParts.get(k);
+      if (!p) keyParts.set(k, (p = k.split('|') as [string, string, string]));
+      out.push({ sku: p[0], lot: p[1], locationCode: p[2], qty });
+    }
+    return out;
   }
 
   expiryOf(sku: string, lot: string): string | undefined {
