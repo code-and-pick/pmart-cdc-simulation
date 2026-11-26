@@ -361,15 +361,17 @@ function ZoneInfo() {
 
 /** 오토스토어 — 설계(격자·통·칸·로봇·포트·하중)와 작동(포트 가동률·로봇·통 교환·대기·실사·보충) [사용자 2026-11-26 "누르면 안에 설계랑 작동"] */
 function AutoStoreInfo() {
-  const { sim, layout } = useApp();
+  const { sim } = useApp();
+  const view = useView();
   useTick();
-  const A = layout.autostore!;
-  const st = sim.auto;
-  const u = sim.portUtil();
+  const fl = view.floorLayout()!;
+  const A = fl.autostore!;
+  const st = sim.autoOf(fl.floor);
+  const u = sim.portUtil(fl.floor);
   const busyRobots = st.robotFree.filter((t) => t > sim.time).length;
   const m2 = (A.rect.x1 - A.rect.x0) * (A.rect.z1 - A.rect.z0);
   const fill = A.binsFit ? A.bins / A.binsFit : 0;
-  const atPort = sim.agents.filter((a) => a.floor === 7 && /포트|오토스토어|로봇이 통/.test(a.activity));
+  const atPort = sim.agents.filter((a) => a.floor === fl.floor && /포트|오토스토어|로봇이 통/.test(a.activity));
   return (
     <>
       <Sec title="설계" aside="[가정] 값은 설정에서">
@@ -410,7 +412,7 @@ function AutoStoreInfo() {
 }
 
 function ZoneBody({ zoneId }: { zoneId: string }) {
-  const { backend, sim, catalog, layout } = useApp();
+  const { backend, sim, catalog } = useApp();
   const view = useView();
   const f = view.floorLayout()!;
   const zone = f.zones.find((z) => z.id === zoneId)!;
@@ -568,14 +570,14 @@ function ZoneBody({ zoneId }: { zoneId: string }) {
                 ];
               })()
             : (() => {
-                const A = layout.autostore!;
-                const u = sim.portUtil();
+                const A = f.autostore!;
+                const u = sim.portUtil(f.floor);
                 return [
                   [`${A.bins.toLocaleString()} / ${A.binsFit.toLocaleString()}`, '통 필요 / 그린 면적에 들어가는 통'],
                   [`${A.skus.toLocaleString()} · ${A.capacity.toLocaleString()}`, 'SKU · 용량(유닛)'],
-                  [AUTOSTORE.robots, '로봇'],
-                  [sim.auto.waiting, '대기 통(로봇이 가져오는 중)'],
-                  [u.length ? u.map((x) => Math.round(x * 100) + '%').join(' / ') : '—', `포트 ${AUTOSTORE.ports}개 가동률`],
+                  [A.robots, '로봇'],
+                  [sim.autoOf(f.floor).waiting, '대기 통(로봇이 가져오는 중)'],
+                  [u.length ? u.map((x) => Math.round(x * 100) + '%').join(' / ') : '—', `포트 ${A.ports}개 가동률`],
                   [`${A.floorLoadKgM2.toLocaleString()} / ${A.floorLoadAllowedKgM2.toLocaleString()}`, '바닥 하중 kg/㎡ (16단 / 허용 [확인 필요])'],
                 ];
               })();

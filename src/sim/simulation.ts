@@ -6,7 +6,7 @@
 // 운송(§12 ⑦): 22:00 배차(고정 노선 × 온도대, MockTms) → 출차 30분 전 상차(방문 역순) → 노선별 출차 → 주행 → MFC 도착·하차(동시 3대)·인계 → 복귀.
 // React·three 에 의존하지 않는다(시험이 화면 없이 하루를 돌린다).
 
-import { AUTOSTORE, dockFloorFor, DOCKS, FLOW, CENTER_ID, INBOUND, MFCS, SHELF, OUTBOUND, SHIFT, SIM_START, SUPPLY, TMS, WORK, WORKFORCE } from '../config';
+import { AUTOSTORE, AUTOSTORE_PORTS, AUTOSTORE_ROBOTS, dockFloorFor, DOCKS, FLOW, CENTER_ID, INBOUND, MFCS, SHELF, OUTBOUND, SHIFT, SIM_START, SUPPLY, TMS, WORK, WORKFORCE } from '../config';
 // 시간표 근거: 정본 CDC-8(PR #447) — 21:30 WMS 완료 · 22:00 R/T 카운팅 · 22:30 상차 · 23:00~ 출차
 import type { MockBackend } from '../backend/mock/MockBackend';
 import type { ApiCallRecord, DomainEventRecord } from '../backend/port';
@@ -27,6 +27,23 @@ const dasRowsOf = (f: FloorLayout, kind: 'DAS' | 'SPLIT') => {
 };
 import { makeTransfers, trfTemp } from './supply';
 import { pickMethodOf } from '../domain/pickMethod';
+
+/** 한 층 오토스토어 상태 — 로봇·포트가 비는 시각, 포트 쓴 시간, 통·실사·보충 수 */
+interface AutoState {
+  robotFree: number[];
+  portFree: number[];
+  portLast: number[];
+  portBusy: number[];
+  portHeld: number[];
+  waiting: number;
+  waits: number;
+  waitSec: number;
+  bins: number;
+  counts: number;
+  refills: number;
+  firstAt: number;
+  lastAt: number;
+}
 
 export interface SimEvent {
   at: number;
@@ -232,7 +249,13 @@ export class Simulation implements DutyClock {
   readonly lineLitHist: number[] = [];
   readonly lineLitByFloor = new Map<FloorNo, number[]>();
   /** 오토스토어 — 로봇·포트 상태와 집계(§5) */
-  readonly auto = { robotFree: [] as number[], portFree: [] as number[], portLast: [] as number[], portBusy: [] as number[], portHeld: [] as number[], waiting: 0, waits: 0, waitSec: 0, bins: 0, counts: 0, refills: 0, firstAt: 0, lastAt: 0 };
+  /** 층마다 오토스토어 상태(6F 상온 C · 7F 생활용품 F — 포트·로봇 AUTOSTORE_PORTS·AUTOSTORE_ROBOTS) */
+  readonly autos = new Map<number, AutoState>();
+  autoOf(fl: number): AutoState {
+    let st = this.autos.get(fl);
+    if (!st) this.autos.set(fl, (st = { robotFree: [], portFree: [], portLast: [], portBusy: [], portHeld: [], waiting: 0, waits: 0, waitSec: 0, bins: 0, counts: 0, refills: 0, firstAt: 0, lastAt: 0 }));
+    return st;
+  }
   /** 층별 마지막 피킹 시각 */
   readonly lastPickAt = new Map<FloorNo, number>();
   /** 방식별 닫은 박스 수(DPS·박스·FC 바로 출고대기·라인·분배) — 시험·지표용 */
@@ -570,7 +593,7 @@ export class Simulation implements DutyClock {
   private tripLoaded(r: TripRun): boolean {
     if (!this.day.released || !r.loaded.length || this.loading.has(r.plan.tripId)) return false;
     const ids = new Set(r.plan.stops.flatMap((s) => s.trfIds));
-    if (this.backend.findTasks((t) => t.trfIds.some((id) => ids.has(id)) && !TERMINAL.includes(t.state)).length) return false;
+    if (this.backend.anyTask((t) => t.trfIds.some((id) => ids.has(id)) && !TERMINAL.includes(t.state))) return false;
     for (const id of ids) if (this.pendingTrf(id)) return false;
     if ([...this.staged.values()].flat().some((b) => ids.has(b.trfId))) return false;
     return !this.atDock.some((x) => ids.has(x.trfId));
@@ -793,7 +816,7 @@ export class Simulation implements DutyClock {
         await this.go(a, site.autostoreRefill(), WORK.forklift, '오토스토어 입고 포트로');
         a.pda.step = '통에 채우고 스캔';
         await a.wait(AUTOSTORE.refillBinSec + qty * AUTOSTORE.refillPerUnitSec, '오토스토어 통에 채우기');
-        this.auto.refills++;
+        this.autoOf(to.floor).refills++;
       } else if (to.aisle < SHELF.aisleBase) {
         // 랙 1단 박스 피킹면 — 같은 기둥 위 단 팔레트를 1단으로 내림
         a.pda.step = '위 단 팔레트를 1단 피킹면으로';
@@ -956,7 +979,7 @@ export class Simulation implements DutyClock {
       } else a.pda.step = `${basket[i].name} ${take}개 ${handling === 'LINE' ? '박스째 싣기' : '카트에 담기'}`;
       await a.wait((WORK.pickScan + take * WORK.pickPerUnit * (handling === 'BOX' ? WORK.heavyFactor : 1)) / this.pace(a), handling === 'DPS' ? '불 보고 집기' : handling === 'BOX' ? '무거운 상자 싣기' : '상품 스캔 → 담기');
       if (light) this.lights.splice(this.lights.indexOf(light), 1);
-      if (port !== null) await this.portRelease(a, port);
+      if (port !== null) await this.portRelease(a, port, loc.floor);
       await this.backend.reportPickResult(
         task.taskId,
         { workerId: a.id, lines: [{ sku: l.sku, lot: l.lot, locationCode: l.locationCode, pickedQty: take, ...(short ? { shortQty: short, shortReason: 'NOT_FOUND' as const } : {}) }] },
@@ -1006,13 +1029,14 @@ export class Simulation implements DutyClock {
   /** 오토스토어 포트 잡기 → 로봇이 통을 가져옴(로봇 수·포트 처리 상한) → 포트 번호 */
   private async portFetch(a: Agent, loc: Location, _m: number): Promise<number> {
     const A = AUTOSTORE;
-    const st = this.auto;
+    const st = this.autoOf(loc.floor);
     if (!st.robotFree.length) {
-      st.robotFree = Array(A.robots).fill(0);
-      st.portFree = Array(A.ports).fill(0);
-      st.portLast = Array(A.ports).fill(-1e9);
-      st.portBusy = Array(A.ports).fill(0);
-      st.portHeld = Array(A.ports).fill(0);
+      const nP = AUTOSTORE_PORTS[loc.floor] ?? A.ports;
+      st.robotFree = Array(AUTOSTORE_ROBOTS[loc.floor] ?? A.robots).fill(0);
+      st.portFree = Array(nP).fill(0);
+      st.portLast = Array(nP).fill(-1e9);
+      st.portBusy = Array(nP).fill(0);
+      st.portHeld = Array(nP).fill(0);
       st.firstAt = this.time;
     }
     void loc;
@@ -1050,8 +1074,8 @@ export class Simulation implements DutyClock {
   }
 
   /** 포트 놓기 — 순환 실사(일정 확률로 통 수량 세기) 뒤 통은 돌아간다 */
-  private async portRelease(a: Agent, p: number) {
-    const st = this.auto;
+  private async portRelease(a: Agent, p: number, fl: number) {
+    const st = this.autoOf(fl);
     if (this.rng.next() < AUTOSTORE.cycleCountRate) {
       st.counts++;
       await a.wait(AUTOSTORE.cycleCountSec, '순환 실사 — 통 수량 세기');
@@ -1065,8 +1089,8 @@ export class Simulation implements DutyClock {
    * 포트 가동률(0~1) — 처음 통이 온 때부터 마지막 통을 놓은 때까지(포트를 쓰는 동안) 대비.
    * 전엔 지금 시각까지 나눠, 피킹이 끝난 18시 뒤 밤새 시간까지 들어가 40% 로 낮게 보였음(실제로는 통 대부분이 빈 포트를 기다림, 2026-11-26)
    */
-  portUtil(): number[] {
-    const st = this.auto;
+  portUtil(fl = 7): number[] {
+    const st = this.autoOf(fl);
     const busyNow = st.portFree.some((t) => t === Infinity);
     const el = Math.max(1, (busyNow ? this.time : st.lastAt || this.time) - st.firstAt);
     return st.portBusy.map((b, i) => Math.min(1, (b + (st.portFree[i] === Infinity ? this.time - st.portHeld[i] : 0)) / el));
@@ -1081,11 +1105,11 @@ export class Simulation implements DutyClock {
       this.log('flow', `라인 DAS 스캔 ${scans}회 — 켜진 칸 수 분포 ${h.map((n, i) => (n ? `${i}칸 ${n}` : '')).filter(Boolean).join(' · ')}, 1칸만 ${Math.round(one * 100)}%`);
       if (one > 0.4) this.log('warn', `라인 1칸만 켜지는 비율이 높음(${Math.round(one * 100)}%) — 같은 상품을 받는 MFC 가 적거나(요청 겹침), 같은 상품 몫이 라인에 함께 모이지 않음`);
     }
-    const st = this.auto;
-    if (st.bins) {
-      const u = this.portUtil();
-      const end7 = this.lastPickAt.get(7);
-      this.log(end7 !== undefined && end7 > 22 * 3600 ? 'warn' : 'flow', `오토스토어: 통 ${st.bins}회 · 포트 ${AUTOSTORE.ports}개 가동률 ${u.map((x) => Math.round(x * 100) + '%').join('/')} · 로봇 ${AUTOSTORE.robots}대 · 포트 대기 ${st.waits}회 평균 ${st.waits ? Math.round(st.waitSec / st.waits) : 0}초 · 순환 실사 ${st.counts}회 · 7F 마지막 피킹 ${end7 !== undefined ? hm(end7) : '-'}${Math.max(...u) > 0.85 ? ' — 포트가 병목' : ''}`);
+    for (const [fl, st] of [...this.autos].sort((x, y) => x[0] - y[0])) {
+      if (!st.bins) continue;
+      const u = this.portUtil(fl);
+      const end7 = this.lastPickAt.get(fl as FloorNo);
+      this.log(end7 !== undefined && end7 > 22 * 3600 ? 'warn' : 'flow', `${fl}F 오토스토어: 통 ${st.bins}회 · 포트 ${u.length}개 가동률 ${u.map((x) => Math.round(x * 100) + '%').join('/')} · 로봇 ${AUTOSTORE_ROBOTS[fl] ?? AUTOSTORE.robots}대 · 포트 대기 ${st.waits}회 평균 ${st.waits ? Math.round(st.waitSec / st.waits) : 0}초 · 순환 실사 ${st.counts}회 · ${fl}F 마지막 피킹 ${end7 !== undefined ? hm(end7) : '-'}${Math.max(...u) > 0.85 ? ' — 포트가 병목' : ''}`);
     }
   }
 
@@ -1196,7 +1220,7 @@ export class Simulation implements DutyClock {
 
   /** 박스가 이 구역에 더 있어야 하는지 — 그 TRF 의 이 구역 DPS 작업이 아직 남았을 때(받았든 아직 안 받았든) */
   private dpsHold(box: DpsBox, zi: number): boolean {
-    if (box.taskId) return this.backend.findTasks((t) => t.taskId === box.taskId && !TERMINAL.includes(t.state)).length > 0;
+    if (box.taskId) return this.backend.anyTask((t) => t.taskId === box.taskId && !TERMINAL.includes(t.state));
     return this.dpsOpen(box.trfId, zi).length > 0;
   }
 
@@ -1559,7 +1583,7 @@ export class Simulation implements DutyClock {
         q.some((d) => d.trfId === box.trfId && d.contents.some((c) => c.qty > 0)) ||
         (this.busy.get(box.trfId) ?? 0) > 0 ||
         [...this.carts.values()].some((c) => c.drops.some((d) => d.trfId === box.trfId && d.route === 'DAS')) ||
-        this.backend.findTasks((t) => t.trfIds.includes(box.trfId) && !TERMINAL.includes(t.state) && t.lines.some((l) => this.routeOf(l.sku) === 'DAS' && l.shares.some((sh) => sh.trfId === box.trfId && sh.plannedQty - sh.pickedQty - sh.shortQty > 0))).length > 0;
+        this.backend.anyTask((t) => t.trfIds.includes(box.trfId) && !TERMINAL.includes(t.state) && t.lines.some((l) => this.routeOf(l.sku) === 'DAS' && l.shares.some((sh) => sh.trfId === box.trfId && sh.plannedQty - sh.pickedQty - sh.shortQty > 0)));
       if (more && units < OUTBOUND.boxMaxUnits) continue;
       // 같은 줄 다른 작업자가 이미 닫았으면 건너뜀(목록은 시작 때 찍은 것)
       if (this.openBoxes.get(key) !== box) continue;
@@ -1587,8 +1611,9 @@ export class Simulation implements DutyClock {
 
   /** 이 층에서 그 MFC 몫 일이 다 끝났는지 — 피킹·분류·출고대기 옮기기·검품 */
   private floorDoneFor(floor: FloorNo, trfId: string, code: string): boolean {
-    const tasks = this.backend.findTasks((t) => t.trfIds.includes(trfId) && t.lines[0]?.locationCode.split('-')[2] === String(floor));
-    if (!this.day.released || tasks.some((t) => !TERMINAL.includes(t.state))) return false;
+    if (!this.day.released) return false;
+    const fs = String(floor);
+    if (this.backend.anyTask((t) => !TERMINAL.includes(t.state) && t.trfIds.includes(trfId) && t.lines[0]?.locationCode.split('-')[2] === fs)) return false;
     if (this.pendingTrf(trfId)) return false;
     return !(this.staged.get(code) ?? []).some((b) => b.state !== 'PASSED');
   }

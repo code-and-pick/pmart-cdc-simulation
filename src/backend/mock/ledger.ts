@@ -53,7 +53,13 @@ export const isShelfLocation = (code: string) => {
   return (a >= SHELF.aisleBase && a < 90) || a === VEG_LANES.aisle || (a < SHELF.aisleBase && level === '1' && SKU_PLACE.faceZones.includes(zone));
 };
 /** 팔레트 랙 보관 칸(RESERVE) */
-export const isPalletLocation = (code: string) => aisleOf(code) < SHELF.aisleBase && !isShelfLocation(code);
+const palletMemo = new Map<string, boolean>();
+/** 위치 코드마다 한 번만 계산(보충 계산이 보유마다 부름 — 성능) */
+export const isPalletLocation = (code: string) => {
+  let v = palletMemo.get(code);
+  if (v === undefined) palletMemo.set(code, (v = aisleOf(code) < SHELF.aisleBase && !isShelfLocation(code)));
+  return v;
+};
 
 function daysBetween(from: string, to: string): number {
   return Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000);
@@ -61,6 +67,9 @@ function daysBetween(from: string, to: string): number {
 
 export class CdcLedger {
   private readonly cells = new Map<string, Cell>();
+  /** SKU → 그 SKU 칸들 · 위치 → 그 위치 칸들(칸이 생길 때만 늘어남). 할당·가용 조회가 SKU 마다 전체 칸을 훑지 않게 — 물량 30만에서 08:00 할당 한 번에 73초 걸리던 것(2026-11-26) */
+  private readonly cellsBySku = new Map<string, Cell[]>();
+  private readonly cellsByLoc = new Map<string, Cell[]>();
   private readonly lotExpiry = new Map<string, string>(); // sku|lot → 유통기한
   private readonly allocations = new Map<string, AllocRec>();
   private readonly allocByTrf = new Map<string, string>(); // trfId|version → allocationId
@@ -92,6 +101,12 @@ export class CdcLedger {
     if (!c) {
       c = { sku, lot, locationCode: loc, onHand: 0, reserved: 0, held: 0 };
       this.cells.set(k, c);
+      const bs = this.cellsBySku.get(sku);
+      if (bs) bs.push(c);
+      else this.cellsBySku.set(sku, [c]);
+      const bl = this.cellsByLoc.get(loc);
+      if (bl) bl.push(c);
+      else this.cellsByLoc.set(loc, [c]);
     }
     return c;
   }
@@ -126,8 +141,8 @@ export class CdcLedger {
 
   // ── 조회 ────────────────────────────────────────
   cellsAt(locationCode: string): { sku: string; lot: string; onHand: number; reserved: number; expiresAt: string }[] {
-    return [...this.cells.values()]
-      .filter((c) => c.locationCode === locationCode && c.onHand > 0)
+    return (this.cellsByLoc.get(locationCode) ?? [])
+      .filter((c) => c.onHand > 0)
       .map((c) => ({ sku: c.sku, lot: c.lot, onHand: c.onHand, reserved: c.reserved, expiresAt: this.lotExpiry.get(`${c.sku}|${c.lot}`) ?? '' }));
   }
 
@@ -140,7 +155,7 @@ export class CdcLedger {
 
   onHandAt(locationCode: string): number {
     let n = 0;
-    for (const c of this.cells.values()) if (c.locationCode === locationCode) n += c.onHand;
+    for (const c of this.cellsByLoc.get(locationCode) ?? []) n += c.onHand;
     return n;
   }
 
@@ -159,8 +174,8 @@ export class CdcLedger {
   /** 적격 E = 품질 RELEASED(MOCK 은 held 만 뺀다) · 랙 칸 · 막히지 않음 · 잔여일수 충족 */
   private eligibleCells(sku: string, minRemainingDays: number): Cell[] {
     const today = this.opt.today();
-    return [...this.cells.values()]
-      .filter((c) => c.sku === sku && isRackLocation(c.locationCode) && !this.blocked.has(key(c.sku, c.lot, c.locationCode)))
+    return (this.cellsBySku.get(sku) ?? [])
+      .filter((c) => isRackLocation(c.locationCode) && !this.blocked.has(key(c.sku, c.lot, c.locationCode)))
       .filter((c) => daysBetween(today, this.lotExpiry.get(`${c.sku}|${c.lot}`) ?? today) >= minRemainingDays)
       .sort((a, b) => {
         const ea = this.lotExpiry.get(`${a.sku}|${a.lot}`) ?? '';
@@ -181,8 +196,7 @@ export class CdcLedger {
     let reserved = 0;
     let held = 0;
     let transit = 0;
-    for (const c of this.cells.values()) {
-      if (c.sku !== sku) continue;
+    for (const c of this.cellsBySku.get(sku) ?? []) {
       onHand += c.onHand;
       reserved += c.reserved;
       held += c.held;
@@ -247,9 +261,10 @@ export class CdcLedger {
   private reserve(rec: AllocRec, sku: string, qty: number, minDays: number, safety: number, deltas: Commit['deltas']): AllocationLot[] {
     const out: AllocationLot[] = [];
     // 안전량은 SKU 전체 적격 가용에서 먼저 뺀다
-    let free = Math.max(0, this.eligibleCells(sku, minDays).reduce((s, c) => s + c.onHand - c.held - c.reserved, 0) - safety);
+    const el = this.eligibleCells(sku, minDays);
+    let free = Math.max(0, el.reduce((s, c) => s + c.onHand - c.held - c.reserved, 0) - safety);
     let need = Math.min(qty, free);
-    for (const c of this.eligibleCells(sku, minDays)) {
+    for (const c of el) {
       if (need <= 0) break;
       const take = Math.min(need, c.onHand - c.held - c.reserved);
       if (take <= 0) continue;

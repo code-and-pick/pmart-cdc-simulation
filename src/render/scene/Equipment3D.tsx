@@ -9,7 +9,7 @@ import { useFrame } from '@react-three/fiber';
 import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { useApp, useTick } from '../../app/context';
-import { FLOW, MFCS } from '../../config';
+import { AUTOSTORE, AUTOSTORE_PORTS, FLOW, MFCS } from '../../config';
 import type { Equip } from '../../domain/layout';
 import type { FloorNo } from '../../domain/sites/chilgok';
 import { autostorePorts, dasRows, inboundSpots, mfcSlotIndex } from '../../sim/site';
@@ -670,8 +670,8 @@ function VegLanes({ e, floor }: { e: Equip; floor: FloorNo }) {
 }
 
 /** 오토스토어 포트 앞 MFC 박스 다섯(PPC-01~05) — 숫자(통·포트 가동률)는 3D 에 띄우지 않고 왼쪽 구역 패널에(사용자 2026-11-25) [사용자 §5] */
-function PortBoxes({ e }: { e: Equip }) {
-  const ports = autostorePorts(e.rect);
+function PortBoxes({ e, floor }: { e: Equip; floor: FloorNo }) {
+  const ports = autostorePorts(e.rect, AUTOSTORE_PORTS[floor] ?? AUTOSTORE.ports);
   return (
     <group>
       {ports.map((px, p) =>
@@ -945,7 +945,7 @@ function Office({ e }: { e: Equip }) {
 }
 
 /** 오토스토어 — 알루미늄 격자(위), 옥색 옆판, 빨간 로봇들이 격자 위를 오감, 남쪽(앞) 포트 2개 */
-function AutoStore({ e }: { e: Equip }) {
+function AutoStore({ e, floor }: { e: Equip; floor: FloorNo }) {
   const { sim } = useApp();
   const r = e.rect;
   const H = 4.4;
@@ -1020,7 +1020,7 @@ function AutoStore({ e }: { e: Equip }) {
         <meshStandardMaterial color={0xe5322d} />
       </instancedMesh>
       {/* 포트(작업자가 빈에서 꺼내 MFC 박스에 담는 자리) */}
-      {autostorePorts(r).map((px) => (
+      {autostorePorts(r, AUTOSTORE_PORTS[floor] ?? AUTOSTORE.ports).map((px) => (
         <group key={px} position={[px, 0, r.z1 - 0.9]}>
           <mesh position={[0, 0.5, 0]}>
             <boxGeometry args={[1.4, 1.0, 1.2]} />
@@ -1053,8 +1053,8 @@ export function EquipmentModel({ e, floor }: { e: Equip; floor: FloorNo }) {
   if (e.kind === 'OFFICE') return <Office e={e} />;
   return (
     <>
-      <AutoStore e={e} />
-      <PortBoxes e={e} />
+      <AutoStore e={e} floor={floor} />
+      <PortBoxes e={e} floor={floor} />
     </>
   );
 }

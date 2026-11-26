@@ -652,6 +652,12 @@ export class MockBackend implements CdcOutboundPort {
   }
 
   /** 조건에 맞는 작업만 복사해 본다 (MOCK 전용 조회 — 전부 복사하지 않게) */
+  /** 조건에 맞는 작업이 하나라도 있나 — 복사하지 않는다(시뮬이 자주 부르는 확인용, 물량 30만에서 findTasks 복사가 시간 대부분이었음 2026-11-26) */
+  anyTask(pred: (t: Readonly<Task>) => boolean): boolean {
+    for (const t of this.tasks.values()) if (pred(t)) return true;
+    return false;
+  }
+
   findTasks(pred: (t: Task) => boolean): Task[] {
     const out: Task[] = [];
     for (const t of this.tasks.values()) if (pred(t)) out.push(this.publicTask(t));

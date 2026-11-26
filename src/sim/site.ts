@@ -2,7 +2,7 @@
 //   북쪽 통로(승강기·출고대기 앞) · 보관 방 북쪽 벽 앞 통로 · 선반 통로(남북) · 랙 앞 가로 통로 · 랙 통로(남북) · 서쪽 벽 연결 통로.
 // React·three 에 의존하지 않는다.
 
-import { AUTOSTORE, FLOW, MFCS, SHELF, VEG_LANES } from '../config';
+import { AUTOSTORE, AUTOSTORE_PORTS, FLOW, MFCS, SHELF, VEG_LANES } from '../config';
 const SHELF_BASE = SHELF.aisleBase;
 import type { EquipKind } from '../domain/sites/chilgok';
 import type { FloorLayout, Layout, Location, Rect } from '../domain/layout';
@@ -38,7 +38,7 @@ export class FloorSite {
       // 오토스토어 빈: 작업자는 포트 앞에 서고 로봇이 통을 가져온다
       const e = this.f.equipment.find((x) => x.kind === 'AUTOSTORE');
       if (e) {
-        const ports = autostorePorts(e.rect);
+        const ports = autostorePorts(e.rect, AUTOSTORE_PORTS[this.floor] ?? AUTOSTORE.ports);
         return { x: ports[(loc.binNo ?? loc.bay) % ports.length], z: this.f.walk.roomZ, lane: 'S' };
       }
     }
@@ -75,7 +75,7 @@ export class FloorSite {
   /** 오토스토어 포트 p 의 MFC m 박스 자리(PPC-01~05 다섯 개가 포트 앞에 나란히) */
   portBox(p: number, m: number) {
     const e = this.f.equipment.find((x) => x.kind === 'AUTOSTORE')!;
-    const px = autostorePorts(e.rect)[p];
+    const px = autostorePorts(e.rect, AUTOSTORE_PORTS[this.floor] ?? AUTOSTORE.ports)[p];
     return { x: px + (m - (MFCS.length - 1) / 2) * 0.42, y: 1.05, z: e.rect.z1 - 0.3 };
   }
 
@@ -258,8 +258,8 @@ export function mfcSlotIndex(m: number, n: number): number {
 }
 
 /** 오토스토어 포트 x 들 — 북쪽(통로 쪽) 면에 둘. 화면(AutoStore)과 같은 계산 */
-export function autostorePorts(r: Rect): number[] {
-  const n = AUTOSTORE.ports;
+/** n = 그 층 포트 수(AUTOSTORE_PORTS — 6F 4 · 7F 8) */
+export function autostorePorts(r: Rect, n: number = AUTOSTORE.ports): number[] {
   return Array.from({ length: n }, (_, i) => r.x0 + ((i + 0.5) * (r.x1 - r.x0)) / n);
 }
 
