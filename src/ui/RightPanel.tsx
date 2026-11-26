@@ -10,6 +10,7 @@ import { TEMP_KO } from '../sim/simulation';
 import { trfTemp } from '../sim/supply';
 import { AdminBoard, BarcodeBoard, MfcPick, MovesBoard, StockSearch, TrfBoard } from './Boards';
 import { DayTimeline, Meter, Tile } from './viz';
+import { WorkerFlow } from './WorkerFlow';
 
 const clock = (sec: number) => `${String(Math.floor(sec / 3600) % 24).padStart(2, '0')}:${String(Math.floor(sec / 60) % 60).padStart(2, '0')}`;
 /** 큰 수는 만 단위로 짧게 */
@@ -506,11 +507,17 @@ function Log({ tab }: { tab: RightView }) {
 export function RightPanel() {
   const view = useView();
   useTick();
-  if (!view.rightView) return null;
+  if (!view.rightView && !view.selectedWorker) return null;
   return (
     <div className="panel right">
-      <Summary />
-      <Log tab={view.rightView} />
+      {/* 고른 작업자의 흐름·실시간 자리 — 맨 위(사용자 2026-11-26) */}
+      <WorkerFlow />
+      {view.rightView && (
+        <>
+          <Summary />
+          <Log tab={view.rightView} />
+        </>
+      )}
     </div>
   );
 }

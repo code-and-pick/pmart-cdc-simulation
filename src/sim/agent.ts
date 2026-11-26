@@ -24,7 +24,19 @@ export interface PdaView {
 export interface DutyClock {
   onDuty(a: Agent): boolean;
   dutyLabel(a: Agent): string;
+  /** 시뮬레이션 시각(초) — 작업 기록 시각 */
+  now?(): number;
 }
+
+/** 작업 기록 한 줄 — 하는 일이 바뀐 시각·그때 자리(사용자 2026-11-26 "작업자를 누르면 흐름·실시간으로 어디서 뭘 하는지") */
+export interface ActivityRec {
+  at: number;
+  text: string;
+  x: number;
+  z: number;
+}
+/** 작업자마다 남기는 기록 수 */
+const HISTORY_MAX = 60;
 
 /** 일 없이 기다리는 중인지 — "작업 대기"·"DPS 박스 기다림" 등(좁은 통로에서 앞사람을 기다리는 것은 일하는 중으로 본다) */
 export function idleActivity(activity: string): boolean {
@@ -48,7 +60,18 @@ export class Agent {
   onDutySeconds = 0;
   idleSeconds = 0;
   units = 0;
-  activity = '근무 전';
+  private _activity = '근무 전';
+  /** 하는 일이 바뀐 기록(최근 HISTORY_MAX 개) */
+  readonly history: ActivityRec[] = [];
+  get activity(): string {
+    return this._activity;
+  }
+  set activity(v: string) {
+    if (v === this._activity) return;
+    this._activity = v;
+    this.history.push({ at: this.clock.now?.() ?? 0, text: v, x: this.pos.x, z: this.pos.z });
+    if (this.history.length > HISTORY_MAX) this.history.shift();
+  }
   carrying: 'CART' | 'PALLET' | 'ROLL' | null = null;
   /** 지게차를 세워 두고 걸어서 선반에 갔을 때 — 지게차 자리 [사용자 2026-11-25 "지게차는 선반 입구까지만"] */
   parked: { x: number; z: number; heading: number } | null = null;

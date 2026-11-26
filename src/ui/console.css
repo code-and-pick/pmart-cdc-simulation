@@ -1373,3 +1373,27 @@ details.sec > summary h4 { justify-content: flex-start; gap: 6px; }
 .k-TOUT { --mv: #f59e0b; }
 .k-RECEIPT_ACK { --mv: #34d399; }
 .k-INITIAL_BALANCE { --mv: #64748b; }
+
+/* 고른 작업자 흐름(WorkerFlow) — 사용자 2026-11-26 */
+.wflow { border-color: var(--accent, #7c5cff); }
+.wf-steps { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 2px; margin: 2px 0 10px; }
+.wf-step-wrap { display: inline-flex; align-items: center; gap: 2px; }
+.wf-step { display: inline-flex; align-items: center; gap: 5px; padding: 4px 8px; border-radius: 999px; border: 1px solid var(--line); background: var(--bg, transparent); font-size: 11.5px; color: var(--muted); }
+.wf-step i { font-style: normal; font-weight: 700; font-size: 10px; width: 16px; height: 16px; border-radius: 50%; display: inline-grid; place-items: center; background: var(--line); color: var(--ink, inherit); }
+.wf-step.done { color: var(--ink, inherit); opacity: .75; }
+.wf-step.done i { background: var(--ok, #2e9e6a); color: #fff; }
+.wf-step.now { color: #fff; background: var(--accent, #7c5cff); border-color: var(--accent, #7c5cff); font-weight: 700; animation: wfpulse 1.4s ease-in-out infinite; }
+.wf-step.now i { background: #fff; color: var(--accent, #7c5cff); }
+@keyframes wfpulse { 50% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent, #7c5cff) 25%, transparent); } }
+.wf-arrow { color: var(--muted); font-size: 11px; padding: 0 1px; }
+.wf-now { display: grid; gap: 6px; margin-bottom: 8px; }
+.wf-now > div { display: flex; gap: 8px; align-items: baseline; }
+.wf-now small, .wf-rows small { color: var(--muted); font-size: 11px; min-width: 34px; }
+.wf-now b { font-size: 13px; }
+.wf-rows { display: grid; grid-template-columns: 1fr 1fr; gap: 3px 10px; font-size: 12px; margin-bottom: 8px; }
+.wf-hist { max-height: 260px; overflow: auto; border-top: 1px solid var(--line); padding-top: 6px; font-size: 12px; }
+.wf-hist-h { color: var(--muted); font-size: 11px; margin-bottom: 4px; }
+.wf-hist > div:not(.wf-hist-h):not(.note) { display: grid; grid-template-columns: 62px 1fr auto; gap: 6px; padding: 2px 0; }
+.wf-hist .t { color: var(--muted); font-variant-numeric: tabular-nums; }
+.wf-hist .p { color: var(--muted); font-size: 11px; max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wf-hist .now .x { font-weight: 700; }

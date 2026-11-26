@@ -335,6 +335,10 @@ export class Simulation implements DutyClock {
   private window(a: Agent) {
     return a.shift === 'DAY' ? SHIFT.day : a.shift === 'NIGHT' ? OUTBOUND.loaderShift : SHIFT.evening;
   }
+  now(): number {
+    return this.time;
+  }
+
   onDuty(a: Agent): boolean {
     const m = this.time / 60;
     const w = this.window(a);
