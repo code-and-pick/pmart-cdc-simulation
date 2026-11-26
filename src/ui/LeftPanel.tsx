@@ -1,5 +1,6 @@
 // 왼쪽 패널 — 설정(센터 고정값·시간표) · 구역(층·칸 정보) · 도움말. MFC 시뮬레이터 LeftPanel 의 sec/srow 모양을 쓴다.
 import { Fragment, lazy, Suspense, useEffect, useState, type ReactNode } from 'react';
+import { runLanOne, type RunStep } from '../backend/http/lanRun';
 import { checkReadiness, READINESS_KO, type ProbeResult } from '../backend/http/readiness';
 import { useApp, useTick, useView } from '../app/context';
 import { CDC_FACTS, MFCS, OUTBOUND, SHIFT, WORK, RACK, FLOW, AUTOSTORE } from '../config';
@@ -206,6 +207,7 @@ function Settings() {
   return (
     <>
       {real && <RealCheck />}
+      {real && <LanRun />}
       <VirtualWorkers />
       {/* 글 줄 대신 숫자 타일·막대·표(사용자 2026-11-25 "글이 많아 직관적으로 안 보여") */}
       <Sec title={CDC_FACTS.name} aside="고정값">
@@ -622,6 +624,49 @@ function CellCard() {
           <Row k="현물 · 예약" v={`${c.onHand.toLocaleString()} · ${c.reserved.toLocaleString()} 유닛`} />
         </div>
       ))}
+    </Sec>
+  );
+}
+
+/** 실서버 한 건 돌리기 — 새 TRF 하나를 인수부터 출발까지(LAN 에 씀, 사용자 2026-11-26 승인 "LAN 에서 새 TRF 한 건을 처음부터 끝까지 돌리는 점검") */
+function LanRun() {
+  const { real } = useApp();
+  const [mfcId, setMfcId] = useState<string>(MFCS[0].id);
+  const [steps, setSteps] = useState<RunStep[] | null>(null);
+  const [busy, setBusy] = useState(false);
+  if (!real) return null;
+  const go = () => {
+    setBusy(true);
+    setSteps([]);
+    void runLanOne({ gateway: real.backend.client, backend: real.backend, internal: real.internal, operatorId: () => real.tokens.operatorId }, { mfcId, skus: 3, qty: 2 }, setSteps).finally(() => setBusy(false));
+  };
+  return (
+    <Sec title="한 건 돌리기 (LAN 에 씀)" aside={busy ? '도는 중…' : <button onClick={go}>시작</button>}>
+      <div className="help">
+        <p>새 TRF 하나(상온 · 피킹면 재고 3품목 × 2개)를 인수 → 할당 → Wave → 피킹 → 분류 → 검품 → 배차·계획완료 → 상차 → 입차·상차완료·출차 → 출발 검증까지 계약 API 로 차례로 부릅니다. 막히면 그 단계에서 멈추고 응답 code 를 그대로 보여 줍니다.</p>
+        <label>
+          MFC{' '}
+          <select value={mfcId} onChange={(e) => setMfcId(e.target.value)} disabled={busy}>
+            {MFCS.filter((m) => !m.id.startsWith('ETC-')).map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.name} ({m.id})
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+      <div className="rc-list">
+        {(steps ?? []).map((st, i) => (
+          <div key={i} className={`rc-item ${st.state === 'ok' ? 'ok' : st.state === 'fail' ? 'bad' : 'warn'}`}>
+            <div className="rc-top">
+              <i />
+              <b>{i + 1}. {st.name}</b>
+              <span>{st.state === 'ok' ? '완료' : st.state === 'fail' ? '막힘' : '도는 중'}</span>
+            </div>
+            <code>{st.detail}</code>
+          </div>
+        ))}
+      </div>
     </Sec>
   );
 }
