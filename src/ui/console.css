@@ -1813,3 +1813,8 @@ tr.ex td { color: var(--muted); font-style: italic; }
 .lr-open-row.on span b { color: #2f80ed; }
 .lr-open-row.on { background: color-mix(in srgb, #2f80ed 9%, transparent); border-radius: 7px; }
 .lr-open-row i { width: 0; }
+/* 실서버 운송 탭 — LAN 운행 카드 */
+.lt-trips { display: grid; gap: 8px; }
+.lt-trips .lt-trip { display: grid; gap: 6px; padding: 10px; border: 1px solid var(--line); border-radius: 10px; cursor: pointer; }
+.lt-trips .lt-trip.on { border-color: #2f80ed; background: color-mix(in srgb, #2f80ed 7%, transparent); }
+.lt-trips .lt-trip .lt-act { cursor: default; }

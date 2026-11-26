@@ -15,7 +15,9 @@ export interface LanRunState {
   trfId?: string;
 }
 
-let state: LanRunState = { steps: null, busy: false, mfcId: 'MFC-BJG-01', mode: 'pda', hideScan: false };
+const KEEP = 'cdc-sim-lan-trf';
+const kept = typeof sessionStorage === 'undefined' ? null : sessionStorage.getItem(KEEP);
+let state: LanRunState = { steps: null, busy: false, mfcId: 'MFC-BJG-01', mode: 'pda', hideScan: false, ...(kept ? { trfId: kept } : {}) };
 const subs = new Set<() => void>();
 
 export function setLanRun(p: Partial<LanRunState>) {
@@ -26,6 +28,11 @@ export function setLanRun(p: Partial<LanRunState>) {
     next.hideScan = false;
   }
   state = next;
+  // 보던 TRF 는 새로고침해도 남김(사용자 2026-11-26 "도착 보내기 단추가 있던 탭이 없어졌어")
+  if ('trfId' in p && typeof sessionStorage !== 'undefined') {
+    if (next.trfId) sessionStorage.setItem(KEEP, next.trfId);
+    else sessionStorage.removeItem(KEEP);
+  }
   for (const f of subs) f();
 }
 

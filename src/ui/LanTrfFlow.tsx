@@ -44,7 +44,7 @@ function stageOf(t: TransferIntake, trip?: Trip | null, stop?: Stop | null): num
 const hm = (iso?: string | null) => (iso ? new Date(iso).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }) : '');
 const who = (id?: string | null) => (id ? (id.startsWith('OP-') ? `작업자 ${id.slice(3, 9)}` : id) : '');
 
-interface Stop {
+export interface Stop {
   seq: number;
   mfcId: string;
   state: string;
@@ -54,7 +54,7 @@ interface Stop {
   departedAt?: string | null;
   plannedArrivalAt?: string | null;
 }
-interface Trip {
+export interface Trip {
   tripId: string;
   state: string;
   vehicleId?: string | null;
@@ -287,7 +287,7 @@ export function LanTrfFlow() {
 }
 
 /** 출차 뒤 — 실서버엔 DC 트럭 기사 앱이 없어 도착·정차 출발·운행 종료를 운영자로 보낸다(transport-execution, OPERATOR). 하차 인계는 MFC 점원이 PDA 로(사용자 2026-11-26 "도착 보내는 버튼을 시뮬에 만들어도 되고") */
-function TripActions({ trip, stop, boxes }: { trip: Trip; stop: Stop; boxes: string[] }) {
+export function TripActions({ trip, stop, boxes }: { trip: Trip; stop: Stop; boxes: string[] }) {
   const { real } = useApp();
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
@@ -341,6 +341,78 @@ function TripActions({ trip, stop, boxes }: { trip: Trip; stop: Stop; boxes: str
         </button>
       )}
       {msg && <small>{msg}</small>}
+    </div>
+  );
+}
+
+const TRIP_STATE_KO: Record<string, string> = { SCHEDULED: '계획완료', CHECKED_IN: '입차', LOADED: '상차완료', DEPARTED: '운행 중', COMPLETED: '운행 종료', CANCELLED: '취소' };
+const STOP_KO: Record<string, string> = { PLANNED: '도착 전', ARRIVED: '도착', HANDED_OVER: '인계', DEPARTED: '정차 출발' };
+
+/** 실서버 운송 탭 — LAN 운행 목록(시뮬레이션 운행 대신). 누르면 그 TRF 흐름이 위에 뜨고, 단추로 도착·정차 출발·운행 종료(사용자 2026-11-26 "이 탭 운송탭에 나와야") */
+export function LanTransport() {
+  const { real } = useApp();
+  const viewing = useLanRun().trfId;
+  const [trips, setTrips] = useState<Trip[] | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  useEffect(() => {
+    if (!real) return;
+    let on = true;
+    const load = () =>
+      real.backend.client
+        .call<{ items?: Trip[] }>('GET', '/cdcs/CDC01/trips', { query: { size: '100' } })
+        .then((r) => {
+          if (!on) return;
+          setTrips(r.body.items ?? []);
+          setErr(null);
+        })
+        .catch((e: unknown) => on && setErr(e instanceof Error ? e.message : String(e)));
+    void load();
+    const t = setInterval(load, 3000);
+    return () => {
+      on = false;
+      clearInterval(t);
+    };
+  }, [real]);
+  if (!real) return null;
+  // 시험 TRF 가 든 운행 먼저, 안 끝난 것 먼저, 최근 순
+  const list = [...(trips ?? [])]
+    .filter((x) => x.state !== 'CANCELLED')
+    .sort((a, b) => Number(a.state === 'COMPLETED') - Number(b.state === 'COMPLETED') || (b.departedAt ?? '').localeCompare(a.departedAt ?? ''));
+  return (
+    <div className="lan-trf lt-trips">
+      <div className="note">실서버 운행 · 누르면 위에 TRF 흐름 · 3초마다 새로 읽음</div>
+      {err && <div className="note">읽기 실패 — {err}</div>}
+      {!trips && !err && <div className="note">읽는 중…</div>}
+      {trips && !list.length && <div className="note">운행이 없습니다</div>}
+      {list.map((tr) => {
+        const trfs = tr.stops.flatMap((s) => s.trfIds ?? []);
+        const sim = trfs.find((x) => x.startsWith('TRF-SIM-'));
+        const mine = trfs.includes(viewing ?? '');
+        return (
+          <div key={tr.tripId} className={`lt-trip${mine ? ' on' : ''}`} onClick={() => sim && setLanRun({ trfId: sim })} role={sim ? 'button' : undefined}>
+            <div className="lt-h">
+              <b>{tr.tripId}</b>
+              <span>{tr.vehicleId ?? ''}</span>
+              <em className={tr.state === 'COMPLETED' ? 'ok' : ''}>{TRIP_STATE_KO[tr.state] ?? tr.state}</em>
+            </div>
+            {tr.stops.map((st) => (
+              <div key={st.seq} className="lt-line">
+                <span>
+                  {st.seq}. {st.mfcId}
+                </span>
+                <span>{(st.trfIds ?? []).map((x) => x.replace('TRF-SIM-', 'SIM ')).join(', ')}</span>
+                <b className={st.state === 'DEPARTED' ? 'ok' : ''}>{STOP_KO[st.state] ?? st.state}</b>
+              </div>
+            ))}
+            {tr.state === 'DEPARTED' &&
+              tr.stops.map((st) => (
+                <div key={`a${st.seq}`} onClick={(e) => e.stopPropagation()}>
+                  <TripActions trip={tr} stop={st} boxes={[]} />
+                </div>
+              ))}
+          </div>
+        );
+      })}
     </div>
   );
 }

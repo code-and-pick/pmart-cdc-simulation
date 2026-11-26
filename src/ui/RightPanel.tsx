@@ -5,7 +5,7 @@ import { useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'reac
 import { useApp, useTick, useView } from '../app/context';
 import { MFCS, OUTBOUND, TMS } from '../config';
 import type { RightView } from '../render/controller';
-import { LanTrfFlow } from './LanTrfFlow';
+import { LanTransport, LanTrfFlow } from './LanTrfFlow';
 import { useLanRun } from './lanRunStore';
 import { TEMP_KO } from '../sim/simulation';
 import { ROLE_KO } from '../sim/agent';
@@ -607,8 +607,9 @@ function DcStock() {
 }
 
 function LogBody({ tab }: { tab: RightView }): ReactNode {
-  const { sim } = useApp();
-  if (tab === 'transport') return <Transport />;
+  const { sim, real } = useApp();
+  // 실서버 모드 — 운송 탭은 LAN 운행(도착·인계 단추)
+  if (tab === 'transport') return real ? <LanTransport /> : <Transport />;
   if (tab === 'trf') return <TrfBoard />;
   if (tab === 'admin') return <AdminBoard />;
   if (tab === 'moves') return <MovesBoard />;
