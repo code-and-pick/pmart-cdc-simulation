@@ -463,14 +463,40 @@ export function zoneCards(f: FloorLayout): Card[] {
   return out;
 }
 
+/** 가까이 가면 카드 흐리게(사용자 2026-11-26) — 카메라에서 FADE_FAR m 밖은 그대로, FADE_NEAR m 안은 FADE_MIN 까지 [시뮬] */
+const FADE_FAR = 70;
+const FADE_NEAR = 30;
+const FADE_MIN = 0.12;
+
 function ZoneCards({ f }: { f: FloorLayout }) {
   const cards = useMemo(() => zoneCards(f), [f]);
+  const mats = useRef<(THREE.MeshBasicMaterial | null)[]>([]);
+  const at = useMemo(() => new THREE.Vector3(), []);
+  useFrame(({ camera }) => {
+    cards.forEach((t, i) => {
+      const m = mats.current[i];
+      if (!m) return;
+      const d = camera.position.distanceTo(at.set(t.pos[0], t.pos[1], t.pos[2]));
+      const k = Math.min(1, Math.max(0, (d - FADE_NEAR) / (FADE_FAR - FADE_NEAR)));
+      const o = FADE_MIN + (1 - FADE_MIN) * k;
+      if (Math.abs(m.opacity - o) > 0.01) m.opacity = o;
+    });
+  });
   return (
     <>
-      {cards.map((t) => (
+      {cards.map((t, i) => (
         <mesh key={t.id} position={t.pos} renderOrder={5} raycast={() => null}>
           <planeGeometry args={[t.w, t.h]} />
-          <meshBasicMaterial map={t.tex} transparent depthWrite={false} toneMapped={false} side={THREE.DoubleSide} />
+          <meshBasicMaterial
+            ref={(m) => {
+              mats.current[i] = m;
+            }}
+            map={t.tex}
+            transparent
+            depthWrite={false}
+            toneMapped={false}
+            side={THREE.DoubleSide}
+          />
         </mesh>
       ))}
     </>
