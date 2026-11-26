@@ -181,7 +181,7 @@ export function WorkerFlow() {
   // 이번 회차 = 마지막으로 1단계(또는 그다음 첫 단계)가 시작된 뒤
   let cycleFrom = 0;
   for (let i = segs.length - 1; i >= 0; i--)
-    if (segs[i].step === 0 || (i > 0 && segs[i].step < segs[i - 1].step)) {
+    if (i > 0 && segs[i].step < segs[i - 1].step) {
       cycleFrom = i;
       break;
     }
@@ -197,7 +197,8 @@ export function WorkerFlow() {
     sum.set(s.step, v);
   }
   // 한 바퀴 수·평균 — 1단계가 다시 시작된 횟수
-  const starts = segs.filter((s, i) => s.step === 0 && i > 0).map((s) => s.start);
+  // 단계가 앞으로 되돌아가면 새 바퀴(지게차 보충처럼 일이 이어지면 1단계 대기를 건너뛰고 2단계부터 다시 — 그것도 한 바퀴, 사용자 2026-11-26)
+  const starts = segs.filter((s, i) => i > 0 && s.step < segs[i - 1].step).map((s) => s.start);
   const cycles = starts.length;
   const avgCycle = cycles > 1 ? (starts[starts.length - 1] - starts[0]) / (cycles - 1) : null;
   const idleNow = flow.idle?.test(a.activity) || a.idle;

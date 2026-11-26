@@ -1439,3 +1439,18 @@ details.sec > summary h4 { justify-content: flex-start; gap: 6px; }
 .wf-log .t { color: var(--muted); font-variant-numeric: tabular-nums; }
 .wf-log .d { width: 8px; height: 8px; border-radius: 50%; }
 .wf-log .p { color: var(--muted); font-size: 10.5px; max-width: 130px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* 실서버 연결 점검 목록(RealCheck) */
+.rc-list { display: grid; gap: 6px; }
+.rc-item { border: 1px solid var(--line); border-radius: 9px; padding: 6px 8px; display: grid; gap: 2px; min-width: 0; }
+.rc-top { display: flex; align-items: center; gap: 6px; }
+.rc-top i { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex-shrink: 0; }
+.rc-item.ok .rc-top i { background: #27ae60; }
+.rc-item.warn .rc-top i { background: #f2994a; }
+.rc-item.bad .rc-top i { background: #eb5757; }
+.rc-top b { flex: 1; font-size: 12.5px; }
+.rc-top span { font-size: 12px; font-weight: 700; }
+.rc-item.ok .rc-top span { color: #27ae60; }
+.rc-item.bad .rc-top span { color: #eb5757; }
+.rc-item small { color: var(--muted); font-size: 11px; }
+.rc-item code { font-size: 11px; color: var(--muted); white-space: normal; word-break: break-all; }

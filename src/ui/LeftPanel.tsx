@@ -645,9 +645,21 @@ function RealCheck() {
         <p>실서버 모드에서는 시뮬레이션 엔진을 돌리지 않습니다 — TMS 가 LAN 에 아직 없고, LAN 위치표가 지금 도면(5F 냉장·냉동 · 6F·7F 상온)보다 예전 것입니다. CDC 시험 계정(claude-cdc-sup · cdcw-*)은 PC1 이 만들었고(R-16), 토큰을 받으려면 이 PC 비밀번호 폴더에 그 비밀번호 파일이 있어야 합니다. 아래는 조회만 해 보는 연결 점검입니다. 공개 경로는 게이트웨이 + 직원 토큰, 내부 경로는 LAN 서비스 직접(토큰 없음, CDC-9).</p>
         {real.tokens.lastError && <p>토큰: {real.tokens.lastError}</p>}
       </div>
-      {(rows ?? []).map((r) => (
-        <Row key={r.service} k={`${r.service} · ${r.use}`} v={`${READINESS_KO[r.state]} (${r.detail})`} />
-      ))}
+      {/* 서비스마다 한 칸 — 상태는 색 점·글, 자세한 응답은 아래 줄(긴 문구가 값 칸을 한 글자 폭으로 찌그러뜨리던 것, 사용자 2026-11-26 "계속 안 떠") */}
+      <div className="rc-list">
+        {(rows ?? []).map((r) => (
+          <div key={r.service} className={`rc-item ${r.state === 'READY' ? 'ok' : r.state === 'UNREACHABLE' || r.state === 'ERROR' ? 'bad' : 'warn'}`}>
+            <div className="rc-top">
+              <i />
+              <b>{r.service}</b>
+              <span>{READINESS_KO[r.state]}</span>
+            </div>
+            <small>{r.use}</small>
+            <code>{r.detail}</code>
+          </div>
+        ))}
+        {!rows && <div className="note">점검 중…</div>}
+      </div>
     </Sec>
   );
 }
