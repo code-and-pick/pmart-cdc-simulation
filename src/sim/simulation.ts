@@ -232,7 +232,7 @@ export class Simulation implements DutyClock {
   readonly lineLitHist: number[] = [];
   readonly lineLitByFloor = new Map<FloorNo, number[]>();
   /** 오토스토어 — 로봇·포트 상태와 집계(§5) */
-  readonly auto = { robotFree: [] as number[], portFree: [] as number[], portLast: [] as number[], portBusy: [] as number[], portHeld: [] as number[], waiting: 0, waits: 0, waitSec: 0, bins: 0, counts: 0, refills: 0, firstAt: 0 };
+  readonly auto = { robotFree: [] as number[], portFree: [] as number[], portLast: [] as number[], portBusy: [] as number[], portHeld: [] as number[], waiting: 0, waits: 0, waitSec: 0, bins: 0, counts: 0, refills: 0, firstAt: 0, lastAt: 0 };
   /** 층별 마지막 피킹 시각 */
   readonly lastPickAt = new Map<FloorNo, number>();
   /** 방식별 닫은 박스 수(DPS·박스·FC 바로 출고대기·라인·분배) — 시험·지표용 */
@@ -1038,12 +1038,17 @@ export class Simulation implements DutyClock {
     }
     st.portBusy[p] += this.time - st.portHeld[p];
     st.portFree[p] = this.time;
+    st.lastAt = this.time;
   }
 
-  /** 포트 가동률(0~1) — 처음 통이 온 뒤 경과 시간 대비 */
+  /**
+   * 포트 가동률(0~1) — 처음 통이 온 때부터 마지막 통을 놓은 때까지(포트를 쓰는 동안) 대비.
+   * 전엔 지금 시각까지 나눠, 피킹이 끝난 18시 뒤 밤새 시간까지 들어가 40% 로 낮게 보였음(실제로는 통 대부분이 빈 포트를 기다림, 2026-11-26)
+   */
   portUtil(): number[] {
     const st = this.auto;
-    const el = Math.max(1, this.time - st.firstAt);
+    const busyNow = st.portFree.some((t) => t === Infinity);
+    const el = Math.max(1, (busyNow ? this.time : st.lastAt || this.time) - st.firstAt);
     return st.portBusy.map((b, i) => Math.min(1, (b + (st.portFree[i] === Infinity ? this.time - st.portHeld[i] : 0)) / el));
   }
 

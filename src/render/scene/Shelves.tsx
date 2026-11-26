@@ -165,15 +165,14 @@ function ShelfStock({ f }: { f: FloorLayout }) {
   );
 }
 
-/** 선반 통로 번호판(예 C61) — 통로 북쪽 끝 위 */
+/** 선반 통로 번호판(예 C61) — 그 통로의 북쪽 끝 위. 전엔 층 첫 선반 블록의 북쪽 끝 하나로 둬서, 블록이 남북 둘인 5F 냉동 H·6F 냉장 G 는 두 블록 번호판이 한 줄에 겹쳤음(2026-11-26) */
 function ShelfPlates({ f }: { f: FloorLayout }) {
   const view = useView();
   if (view.labelMode === 'off') return null;
-  const z0 = f.shelfRows[0]?.z0 ?? 0;
   return (
     <>
       {f.shelfAisles.map((a) => (
-        <sprite key={a.plate} position={[a.cx, SHELF.height + 0.6, z0 - 0.3]} scale={[1.6, 0.8, 1]}>
+        <sprite key={a.plate} position={[a.cx, SHELF.height + 0.6, (a.z0 ?? f.shelfRows[0]?.z0 ?? 0) - 0.3]} scale={[1.6, 0.8, 1]}>
           <spriteMaterial map={plateTexture(a.plate)} depthWrite={false} />
         </sprite>
       ))}

@@ -694,10 +694,11 @@ export function Inbound({ e, floor }: { e: Equip; floor: FloorNo }) {
   const r = e.rect;
   // 칸 자리는 입고 흐름(simulation.inboundOnce)과 같은 계산
   const { alongX, n, lanes, span, spots } = useMemo(() => inboundSpots(r), [r]);
-  const cx = (r.x0 + r.x1) / 2;
-  const cz = (r.z0 + r.z1) / 2;
   // 들어오는 쪽(앞) — 저울·카트
-  const head = alongX ? { x: r.x0 + 1.6, z: cz } : { x: cx, z: r.z0 + 1.6 };
+  // 들어오는 쪽(앞) — 저울·카트는 팔레트 줄 쪽(첫 줄과 같은 선), 바닥 글씨는 반대쪽 끝에(겹쳐 "입고 →" 가 저울에 가렸음, 2026-11-26)
+  const lane0 = 0.6 + 0.75;
+  const head = alongX ? { x: r.x0 + 1.6, z: r.z0 + lane0 } : { x: r.x0 + lane0, z: r.z0 + 1.6 };
+  const cart = alongX ? { x: r.x0 + 2.65, z: r.z0 + lane0 } : { x: r.x0 + lane0, z: r.z0 + 2.65 };
   const line = (x0: number, z0: number, x1: number, z1: number) => (
     <mesh rotation-x={-Math.PI / 2} position={[(x0 + x1) / 2, 0.011, (z0 + z1) / 2]}>
       <planeGeometry args={[Math.max(0.06, x1 - x0), Math.max(0.06, z1 - z0)]} />
@@ -728,7 +729,7 @@ export function Inbound({ e, floor }: { e: Equip; floor: FloorNo }) {
           );
         })}
         {/* 바닥 팔레트 저울(낮은 강판 + 표시기 기둥) */}
-        <group position={[head.x, 0, head.z + (alongX ? -0.9 : 0)]}>
+        <group position={[head.x, 0, head.z]}>
           <mesh position={[0, 0.04, 0]}>
             <boxGeometry args={[1.3, 0.08, 1.3]} />
             <meshStandardMaterial color={0x8f969f} metalness={0.4} roughness={0.5} />
@@ -747,7 +748,7 @@ export function Inbound({ e, floor }: { e: Equip; floor: FloorNo }) {
           </mesh>
         </group>
         {/* 이동식 라벨 프린터 카트(좁은 철제 카트 + 프린터 + PDA) */}
-        <group position={[head.x + (alongX ? 0 : 1.2), 0, head.z + (alongX ? 0.9 : 0)]}>
+        <group position={[cart.x, 0, cart.z]}>
           {[0.5, 0.9].map((y) => (
             <mesh key={y} position={[0, y, 0]}>
               <boxGeometry args={[0.5, 0.04, 0.4]} />
@@ -780,7 +781,7 @@ export function Inbound({ e, floor }: { e: Equip; floor: FloorNo }) {
           ['검수 완료', 0.6 + 2.4 + ((3 * n) / 4) * 1.5, '#1f9d5a', '#ffffff'],
         ] as const
       ).map(([t, u, bg, fg]) => {
-        const v = lanes === 2 ? span / 2 + 0.6 : span + 0.6 - 1.5 - 0.6;
+        const v = lanes === 2 ? span / 2 + 0.6 : span + 0.6 - 0.5;
         const at = alongX ? { x: r.x0 + u, z: r.z0 + Math.max(1.6, v) } : { x: r.x0 + Math.max(1.6, v), z: r.z0 + u };
         return (
           <mesh key={t} rotation-x={-Math.PI / 2} rotation-z={alongX ? 0 : Math.PI / 2} position={[at.x, 0.02, at.z]} raycast={() => null}>
