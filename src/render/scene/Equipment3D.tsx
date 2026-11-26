@@ -504,6 +504,10 @@ function DasLines({ e, floor, split }: { e: Equip; floor: FloorNo; split: boolea
       {dasRows(e.rect).map((row, k) => {
         const { z, cx, len, slots } = row;
         const mfcAt = new Map(MFCS.map((m, i) => [mfcSlotIndex(i, slots.length), m]));
+        // R/T 는 MFC 칸에만(사용자 2026-11-26 "R/T 자리를 없애" — MFC 5 곳인데 줄 길이만큼 빈 R/T 가 서 있었음). 틀·표시등도 MFC 칸 범위만
+        const mx = [...mfcAt.keys()].map((i) => slots[i]);
+        const fx0 = Math.min(...mx) - 0.7;
+        const fx1 = Math.max(...mx) + 0.7;
         return (
           <group key={k}>
             {/* 컨베이어 틀·크레이트·R/T 선반 틀은 움직이지 않음 → 합쳐 그림(성능) */}
@@ -523,13 +527,13 @@ function DasLines({ e, floor, split }: { e: Equip; floor: FloorNo; split: boolea
                   </group>
                 )
               ) : (
-                <RollContainer key={i} x={x} z={z + 1.35} cold={false} fill={mfcAt.has(i) ? 0.5 : 0} />
+                mfcAt.has(i) && <RollContainer key={i} x={x} z={z + 1.35} cold={false} fill={0.5} />
               ),
             )}
-            {!split && <BlueFrame x={cx} z={z + 1.35} len={len} depth={1.0} h={2.4} dir="x" levels={1} />}
+            {!split && <BlueFrame x={(fx0 + fx1) / 2} z={z + 1.35} len={fx1 - fx0} depth={1.0} h={2.4} dir="x" levels={1} />}
             </StaticMerge>
             {/* 표시등 줄(꺼진 상태) — 켜지는 불은 WorkLights 가 실제 작업대로 그린다 */}
-            {!split && <LightStrip x={cx} y={2.4} z={z + 0.83} len={len} dir="x" busy={off} />}
+            {!split && <LightStrip x={(fx0 + fx1) / 2} y={2.4} z={z + 0.83} len={fx1 - fx0} dir="x" busy={off} />}
             {/* MFC 칸 이름(PPC 번호·MFC) */}
             {[...mfcAt].map(([i, m]) => (
               <sprite key={m.id} position={[slots[i], split ? 1.7 : 3.0, z + (split ? 1.0 : 1.35)]} scale={[1.5, 0.56, 1]}>
