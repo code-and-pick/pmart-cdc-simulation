@@ -3,7 +3,6 @@
 // 값은 MOCK 계약 응답(이관 진행·원장)과 시뮬레이션 줄에서만.
 import { useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useApp, useTick, useView } from '../app/context';
-import { fmt } from '../backend/mock/MockTms';
 import { MFCS, OUTBOUND, TMS } from '../config';
 import type { RightView } from '../render/controller';
 import { TEMP_KO } from '../sim/simulation';
@@ -11,6 +10,7 @@ import { trfTemp } from '../sim/supply';
 import { AdminBoard, BarcodeBoard, MfcPick, MovesBoard, StockSearch, TrfBoard } from './Boards';
 import { DayTimeline, Meter, Tile } from './viz';
 import { WorkerFlow } from './WorkerFlow';
+import { PlanCard, TripCard, TripSummary } from './TransportFlow';
 
 const clock = (sec: number) => `${String(Math.floor(sec / 3600) % 24).padStart(2, '0')}:${String(Math.floor(sec / 60) % 60).padStart(2, '0')}`;
 /** 큰 수는 만 단위로 짧게 */
@@ -522,8 +522,6 @@ export function RightPanel() {
   );
 }
 
-const RUN_KO = { PLANNED: '배차', LOADING: '상차 중', IN_TRANSIT: '운송 중', RETURNING: '복귀 중', RETURNED: '복귀', CANCELLED: '결행' } as const;
-const hmSec = (sec?: number) => (sec === undefined ? '' : fmt(sec / 60));
 
 /** 운송 — 운행(노선 × 온도대)마다 차·기사·출차·정차별 도착·인계 [TMS 2.2] */
 function Transport() {
@@ -549,41 +547,11 @@ function Transport() {
         <div className="note">
           22:00 배차 전 — 오늘 운행 예정(정규차, 노선 × 온도대 차 한 대, 5톤 {TMS.vehicle.maxRt} R/T). 물량 없는 운행은 배차 때 결행.
         </div>
-        <table className="inv">
-          <thead>
-            <tr>
-              <th>노선</th>
-              <th>차·기사</th>
-              <th>출차</th>
-              <th>정차 (도착 예정)</th>
-              <th>상태</th>
-            </tr>
-          </thead>
-          <tbody>
-            {pre.map((p) => (
-              <tr key={`${p.routeId}-${p.temp}`}>
-                <td>
-                  {p.region} {TEMP_KO[p.temp]}
-                </td>
-                <td>
-                  {p.plateNo}
-                  <br />
-                  {p.driverName}
-                </td>
-                <td>{fmt(p.departMin)}</td>
-                <td>
-                  {p.stops.map((s) => (
-                    <div key={s.mfcId}>
-                      {MFCS.find((m) => m.id === s.mfcId)?.name.replace(/^\d호점 /, '')} {fmt(s.arriveMin)}
-                    </div>
-                  ))}
-                  <div className="muted">복귀 {fmt(p.returnMin)}</div>
-                </td>
-                <td>배차 전</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <div className="trips">
+          {pre.map((p) => (
+            <PlanCard key={`${p.routeId}-${p.temp}`} p={p} />
+          ))}
+        </div>
       </>
     );
   }
@@ -592,54 +560,13 @@ function Transport() {
     <div className="pick-row">
       <MfcPick />
     </div>
-    <table className="inv">
-      <thead>
-        <tr>
-          <th>노선</th>
-          <th>차·기사</th>
-          <th>출차</th>
-          <th>정차 (도착·인계)</th>
-          <th>상태</th>
-        </tr>
-      </thead>
-      <tbody>
-        {runs.map((r) => (
-          <tr key={r.plan.tripId} title={`${r.plan.tripId} · ${r.result ?? ''}`}>
-            <td>
-              {r.plan.region} {TEMP_KO[r.plan.temp]}
-            </td>
-            <td>
-              {r.plateNo}
-              <br />
-              {r.driverName}
-            </td>
-            <td>
-              {fmt(r.plan.plannedDepartMin)}
-              {r.departedAt !== undefined && (
-                <>
-                  <br />
-                  실제 {hmSec(r.departedAt)}
-                </>
-              )}
-            </td>
-            <td>
-              {r.stops.map((st, i) => (
-                <div key={st.mfcId}>
-                  {MFCS.find((m) => m.id === st.mfcId)?.name.replace(/^\d호점 /, '')} {fmt(r.plan.plannedArriveMin[i])}
-                  {st.arrivedAt !== undefined && ` → ${hmSec(st.arrivedAt)}`}
-                  {st.handedAt !== undefined && ` · 인계 ${(st.received ?? 0).toLocaleString()}`}
-                </div>
-              ))}
-            </td>
-            <td>
-              {RUN_KO[r.state]}
-              <br />
-              R/T {Math.ceil(r.loaded.length / OUTBOUND.boxesPerRt)}
-            </td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
+    {/* 흐름 — 운행마다 배차 → 상차 → 출발 → MFC 도착·인계 → 복귀 (사용자 2026-11-26) */}
+    <TripSummary runs={[...sim.runs.values()]} />
+    <div className="trips">
+      {runs.map((r) => (
+        <TripCard key={r.plan.tripId} r={r} />
+      ))}
+    </div>
     </>
   );
 }
