@@ -180,12 +180,12 @@ export const AUTOSTORE = {
   unitsPerCompartment: 40,
   minQty: 8,
   /** 로봇·포트 [가정 — 설치비 비례] · 포트당 시간당 통 교환 상한 [가정] */
-  robots: 10,
+  robots: 30,
   /**
    * 포트 3 [시뮬 계산] — 2026-11-26 가동률 계산을 고친 뒤(포트를 쓰는 동안만 나눔) 하루를 돌려 비교: 2개 = 가동 77% · 통 582 중 552 회 대기 평균 78초 · 7F 피킹 끝 17:57,
    * 3개 = 가동 67% · 427 회 평균 32초 · 7F 16:49(1시간 이름). 사용자 "계산대로 해" → 3. (전에 2개로 줄인 근거 "3개 26%"는 밤 시간까지 나눈 잘못된 계산)
    */
-  ports: 3,
+  ports: 8, // 물량 30만: 통 교환 약 3.7배 → 3 → 8(2026-11-26, 하루 돌려 확인)
   portBinsPerHour: 300,
   /** 로봇이 통 하나 가져오는 시간(s) [가정] */
   fetchSec: 40,
@@ -312,15 +312,15 @@ export const FLOW = {
   /** 이 수 이상의 PPC 가 같은 날 같이 주문하면 DAS [가정] */
   dasMinPpc: 2,
   /** DAS 존 깊이(m) — R/T 한 줄(MFC 마다 1대) + 작업자 통로. MFC 가 늘어 두 줄이 필요하면 8.8 [시뮬, 사용자 2026-11-26 "한 줄 유지"] */
-  dasDepth: 4.4,
+  dasDepth: 9.2, // 물량 30만: 줄 1 → 2(줄마다 3명 — (9.2 − 0.4) / 4.4 = 2줄, 2026-11-26)
   /** 컨베이어·휠소터 속도(m/s) · 갈래 나누는 시간(s) [가정] */
   conveyorSpeed: 0.5,
   divertSec: 4,
   /** 층별 DAS 라인 작업자(나머지 분류 인원은 분배) · 한 줄 사람 수 [가정] */
   // 라인(DAS) 작업자 — 5F 상온 DAS 존·6F 냉장 라인·7F 생활용품 DAS 존(기사 "상온·냉장·냉동 모두 휠소터를 이용한 DAS")
-  lineWorkers: { 5: 1, 6: 2, 7: 2 } as Record<5 | 6 | 7, number>,
+  lineWorkers: { 5: 2, 6: 6, 7: 6 } as Record<5 | 6 | 7, number>,
   /** DPS(5F 냉동 전실) — 구역 수 · 구역당 작업자 · 컨베이어 속도(m/s) · 동시에 도는 박스 · 구역에서 박스 미는 시간(s) [가정] */
-  dps: { zones: 5, workersPerZone: 1, conveyorSpeed: 0.4, maxBoxes: 20, zoneDwellSec: 3 },
+  dps: { zones: 5, workersPerZone: 3, conveyorSpeed: 0.4, maxBoxes: 60, zoneDwellSec: 3 }, // 물량 30만: 구역당 1 → 3명, 동시 박스 20 → 60(2026-11-26)
 };
 
 export const WORKFORCE: Record<5 | 6 | 7, { fc: number; sort: number; jockey: number; replDay: number; replEve: number }> = {
@@ -328,10 +328,11 @@ export const WORKFORCE: Record<5 | 6 | 7, { fc: number; sort: number; jockey: nu
   // 5F: 상온 FC 6 + DAS 2(냉동은 DPS 구역 작업자 FLOW.dps), 6F: DAS 4 + 분배 2, 7F: FC 7 + DAS 2 [사용자 §9]
   // 2026-11-25 가동률 분석으로 다시 배분(사용자 "유휴 인원 — 병목인지 인원 과다인지"): 5F·6F FC·자키는 가동 5~32%(일이 적음), 7F FC 는 91%(오토스토어 SKU 2,400 으로 늘어 병목) → 5F FC 6→3·자키 3→2, 6F FC 5→4·자키 3→2, 7F FC 7→10·자키 4→3
   // 2026-11-25 다시(사용자 "인원 과다 고쳐"): 상온 DAS 없앰 → 5F·7F 분류 0, 5F FC 3→2 · 6F FC 4→3, 자키 줄임, 6F 라인 2명(+분배 2명, 사용자 "라인 2~3명·분배 2명"). 보충은 13:00 전에 끝나야 해 5명 그대로(3명이면 배포가 늦어 출차 4대 늦음), DPS 도 구역당 2명 그대로(1명이면 마지막 피킹 21:45)
-  5: { fc: 2, sort: 1, jockey: 1, replDay: 5, replEve: 1 },
+  // 2026-11-26 물량 30만(사용자 "1번" — 지금의 약 3.7배)에 맞춰 다시 [시뮬 계산, 하루 돌려 맞춤]: FC·자키·보충 약 3.7배, 분류 = DAS 라인(줄 2 × 3명) + 6F 분배
+  5: { fc: 7, sort: 2, jockey: 4, replDay: 16, replEve: 3 },
   // 6F: 라인 6명(줄 3개에 2명씩 — 한 줄에서 색으로 내 몫 구분) + 분배 2명, 자키 3명(라인에 상품 박스 공급) [사용자 2026-11-25 "라인 2~3명·분배 2명", "라인 줄 수에 맞게"]
-  6: { fc: 3, sort: 4, jockey: 2, replDay: 5, replEve: 1 },
-  7: { fc: 7, sort: 2, jockey: 2, replDay: 5, replEve: 1 },
+  6: { fc: 11, sort: 13, jockey: 7, replDay: 16, replEve: 3 },
+  7: { fc: 26, sort: 6, jockey: 7, replDay: 16, replEve: 3 },
 };
 
 /** 작업 시간·속도 [가정] — 라인 1인 하루 약 2만 걸음 [현장] 을 보정 목표로 */
@@ -360,7 +361,7 @@ export const WORK = {
   cartMaxTasks: 5,
   /** 6F 라인 작업자 수(나머지 분류 인원은 분배), 한 줄에 몇 명 [가정] */
   lineWorkers: 6,
-  perLine: 2,
+  perLine: 3,
   /** 무거운 상자(5F C·D) 피킹 시간 배수 [가정 — 현장 "무거운 상자 존"] */
   heavyFactor: 1.8,
   /** 분배 수량 실수 확률 · 다시 세는 시간(s) [가정 — 현장 "자잘한 야채가 많아 수량 실수가 잦다"] */
@@ -407,11 +408,11 @@ export const TASK = {
  */
 export const OUTBOUND = {
   /** 층마다 검품원(석간) · 도크 상차 작업자 수 [가정] */
-  inspectorsPerFloor: 1,
+  inspectorsPerFloor: 4,
   /** 도크 상차 인원(도크 층마다 나눔) — 상차 전 박스 스캔 대조(사용자 2026-11-25)로 4 → 6 [가정] */
-  loaders: 6,
+  loaders: 22,
   /** 층마다 야간 자키(22:00~ R/T 하강) [가정] */
-  nightJockeys: 1,
+  nightJockeys: 4,
   /** 도크 상차 근무 22:00~다음 날 04:30 [가정] — 노선별 출차(01:50~03:40, TMS 출차 공식) 30분 전부터 싣는다 */
   loaderShift: { start: 22 * 60, end: 28 * 60 + 30 },
   rtCountAt: 22 * 60,
