@@ -5,6 +5,8 @@ import { useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'reac
 import { useApp, useTick, useView } from '../app/context';
 import { MFCS, OUTBOUND, TMS } from '../config';
 import type { RightView } from '../render/controller';
+import { LanTrfFlow } from './LanTrfFlow';
+import { useLanRun } from './lanRunStore';
 import { TEMP_KO } from '../sim/simulation';
 import { ROLE_KO } from '../sim/agent';
 import { trfTemp } from '../sim/supply';
@@ -675,11 +677,16 @@ function Log({ tab }: { tab: RightView }) {
 
 export function RightPanel() {
   const view = useView();
+  const lan = useLanRun();
+  const { real } = useApp();
   useTick();
-  if (!view.rightView && !view.selectedWorker) return null;
+  const lanOn = !!real && !!lan.trfId;
+  if (!view.rightView && !view.selectedWorker && !lanOn) return null;
   return (
     <div className="panel right">
       {/* 고른 작업자의 흐름·실시간 자리 — 맨 위(사용자 2026-11-26) */}
+      {/* 실서버 TRF 흐름(PDA 로 하는 TRF) — 맨 위(사용자 2026-11-26) */}
+      <LanTrfFlow />
       <WorkerFlow />
       {view.rightView && (
         <>

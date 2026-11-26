@@ -53,8 +53,9 @@ export async function runLanOne(
   const steps: RunStep[] = [];
   const runId = `${Date.now().toString(36)}`;
   const key = (s: string) => `sim-lan-${runId}-${s}`;
+  let curTrf: string | undefined = opt.resumeTrfId;
   const step = async <T>(name: string, f: () => Promise<{ v: T; detail: string }>): Promise<T> => {
-    const s: RunStep = { name, state: 'run', detail: '…' };
+    const s: RunStep = { name, state: 'run', detail: '…', ...(curTrf ? { trfId: curTrf } : {}) };
     steps.push(s);
     onStep([...steps]);
     try {
@@ -121,6 +122,7 @@ export async function runLanOne(
     const due = new Date(`${shipDate}T00:00:00+09:00`);
     due.setTime(due.getTime() + (24 + 6) * 3600_000); // 다음 날 06:00 KST — [출고일 12:00, 다음 날 12:00) 안
     const trfId = res ? res.intake.trfId : `TRF-SIM-${runId.toUpperCase()}`;
+    curTrf = trfId;
     if (!res) await step('TRF 인수 (POST /internal/transfer-intakes)', async () => {
       const r = await deps.internal.intakeTransfer(
         {

@@ -722,8 +722,11 @@ function LanRun() {
   const { mfcId, mode, steps, busy, hideScan } = useLanRun();
   if (!real) return null;
   const go = (resumeTrfId?: string) => {
-    setLanRun({ busy: true, steps: [] });
-    void runLanOne({ gateway: real.backend.client, backend: real.backend, internal: real.internal, operatorId: () => real.tokens.operatorId }, { mfcId, skus: 3, qty: 2, pda: mode === 'pda' || !!resumeTrfId, pdaWaitMin: 60, ...(resumeTrfId ? { resumeTrfId } : {}) }, (st) => setLanRun({ steps: st })).finally(() => setLanRun({ busy: false }));
+    setLanRun({ busy: true, steps: [], ...(resumeTrfId ? { trfId: resumeTrfId } : {}) });
+    void runLanOne({ gateway: real.backend.client, backend: real.backend, internal: real.internal, operatorId: () => real.tokens.operatorId }, { mfcId, skus: 3, qty: 2, pda: mode === 'pda' || !!resumeTrfId, pdaWaitMin: 60, ...(resumeTrfId ? { resumeTrfId } : {}) }, (st) => {
+      const id = [...st].reverse().find((x) => x.trfId)?.trfId;
+      setLanRun({ steps: st, ...(id ? { trfId: id } : {}) });
+    }).finally(() => setLanRun({ busy: false }));
   };
   const waitingPda = busy && steps?.at(-1)?.name.startsWith('PDA');
   const cur = steps?.at(-1);
@@ -820,6 +823,7 @@ function LanOpenTrfs({ onResume }: { onResume: (trfId: string) => void }) {
           <span>
             {x.trfNumber ?? x.trfId} · {x.state} · 집음 {x.pickedQty}/{x.allocatedQty}
           </span>
+          <button className="ghost" onClick={() => setLanRun({ trfId: x.trfId })}>흐름</button>
           <button onClick={() => onResume(x.trfId)}>이어 하기</button>
         </div>
       ))}

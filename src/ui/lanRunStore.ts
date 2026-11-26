@@ -11,6 +11,8 @@ export interface LanRunState {
   /** PDA 코드 팝업을 접었나(단계가 바뀌면 다시 펼침) */
   hideScan: boolean;
   lastStep?: string;
+  /** 오른쪽 탭에 흐름을 보일 TRF(실서버) */
+  trfId?: string;
 }
 
 let state: LanRunState = { steps: null, busy: false, mfcId: 'MFC-BJG-01', mode: 'pda', hideScan: false };

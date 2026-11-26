@@ -1771,3 +1771,22 @@ tr.ex td { color: var(--muted); font-style: italic; }
 .lr-open-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .lr-open-row span { color: var(--muted); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lr-open-row button { flex: none; height: 26px; padding: 0 10px; border-radius: 7px; border: 1px solid #2f80ed; background: transparent; color: #2f80ed; cursor: pointer; font-size: 12px; }
+/* 실서버 TRF 흐름(오른쪽 맨 위) */
+.lan-trf .lt-list { display: grid; gap: 6px; }
+.lan-trf .lt-card { display: grid; gap: 4px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 9px; }
+.lan-trf .lt-h { display: flex; align-items: center; gap: 8px; font-size: 12.5px; }
+.lan-trf .lt-h span { color: var(--muted); font-size: 11.5px; }
+.lan-trf .lt-h em { margin-left: auto; font-style: normal; font-size: 11px; font-weight: 700; color: var(--muted); }
+.lan-trf em.ok, .lan-trf b.ok { color: #27ae60; }
+.lan-trf .lt-line { display: grid; grid-template-columns: 1fr auto auto; gap: 8px; font-size: 11.5px; align-items: center; }
+.lan-trf .lt-line > span:first-child { font-family: ui-monospace, monospace; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lan-trf .lt-line.box { padding: 6px 10px; border: 1px solid var(--line); border-radius: 9px; }
+.lan-trf .lt-card > small { color: var(--muted); font-size: 11px; }
+.lan-trf .lt-log { list-style: none; margin: 0; padding: 0; display: grid; }
+.lan-trf .lt-log li { display: grid; grid-template-columns: 62px 1fr; gap: 0 8px; padding: 6px 0; border-top: 1px solid var(--line); font-size: 12px; }
+.lan-trf .lt-log li:first-child { border-top: 0; }
+.lan-trf .lt-log .t { color: var(--muted); font-variant-numeric: tabular-nums; }
+.lan-trf .lt-log small { grid-column: 2; color: var(--muted); font-size: 11px; }
+.lr-open-row button.ghost { border-color: var(--line); color: inherit; }
+.lr-open-row { justify-content: flex-start; }
+.lr-open-row span { flex: 1; }
