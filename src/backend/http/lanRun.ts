@@ -306,24 +306,28 @@ export async function runLanOne(
         if (!n) throw new Error('받을 작업이 없음');
         return { v: n, detail: `작업 ${n}개 · ${picked.reduce((a, p) => a + p.qty, 0)}개` };
       });
-      const lpn = `LPN-SIM-${runId.toUpperCase()}-1`;
-      await step('분류 (sorting-results — 박스 1)', async () => {
-        const r = await deps.backend.reportSortingResult({ waveId: wave.waveId, trfId, workerId: worker, lpns: [{ lpn, unitType: 'BOX', state: 'SEALED', temperatureZone: 'AMBIENT', contents: picked }] }, key('sort'));
-        return { v: r, detail: `${lpn} · ${r.status}` };
+      // 상품(SKU·LOT)마다 박스 하나 — 섞인 박스는 MFC PDA 수령이 상품 수만큼 세어 막힘(mfc 시뮬 C-5, 2026-11-26). 온도대는 TRF 온도대
+      const boxes = [...new Map(picked.map((p) => [`${p.sku}|${p.lot}`, { ...p, qty: picked.filter((x) => x.sku === p.sku && x.lot === p.lot).reduce((a, x) => a + x.qty, 0) }])).values()].map((p, i) => ({ lpn: `LPN-SIM-${runId.toUpperCase()}-${i + 1}`, contents: [p] }));
+      const lpnIds = boxes.map((b) => b.lpn);
+      await step(`분류 (sorting-results — 박스 ${boxes.length})`, async () => {
+        const r = await deps.backend.reportSortingResult({ waveId: wave.waveId, trfId, workerId: worker, lpns: boxes.map((b) => ({ lpn: b.lpn, unitType: 'BOX' as const, state: 'SEALED' as const, temperatureZone: zone, contents: b.contents })) }, key('sort'));
+        return { v: r, detail: `${lpnIds.join(', ')} · ${r.status}` };
       });
       await step('검품 (inspection-results — 합격)', async () => {
-        const r = await deps.backend.reportInspectionResult({ trfId, inspectorId: worker, items: [{ lpn, result: 'PASSED' }] }, key('inspect'));
+        const r = await deps.backend.reportInspectionResult({ trfId, inspectorId: worker, items: lpnIds.map((lpn) => ({ lpn, result: 'PASSED' as const })) }, key('inspect'));
         return { v: r, detail: `${r.status}` };
       });
       const confirmed = await dispatch();
       tripId = confirmed.orderId;
       await step('상차 실적 (loading-results)', async () => {
-        const r = await deps.backend.reportLoadingResult({ trfId, tripId, vehicleId: confirmed.vehicleId ?? '', ...(confirmed.dockCode ? { dockCode: confirmed.dockCode } : {}), workerId: worker, action: 'LOADED', lpns: [{ lpn }] }, key('load'));
+        const r = await deps.backend.reportLoadingResult({ trfId, tripId, vehicleId: confirmed.vehicleId ?? '', ...(confirmed.dockCode ? { dockCode: confirmed.dockCode } : {}), workerId: worker, action: 'LOADED', lpns: lpnIds.map((lpn) => ({ lpn })) }, key('load'));
         return { v: r, detail: `${r.status}` };
       });
-      await checkIn(tripId);
+      // 이어 하기로 이미 입차한 운행이면 건너뜀
+      const tripState = (await deps.gateway.call<{ state?: string }>('GET', `/trips/${encodeURIComponent(tripId)}`).catch(() => null))?.body.state;
+      if (!tripState || tripState === 'SCHEDULED') await checkIn(tripId);
       await step('상차완료 (trips loading-completions)', async () => {
-        const r = await deps.gateway.call<{ state?: string }>('POST', `/trips/${encodeURIComponent(tripId)}/loading-completions`, { body: { transfers: [{ trfId, lpns: [lpn], rtCount: 1 }] }, idempotencyKey: key('loaded') });
+        const r = await deps.gateway.call<{ state?: string }>('POST', `/trips/${encodeURIComponent(tripId)}/loading-completions`, { body: { transfers: [{ trfId, lpns: lpnIds, rtCount: 1 }] }, idempotencyKey: key('loaded') });
         return { v: r.body, detail: `${r.body.state ?? r.status}` };
       });
     }
