@@ -5,6 +5,7 @@ DC 시뮬레이터가 클라이언트 앱에 부탁하는 것. 클라이언트 �
 | 번호 | 날짜 | 내용 | 상태 |
 |---|---|---|---|
 | C-01 | 2026-11-26 | **MFC PDA 앱(`apps/mfc_app`)으로 DC 작업자도 피킹·패킹·분배·출고(검품)·상차·하차** (사용자 "MFC 용 PDA 앱 만든 거 있는데 DC 작업자도 그 PDA 앱으로 피킹패킹분배출고상차하차 할 수 있게"). 아래 §C-01 | 반영됨 — pmart-clients 54825500(분배·패킹·검품·상차·MFC 하차 인계). 시뮬레이터 "실서버 한 건 돌리기" PDA 모드로 확인 |
+| C-02 | 2026-11-26 | **PDA 검품에 분배 끝난 TRF 가 안 뜸** — 검품 화면 TRF 목록(`_TrfPick` → `pickedTransfers`)이 `GET /cdcs/{cdcId}/transfers?state=PICKED` 만 부른다. 분배·패킹(sorting-results)을 다 하면 TRF 가 **SORTED** 로 넘어가 검품 목록에서 빠짐. 검품은 SORTED(부분 검품·재검품이면 INSPECTED 전까지)를 보여야 함 — 분배는 PICKED, 검품은 SORTED 로 화면마다 상태를 달리. LAN 실측: TRF-SIM-MWXEHEAB SORTED(분류 6/6·검품 0) 인데 PDA 검품에 작업 없음 | 요청 — mfc_app 담당(PC3) 세션이 목록에 없어 사용자 전달 |
 
 ## C-01 DC 작업자 PDA 업무
 
