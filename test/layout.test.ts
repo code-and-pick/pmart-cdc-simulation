@@ -62,7 +62,7 @@ describe('층 배치 [사용자 §3]', () => {
     const split = f.equipment.find((x) => x.kind === 'SPLIT')!.rect;
     const lanes = f.equipment.find((x) => x.kind === 'VEG_LANES')!.rect;
     expect(split.z1 <= lanes.z0).toBe(true); // 분배 → 야채 레인(남)
-    expect(f.aisles.length).toBeGreaterThanOrEqual(CHILLED_RACK.startAisles);
+    expect(f.aisles.length).toBe(CHILLED_RACK.aisles); // 냉장 랙은 며칠치만(사용자 2026-11-26)
     expect(f.shelves.filter((l) => l.lane).length).toBeGreaterThanOrEqual(300);
   });
 
@@ -121,13 +121,12 @@ describe('출고 흐름 배치 [기사 — 상온·냉장·냉동 모두 휠소�
 });
 
 describe('용량·SKU 자리 계산 [사용자 §4]', () => {
-  it('총 용량 = 팔레트 칸 × 평균 유닛 + 선반 × 80 + 레인 + 오토스토어 — 계산값, 520만 이상, 팔레트 18,000 이상', () => {
+  it('총 용량 = 팔레트 칸 × 평균 유닛 + 선반 × 80 + 레인 + 오토스토어 — 계산값, 520만 이상', () => {
     const c = L.capacity;
     const sum = L.floors.reduce((s, f) => s + [...f.locations, ...f.shelves].reduce((a, l) => a + l.capacity, 0), 0);
     expect(c.total).toBe(sum);
     expect(c.total).toBeGreaterThanOrEqual(c.target);
     expect(c.shortfall).toBe(0);
-    expect(c.pallets).toBeGreaterThanOrEqual(CHILLED_RACK.palletMin);
   });
 
   it('SKU 자리(선반 + 랙 1단 박스 피킹면 + 야채 레인 + 오토스토어) — 온도대별 목표·18,000 이상', () => {

@@ -108,6 +108,8 @@ describe('가짜 상품 마스터·시작 재고', () => {
       expect(s.shelf.type).toBe('PICK_FACE');
       expect(s.shelf.zone).toBe(s.zone);
       if (s.handling === 'SPLIT') expect(s.column).toEqual([]); // 야채는 바닥 레인에만
+      // 냉장은 잘 나가는 상품(supply popularPool)만 보관 기둥 — 냉장 랙을 며칠치로 줄임(사용자 2026-11-26)
+      else if (s.temp === 'CHILLED' && catalog.skus.indexOf(s) % 50 !== 0) expect(s.column).toEqual([]);
       else {
         expect(s.column.length).toBeGreaterThanOrEqual(3);
         expect(s.column.every((l) => l.type === 'RESERVE' && l.aisle === s.column[0].aisle && l.bay === s.column[0].bay && l.slot === s.column[0].slot)).toBe(true);

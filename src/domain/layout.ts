@@ -770,11 +770,8 @@ export function buildLayout(): Layout {
 
   // ── 6F 냉장 — 층 전체가 냉장 방 ─────────────────────
   const f6 = new FloorBuilder(specOf(6), Bd);
-  // 가공품 팔레트 랙 통로: 출발 10, 팔레트 칸 하한(18,000)을 지키도록 늘린다 [사용자 "용량 계산 결과로"]
-  const others = L5.locations.length + L7.locations.length;
-  const perAisle6 = 2 * RACK.bundleBays * 2 * STORE.bundleRows * RACK.slots * RACK.levels; // 묶음 하나 192 칸 → 통로 하나당 한 묶음
-  let nB = CHILLED_RACK.startAisles;
-  while (others + (nB - 1) * (perAisle6 / 2) < CHILLED_RACK.palletMin) nB++;
+  // 가공품 팔레트 랙 통로 — 냉장 며칠치만(config CHILLED_RACK, 사용자 2026-11-26 "18,000 은 SKU 자리 — 팔레트 랙이 아니어도 된다"). 남는 동쪽은 선반·분배·야채 레인이 넓어진다
+  const nB = CHILLED_RACK.aisles;
   const rack6W = rackWidth(nB) + 1;
   f6.racks([{ spec: f6.zone('G'), aisles: nB }], 0, rack6W, '냉장');
   f6.liftsAndStaging();
@@ -795,10 +792,13 @@ export function buildLayout(): Layout {
   // 냉장 방 안, 출고대기 바로 앞: 휠소터 줄 → DAS 존(컨베이어로 상품이 들어옴 — 핸드자키 대신, 사용자 §9). 동쪽: 분배(크레이트) → 야채 바닥 레인
   const [b0, b1] = f6.stagingSpan('G');
   const ex0 = shX0 + shW + 1.2;
-  f6.equip('WHEEL_SORTER', '휠소터 (냉장 — 박스째 → PPC 슈트 / 낱개 → DAS)', { x0: b0, z0: SORT_Z0, x1: ex0 - 0.5, z1: SORT_Z1 }, 'CHILLED');
+  // 휠소터는 출고대기·DAS 앞까지(분배는 랙 줄 남쪽으로 옮김 — 냉장 랙을 줄여 비운 자리, 사용자 2026-11-26)
+  f6.equip('WHEEL_SORTER', '휠소터 (냉장 — 박스째 → PPC 슈트 / 낱개 → DAS)', { x0: b0, z0: SORT_Z0, x1: b1 + 2, z1: SORT_Z1 }, 'CHILLED');
   f6.equip('DAS', 'DAS 존 (냉장)', { x0: b0, z0: DAS_Z0, x1: b1, z1: DAS_Z1 }, 'CHILLED');
-  const splitZ1 = bandDepth + 10;
-  f6.equip('SPLIT', '분배 (MFC 크레이트 — 출고 용기)', { x0: ex0, z0: DAS_Z0, x1: width - 1, z1: splitZ1 });
+  // 선반 동쪽 — 북쪽 끝에 분배(크레이트 두 줄), 그 남쪽 전부 야채 바닥 적치 레인(냉장 랙을 줄여 넓어짐 — SKU 자리, 사용자 2026-11-26)
+  const splitZ0 = bandDepth + 0.6;
+  const splitZ1 = splitZ0 + 9.2;
+  f6.equip('SPLIT', '분배 (MFC 크레이트 — 출고 용기)', { x0: ex0, z0: splitZ0, x1: width - 1, z1: splitZ1 });
   f6.vegLanes('G', { x0: ex0, z0: splitZ1 + 1, x1: width - 1, z1: depth - 1 }, SKU_PLACE.veg);
   f6.equip('INBOUND', '입고 검수 (냉장)', { x0: 2, z0: DAS_Z0, x1: Math.min(16, b0 - 1), z1: sz1 }, 'CHILLED');
   f6.coldRoom(

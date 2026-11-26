@@ -3,7 +3,7 @@
 // LOT: 선반 = 가장 먼저 끝나는 LOT, 팔레트 1·2단 = 같은 LOT, 3·4단 = 다음 LOT → FEFO 가 선반 → 팔레트 순으로 고른다.
 // React·three 에 의존하지 않는다.
 
-import { AUTOSTORE, CATALOG, SHELF, SKU_PLACE } from '../config';
+import { AUTOSTORE, CATALOG, SHELF, SKU_PLACE, SUPPLY } from '../config';
 import { Rng } from '../util/rng';
 import { skuQuota, type Layout, type Location } from './layout';
 import type { FloorNo, Temp } from './sites/chilgok';
@@ -111,6 +111,18 @@ export function buildCatalog(layout: Layout, baseDate: string): Catalog {
       else if (z === 'G') {
         take(shelves, n - SKU_PLACE.veg, 'LINE', WORDS.G);
         take(lanes, SKU_PLACE.veg, 'SPLIT', WORDS.VEG);
+        // 야채 레인을 넓힌 만큼(냉장 랙을 줄인 자리, 사용자 2026-11-26) 남는 레인은 잘 나가는 야채의 추가 자리로 — 모든 MFC 가 같이 요청해 레인 하나로는 모자람
+        {
+          const step = Math.max(1, Math.round(1 / SUPPLY.popularPool));
+          const base = skus.length + places.length - SKU_PLACE.veg;
+          const veg = places.slice(places.length - SKU_PLACE.veg);
+          const extra = lanes.slice(SKU_PLACE.veg);
+          let e = 0;
+          for (let round = 0; round < 3; round++)
+            veg.forEach((pl, i) => {
+              if ((base + i) % step === 0 && e < extra.length) pl.alt.push(extra[e++]);
+            });
+        }
       } else if (z === 'F') {
         // 오토스토어: SKU 하나 = 서로 다른 통의 칸 AUTOSTORE.compartmentsPerSku 개
         const per = AUTOSTORE.compartmentsPerSku;
@@ -121,7 +133,13 @@ export function buildCatalog(layout: Layout, baseDate: string): Catalog {
 
       // 보충 출발지 — 그 구역 보관 칸(RESERVE) 기둥(같은 통로·베이·슬롯), 피킹면 구역은 2~4단
       const bases = f.locations.filter((l) => l.zone === z && l.type === 'RESERVE' && l.level === (SKU_PLACE.faceZones.includes(z) ? 2 : 1));
-      const cnt = places.filter((p) => p.handling !== 'SPLIT').length;
+      // 냉장은 보관 랙을 며칠치로 줄여(config CHILLED_RACK) 보관 기둥을 잘 나가는 상품(모든 MFC 가 같이 요청 — supply popularPool)에만 준다.
+      // 나머지 냉장 상품은 피킹 선반 재고만(현장: 빠른 상품만 팔레트 보관, 느린 상품은 선반) [시뮬, 사용자 2026-11-26]
+      const start = skus.length;
+      const popularStep = Math.max(1, Math.round(1 / SUPPLY.popularPool));
+      const reserveOnlyPopular = places[0]?.loc.temp === 'CHILLED';
+      const gets = (p: Place, i: number) => p.handling !== 'SPLIT' && (!reserveOnlyPopular || (start + i) % popularStep === 0);
+      const cnt = places.filter((p, i) => gets(p, i)).length;
       const share = Math.max(1, Math.ceil(cnt / Math.max(1, bases.length)));
       let ri = 0;
       places.forEach((p, i) => {
@@ -133,8 +151,8 @@ export function buildCatalog(layout: Layout, baseDate: string): Catalog {
             if (!loc) break;
             column.push(loc);
           }
-        } else if (p.handling !== 'SPLIT' && bases.length) {
-          const base = bases[Math.floor((ri++ * bases.length) / Math.max(1, cnt - faces.length))] ?? bases[ri % bases.length];
+        } else if (gets(p, i) && bases.length) {
+          const base = bases[Math.floor((ri++ * bases.length) / Math.max(1, cnt - (reserveOnlyPopular ? 0 : faces.length)))] ?? bases[ri % bases.length];
           for (let lv = base.level; ; lv++) {
             const loc = byCode.get(base.code.replace(/-(\d+)-(\d)$/, `-${lv}-$2`));
             if (!loc) break;
@@ -152,7 +170,8 @@ export function buildCatalog(layout: Layout, baseDate: string): Catalog {
         const e2 = addDays(baseDate, d2);
         const lot1 = `L${e1.replace(/-/g, '').slice(2)}-${pad(serial, 4)}`;
         const lot2 = `L${e2.replace(/-/g, '').slice(2)}-${pad(serial, 4)}`;
-        const pickFill = p.loc.aisle < SHELF.aisleBase ? CATALOG.reserveFill : SHELF.fill;
+        // 보관 기둥이 없는 냉장 상품은 선반이 곧 재고 — 선반을 더 채워 둔다(현장: 냉장은 매일 아침 입고로 채움)
+        const pickFill = p.loc.aisle < SHELF.aisleBase ? CATALOG.reserveFill : reserveOnlyPopular && column.length === 0 ? CATALOG.chilledShelfFill : SHELF.fill;
         const faceShare = p.loc.aisle < SHELF.aisleBase ? 1 : 1;
         skus.push({
           sku,
