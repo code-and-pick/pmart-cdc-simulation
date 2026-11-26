@@ -96,6 +96,11 @@ export const AUTOSTORE_ROBOTS: Record<number, number> = { 6: 12, 7: 30 };
 export const OFFICE_W = 13.8;
 /** 오토스토어 폭(m) — 6F·7F 같게, 예전 폭 그대로이고 깊이만 띠 남쪽 끝까지(사용자 2026-11-26) [시뮬] */
 export const AUTOSTORE_W = 19.2;
+/**
+ * 피킹면 최소·목표(낱개) — 자동 보충(cdc-inbound)이 보는 값 [가정, 사용자 2026-11-26 "한계 해결해" — 그전엔 "사용자 결정 대기"로 비워 둠].
+ * 최소 = 칸 용량 × minPct(이 아래로 내려가면 보충), 목표 = 칸 용량 × targetPct(보충해 채우는 양). 오토스토어 통(bin)은 입고 포트로 따로라 빼고, 선반·랙 1단 박스 피킹면·야채 레인만.
+ */
+export const PICK_FACE_RULE = { minPct: 0.3, targetPct: 1.0 } as const;
 export const RACK_BUNDLE_BAYS: Record<5 | 6 | 7, number> = { 5: 12, 6: 10, 7: 10 };
 /**
  * 출고대기 줄 수 · 한 줄 칸 수(한 글자 층) [시뮬] — 6F·7F 상온은 앞쪽 띠를 넓혀(사용자 2026-11-26 "상온 앞부분 비좁다, 공간 더 확보·설비 크기도") 3줄 × 15칸 = 45칸.

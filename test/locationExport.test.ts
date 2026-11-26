@@ -37,3 +37,22 @@ describe('위치 목록 내보내기 [CDC-7, cdc-location 0.2.0]', () => {
     }
   });
 });
+
+describe('피킹면 최소·목표 설정 [시뮬 PICK_FACE_RULE, cdc-location 0.7.0 pick-face-settings]', () => {
+  it('PICK_FACE 칸만(오토스토어 통 빼고), 목표 ≥ 최소 ≥ 0, 2,000칸씩 나뉨', async () => {
+    const { buildLayout } = await import('../src/domain/layout');
+    const { buildPickFaceSettings, pickFaceSettingBatches } = await import('../src/domain/pickFaceSettings');
+    const L = buildLayout();
+    const s = buildPickFaceSettings(L);
+    const face = new Set(L.floors.flatMap((f) => [...f.shelves.filter((l) => !l.bin), ...f.locations.filter((l) => l.type === 'PICK_FACE')]).map((l) => l.code));
+    expect(s.items.length).toBe(face.size);
+    for (const i of s.items) {
+      expect(face.has(i.locationCode)).toBe(true);
+      expect(i.pickFaceMinQty).toBeGreaterThanOrEqual(0);
+      expect(i.pickFaceTargetQty).toBeGreaterThanOrEqual(i.pickFaceMinQty);
+    }
+    const b = pickFaceSettingBatches(L);
+    expect(b.every((x) => x.items.length <= 2000)).toBe(true);
+    expect(b.reduce((n, x) => n + x.items.length, 0)).toBe(s.items.length);
+  });
+});
