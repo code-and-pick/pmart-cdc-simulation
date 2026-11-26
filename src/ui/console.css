@@ -1561,3 +1561,7 @@ details.sec > summary h4 { justify-content: flex-start; gap: 6px; }
 .zp-grid span { display: flex; flex-direction: column; min-width: 0; }
 .zp-grid b { font-size: 12px; font-weight: 600; }
 .zp-grid small { font-size: 10.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* 예시 줄(목업 빈 목록) — 사용자 2026-11-26 */
+tr.ex td { color: var(--muted); font-style: italic; }
+.ex-note { border-left: 3px solid #f2994a; padding-left: 8px; margin-top: 6px; }

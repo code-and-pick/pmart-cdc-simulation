@@ -12,6 +12,26 @@ import { scanView, useScanView } from './scanView';
 const clock = (sec: number) => `${String(Math.floor(sec / 3600) % 24).padStart(2, '0')}:${String(Math.floor(sec / 60) % 60).padStart(2, '0')}`;
 const isoClock = (iso: string) => new Date(iso).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Seoul' });
 const mfcName = (id: string) => MFCS.find((m) => m.id === id)?.name ?? id;
+
+/**
+ * 예시 줄 — 목업에서 아직 그 시각이 안 와 목록이 비면(지난 TRF·MFC 인계·R/T 회수·진행 중 작업) 화면이 어떻게 채워지는지 보이게(사용자 2026-11-26
+ * "목업에서 오른쪽탭 정보 어떻게 뜨는지 확인하게 다 만들어서 넣어"). 값은 실규모 하루 결과(2026-11-26 day-report)와 같은 크기의 본보기 — 실제 기록 아님.
+ * 실제 값이 하나라도 생기면 예시는 사라진다.
+ */
+const EX = {
+  past: MFCS.map((m, i) => ({ trf: `T${String(260001 + i).padStart(6, '0')}`, mfc: m.id, state: 'DEPARTED', dep: [32_400, 41_800, 28_600, 30_100, 25_900, 2_000, 2_000, 2_000, 2_000][i] ?? 2_000, hand: 5.5 * 3600 + i * 900 })),
+  tasks: [
+    { task: 'K000412', trf: 'T260001 · T260005', state: 'IN_PROGRESS', who: 'FC 피커 6F-03', lines: '12/20' },
+    { task: 'K000413', trf: 'T260002', state: 'IN_PROGRESS', who: 'DPS 구역 5F-07', lines: '3/8' },
+    { task: 'K000418', trf: 'T260003 · T260004', state: 'ASSIGNED', who: 'FC 피커 7F-11', lines: '0/20' },
+    { task: 'K000421', trf: 'T260001', state: 'CREATED', who: '—', lines: '0/14' },
+  ],
+  handover: MFCS.slice(0, 5).map((m, i) => ({ car: `칠곡-5T-0${i + 1}A`, mfc: m.id, at: 5.5 * 3600 + i * 1200, sent: [32_400, 41_800, 28_600, 30_100, 25_900][i], recv: [32_400, 41_800, 28_598, 30_100, 25_900][i] })),
+  rt: MFCS.map((m, i) => ({ mfc: m.id, out: [62, 80, 55, 58, 50, 4, 4, 4, 4][i] ?? 4, back: [62, 80, 55, 58, 50, 4, 4, 4, 4][i] ?? 4, home: [62, 80, 55, 58, 50, 4, 4, 4, 4][i] ?? 4 })),
+};
+function ExampleNote({ when }: { when: string }) {
+  return <div className="note ex-note">예시 — 아직 기록이 없어 본보기 줄을 보여 줍니다(흐린 글씨). {when}에 실제 값으로 바뀝니다. 머리줄 [22:00 ▶] 로 넘겨 볼 수 있습니다.</div>;
+}
 type Dot = 'done' | 'now' | 'wait';
 
 /** TRF 한 건의 단계 점(피킹 → 분류 → 검품 → 상차 → 출발 → 인계) */
@@ -120,6 +140,11 @@ export function AdminBoard() {
   const k = q.trim().toUpperCase();
   const match = (s: string) => !k || s.toUpperCase().includes(k);
   const byMfc = (id: string) => !view.mfcFilter || id === view.mfcFilter;
+  // 실제 값이 있는지(없으면 예시 줄)
+  const hasPast = rows.some((r) => r.t.state === 'DEPARTED' || r.t.state === 'CANCELLED');
+  const hasTasks = backend.anyTask((t) => t.state !== 'DONE' && t.state !== 'PARTIAL' && t.state !== 'CANCELLED');
+  const hasHand = [...sim.runs.values()].some((r) => r.stops.some((x) => x.arrivedAt !== undefined));
+  const hasRt = [...sim.runs.values()].some((r) => r.stops.some((x) => (x.rtOut ?? 0) > 0));
   return (
     <div>
       <div className="pick-row">
@@ -167,9 +192,22 @@ export function AdminBoard() {
                   <td>{r.handedAt ? clock(r.handedAt) : '—'}</td>
                 </tr>
               ))}
+            {!hasPast &&
+              EX.past
+                .filter((x) => byMfc(x.mfc))
+                .map((x) => (
+                  <tr key={x.trf} className="ex">
+                    <td>{x.trf}</td>
+                    <td>{mfcName(x.mfc).replace(/^\d호점 /, '')}</td>
+                    <td>{x.state}</td>
+                    <td>{x.dep.toLocaleString()}</td>
+                    <td>{clock(x.hand)}</td>
+                  </tr>
+                ))}
           </tbody>
         </table>
       )}
+      {tab === 'past' && !hasPast && <ExampleNote when="첫 차가 출발하는 새벽(01:00~)" />}
       {tab === 'tasks' && (
         <table className="inv">
           <thead>
@@ -197,9 +235,20 @@ export function AdminBoard() {
                   </td>
                 </tr>
               ))}
+            {!hasTasks &&
+              EX.tasks.map((x) => (
+                <tr key={x.task} className="ex">
+                  <td>{x.task}</td>
+                  <td>{x.trf}</td>
+                  <td>{x.state}</td>
+                  <td>{x.who}</td>
+                  <td>{x.lines}</td>
+                </tr>
+              ))}
           </tbody>
         </table>
       )}
+      {tab === 'tasks' && !hasTasks && <ExampleNote when="석간 Wave 배포(13:00) 뒤" />}
       {tab === 'handover' && (
         <table className="inv">
           <thead>
@@ -228,9 +277,24 @@ export function AdminBoard() {
                   );
                 }),
             )}
+            {!hasHand &&
+              EX.handover
+                .filter((x) => byMfc(x.mfc))
+                .map((x) => (
+                  <tr key={x.car} className="ex">
+                    <td>{x.car}</td>
+                    <td>{mfcName(x.mfc).replace(/^\d호점 /, '')}</td>
+                    <td>
+                      {clock(x.at)} · {clock(x.at + 900)}
+                    </td>
+                    <td>{x.sent.toLocaleString()}</td>
+                    <td className={x.recv !== x.sent ? 's-bad' : ''}>{x.recv.toLocaleString()}</td>
+                  </tr>
+                ))}
           </tbody>
         </table>
       )}
+      {tab === 'handover' && !hasHand && <ExampleNote when="차가 MFC 에 도착하는 새벽(05:00~)" />}
       {tab === 'rt' && (
         <>
           <div className="note">MFC 에 R/T 를 내리고 인계할 때 비워 둔 빈 R/T 를 같은 수만큼 돌려받아 싣고, 칠곡에 돌아오면 도크에 내립니다. 판매 불가·파손 상품 회수는 계약이 없어 넣지 않았습니다.</div>
@@ -250,6 +314,17 @@ export function AdminBoard() {
                 const out = stops.reduce((a, { x }) => a + (x.rtOut ?? 0), 0);
                 const back = stops.reduce((a, { x }) => a + (x.rtBack ?? 0), 0);
                 const home = stops.reduce((a, { r, x }) => a + (r.state === 'RETURNED' ? (x.rtBack ?? 0) : 0), 0);
+                const ex = !hasRt ? EX.rt.find((x) => x.mfc === m.id) : undefined;
+                if (ex)
+                  return (
+                    <tr key={m.id} className="ex">
+                      <td>{m.name}</td>
+                      <td>{ex.out}</td>
+                      <td>{ex.back}</td>
+                      <td>{ex.home}</td>
+                      <td>{ex.out - ex.home}</td>
+                    </tr>
+                  );
                 return (
                   <tr key={m.id}>
                     <td>{m.name}</td>
@@ -262,6 +337,7 @@ export function AdminBoard() {
               })}
             </tbody>
           </table>
+          {!hasRt && <ExampleNote when="차가 칠곡으로 돌아오는 아침" />}
         </>
       )}
     </div>
