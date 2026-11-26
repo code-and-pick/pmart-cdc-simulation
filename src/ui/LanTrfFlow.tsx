@@ -292,11 +292,12 @@ function TripActions({ trip, stop, boxes }: { trip: Trip; stop: Stop; boxes: str
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   if (!real) return null;
-  const send = async (path: string, label: string) => {
+  // 멱등 키는 헤더라 영문만(한글이면 fetch 가 헤더를 못 만듦 — 사용자 2026-11-26 "MFC 도착 막힘 … non ISO-8859-1")
+  const send = async (path: string, label: string, slug: string) => {
     setBusy(true);
     setMsg(null);
     try {
-      await real.backend.client.call('POST', path, { body: {}, idempotencyKey: `sim-lan-${label}-${trip.tripId}-${stop.seq}` });
+      await real.backend.client.call('POST', path, { body: {}, idempotencyKey: `sim-lan-${slug}-${trip.tripId}-${stop.seq}` });
       setMsg(`${label} 보냄`);
     } catch (e) {
       setMsg(`${label} 막힘 — ${e instanceof ApiProblem ? `${e.problem.code} ${e.problem.detail ?? ''}` : String(e)}`);
@@ -315,7 +316,7 @@ function TripActions({ trip, stop, boxes }: { trip: Trip; stop: Stop; boxes: str
         </span>
       </div>
       {trip.state === 'DEPARTED' && stop.state === 'PLANNED' && (
-        <button disabled={busy} onClick={() => void send(`${base}/stops/${stop.seq}/arrivals`, 'MFC 도착')}>
+        <button disabled={busy} onClick={() => void send(`${base}/stops/${stop.seq}/arrivals`, 'MFC 도착', 'arrive')}>
           MFC 도착 보내기
         </button>
       )}
@@ -330,12 +331,12 @@ function TripActions({ trip, stop, boxes }: { trip: Trip; stop: Stop; boxes: str
         </>
       )}
       {stop.state === 'HANDED_OVER' && (
-        <button disabled={busy} onClick={() => void send(`${base}/stops/${stop.seq}/departures`, '정차 출발')}>
+        <button disabled={busy} onClick={() => void send(`${base}/stops/${stop.seq}/departures`, '정차 출발', 'stop-depart')}>
           정차 출발 보내기
         </button>
       )}
       {trip.state !== 'COMPLETED' && trip.stops.every((st) => st.state === 'DEPARTED') && (
-        <button disabled={busy} onClick={() => void send(`${base}/physical-ends`, '운행 종료')}>
+        <button disabled={busy} onClick={() => void send(`${base}/physical-ends`, '운행 종료', 'end')}>
           운행 종료 보내기(DC 복귀)
         </button>
       )}

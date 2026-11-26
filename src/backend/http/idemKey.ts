@@ -17,6 +17,8 @@ function fnv64(s: string): string {
 }
 
 export function fitIdempotencyKey(key: string, max = IDEMPOTENCY_KEY_MAX): string {
+  // 헤더 값은 ISO-8859-1 만 — 한글 등이 섞이면 fetch 가 요청을 못 만든다(2026-11-26 "MFC 도착" 키). 같은 원래 키 → 같은 결과(재전송 멱등 유지)
+  if (/[^ -~]/.test(key)) key = `${key.replace(/[^ -~]/g, '').replace(/-{2,}/g, '-')}~${fnv64(key)}`;
   if (key.length <= max) return key;
   const hash = fnv64(key);
   return `${key.slice(0, max - hash.length - 1)}~${hash}`;
