@@ -200,6 +200,9 @@ export interface SimOptions {
 const FLOORS: FloorNo[] = [5, 6, 7];
 const hm = (sec: number) => `${String(Math.floor(sec / 3600) % 24).padStart(2, '0')}:${String(Math.floor(sec / 60) % 60).padStart(2, '0')}`;
 const LUNCH_DAY = { start: 12 * 60, end: 13 * 60 }; // 주간조 점심 [가정]
+/** 주간조 점심 두 조 — 번호 짝수는 11:00~12:00 먼저(사용자 2026-11-26 "냉동 Wave 배포 지연·보충 밀림": 12~13시에 지게차가 다 쉬어 13:00 배포 전 보충이 멈췄음) [가정] */
+const LUNCH_DAY_EARLY = { start: 11 * 60, end: 12 * 60 };
+const lunchOf = (a: Agent) => (Number(a.id.slice(-2)) % 2 === 0 ? LUNCH_DAY_EARLY : LUNCH_DAY);
 const TERMINAL = ['DONE', 'PARTIAL', 'EXCEPTION', 'CANCELLED'];
 export const TEMP_KO: Record<TemperatureZone, string> = { AMBIENT: '상온', CHILLED: '냉장', FROZEN: '냉동' };
 /** MFC 마지막 도착(초, 다음 날 07:30) [정본 TMS 2.2] */
@@ -220,6 +223,8 @@ export class Simulation implements DutyClock {
   readonly domainEvents: DomainEventRecord[] = [];
   /** 피킹 기록(시각·개수) — 최근 1시간 피킹 */
   readonly pickLog: { at: number; qty: number; handling?: Handling; floor?: FloorNo }[] = [];
+  /** 결품 보고 기록(위치·개수) — 하루 보고·원인 보기 */
+  readonly shortLog: { at: number; code: string; qty: number }[] = [];
   /** 결품 보고 개수 */
   shortUnits = 0;
   /** 라인(DAS)에 들어온 상품 박스 · 분배대에 들어온 지역 카트 */
@@ -343,7 +348,7 @@ export class Simulation implements DutyClock {
     const m = this.time / 60;
     const w = this.window(a);
     if (m < w.start || m >= w.end) return false;
-    const breaks = a.shift === 'DAY' ? [LUNCH_DAY] : a.shift === 'NIGHT' ? [] : SHIFT.breaks;
+    const breaks = a.shift === 'DAY' ? [lunchOf(a)] : a.shift === 'NIGHT' ? [] : SHIFT.breaks;
     return !breaks.some((b) => m >= b.start && m < b.end);
   }
   dutyLabel(a: Agent): string {
@@ -1049,7 +1054,10 @@ export class Simulation implements DutyClock {
       if (take > 0) took.set(`${l.sku}|${l.lot}`, (took.get(`${l.sku}|${l.lot}`) ?? 0) + take);
       basket[i].picked += take;
       basket[i].state = short ? 'SHORT' : 'DONE';
-      if (short) this.log('warn', `${a.name} 결품 보고 ${loc.short} ${basket[i].name} ${short}개`);
+      if (short) {
+        this.shortLog.push({ at: this.time, code: loc.code, qty: short });
+        this.log('warn', `${a.name} 결품 보고 ${loc.short} ${basket[i].name} ${short}개`);
+      }
       a.pda.rows[3] = ['진행', `${basket.filter((b) => b.state === 'DONE' || b.state === 'SHORT').length}/${task.lines.length}`];
     }
     // 서버가 나눈 몫(기한 이른 TRF 부터)을 읽어 MFC 별로 담는다 — 서버가 확정한 결과만 [CLAUDE.md]
@@ -1406,7 +1414,10 @@ export class Simulation implements DutyClock {
         this.lastPickAt.set(5, this.time);
       }
       this.shortUnits += short;
-      if (short) this.log('warn', `${a.name} 결품 보고 ${loc.short} ${short}개`);
+      if (short) {
+        this.shortLog.push({ at: this.time, code: loc.code, qty: short });
+        this.log('warn', `${a.name} 결품 보고 ${loc.short} ${short}개`);
+      }
       await a.walk({ ...stand, x: front.x }, [{ x: front.x, z: stand.z }], WORK.walk * this.pace(a), '컨베이어로');
       await a.walk(stand, [stand], WORK.walk * this.pace(a), '컨베이어로');
     }

@@ -46,3 +46,16 @@ console.log('warns', sim.events.filter((e) => e.kind === 'warn' && !/결품|검�
   console.log('출고대기에 남은 현물', [...left].sort().map(([k, q]) => `${k} ${q}`).join(' · ') || '없음');
 }
 console.log('오토스토어', sim.events.filter((e) => /오토스토어/.test(e.text)).map((e) => e.text).join(' | ') || '보고 없음', '· 층별 통', [...sim.autos].map(([f, s]) => `${f}F ${s.bins}`).join(' '));
+{
+  const by = new Map<string, { n: number; q: number }>();
+  for (const x of sim.shortLog) {
+    const [, z, fl, aisle] = x.code.split('-');
+    const a = Number(aisle);
+    const k = `${fl}F ${z} ${a === 93 ? '야채 레인' : a >= 61 ? (z === 'C' || z === 'F' ? '오토스토어' : '선반') : '랙 1단'}`;
+    const v = by.get(k) ?? { n: 0, q: 0 };
+    v.n++;
+    v.q += x.qty;
+    by.set(k, v);
+  }
+  console.log('결품', sim.shortUnits, '개 ·', sim.shortLog.length, '건 —', [...by].map(([k, v]) => `${k} ${v.n}건 ${v.q}개`).join(' · '));
+}

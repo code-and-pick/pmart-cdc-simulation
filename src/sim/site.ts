@@ -7,6 +7,7 @@ const SHELF_BASE = SHELF.aisleBase;
 import type { EquipKind } from '../domain/sites/chilgok';
 import type { FloorLayout, Layout, Location, Rect } from '../domain/layout';
 import type { FloorNo } from '../domain/sites/chilgok';
+import { NavGrid } from './nav';
 
 export interface P {
   x: number;
@@ -193,7 +194,27 @@ export class FloorSite {
    * 길: from → to 를 지나는 점들(from 제외). 북쪽 통로(N, 승강기·출고대기 앞)와 안쪽(선반·랙·설비 — 작업장 남쪽 통로 roomZ)은
    * 남북 연결 통로(walk.links — 온도 방 문 자리)로만 오간다 [시뮬].
    */
+  private nav: NavGrid | null = null;
+
+  /** 길 — 통로망 길이 막히지 않았으면 그대로, 설비·랙·벽에 막히면 격자 길찾기(NavGrid, 사용자 2026-11-26 "장애물 다 뚫고 다닌다") */
   route(from: WalkPoint, to: WalkPoint): P[] {
+    const simple = this.laneRoute(from, to);
+    if (!simple.length) return simple;
+    this.nav ??= new NavGrid(this.f, this.layout.width, this.layout.depth);
+    if (this.nav.clear(from, simple)) return simple;
+    const raw = this.nav.find(from, to);
+    // 격자 칸 가운데와 실제 시작·끝이 어긋난 곳은 ㄱ자로(가로·세로로만 걷게)
+    const pts: P[] = [];
+    let a: P = from;
+    for (const b of raw) {
+      if (a.x !== b.x && a.z !== b.z) pts.push({ x: b.x, z: a.z });
+      pts.push(b);
+      a = b;
+    }
+    return pts.filter((p, i) => (i === 0 ? p.x !== from.x || p.z !== from.z : p.x !== pts[i - 1].x || p.z !== pts[i - 1].z));
+  }
+
+  private laneRoute(from: WalkPoint, to: WalkPoint): P[] {
     const { northZ, roomZ, links } = this.f.walk;
     const cz = (p: WalkPoint) => (p.lane === 'N' ? northZ : roomZ);
     const pts: P[] = [];

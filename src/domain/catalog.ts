@@ -182,7 +182,7 @@ export function buildCatalog(layout: Layout, baseDate: string): Catalog {
         const lot1 = `L${e1.replace(/-/g, '').slice(2)}-${pad(serial, 4)}`;
         const lot2 = `L${e2.replace(/-/g, '').slice(2)}-${pad(serial, 4)}`;
         // 보관 기둥이 없는 냉장 상품은 선반이 곧 재고 — 선반을 더 채워 둔다(현장: 냉장은 매일 아침 입고로 채움)
-        const pickFill = p.loc.aisle < SHELF.aisleBase ? CATALOG.reserveFill : reserveOnlyPopular && column.length === 0 ? CATALOG.chilledShelfFill : SHELF.fill;
+        const pickFill = p.loc.aisle < SHELF.aisleBase ? CATALOG.reserveFill : reserveOnlyPopular && column.length === 0 ? CATALOG.chilledShelfFill : p.loc.temp === 'FROZEN' ? CATALOG.frozenShelfFill : SHELF.fill;
         const faceShare = p.loc.aisle < SHELF.aisleBase ? 1 : 1;
         skus.push({
           sku,
