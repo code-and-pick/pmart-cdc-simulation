@@ -723,9 +723,9 @@ function LanRun() {
   const go = () => {
     setBusy(true);
     setSteps([]);
-    void runLanOne({ gateway: real.backend.client, backend: real.backend, internal: real.internal, operatorId: () => real.tokens.operatorId }, { mfcId, skus: 3, qty: 2, pda: mode === 'pda', pdaWaitMin: 30 }, setSteps).finally(() => setBusy(false));
+    void runLanOne({ gateway: real.backend.client, backend: real.backend, internal: real.internal, operatorId: () => real.tokens.operatorId }, { mfcId, skus: 3, qty: 2, pda: mode === 'pda', pdaWaitMin: 60 }, setSteps).finally(() => setBusy(false));
   };
-  const waitingPda = busy && steps?.at(-1)?.name.startsWith('PDA 피킹 기다림');
+  const waitingPda = busy && steps?.at(-1)?.name.startsWith('PDA');
   return (
     // 실서버 한 건 — 새 TRF 1건을 LAN 에 실제로 넣어 출발까지. 피킹은 자동(시뮬레이터) 또는 PDA 앱(사람)으로(사용자 2026-11-26 "PDA 로 작업 되는지 확인")
     <section className="sec lr">
@@ -754,13 +754,17 @@ function LanRun() {
       </div>
       {mode === 'pda' && (
         <ol className="lr-pda">
-          <li>PDA 앱에 <b>cdcw-fc-01</b> 로 로그인</li>
-          <li>DC 업무 → 피킹 → 다음 작업 받기</li>
-          <li>칸·상품 스캔 → 수량 → 보내기 (작업이 다 끝나면 여기서 이어서 출발까지)</li>
+          <li>
+            시작하면 시뮬레이터가 TRF·Wave 배포 · 배차 · <b>입차</b>까지 합니다
+          </li>
+          <li>
+            PDA 앱 DC 업무에서 차례로: <b>피킹</b>(cdcw-fc-01) → <b>분배·패킹</b>(cdcw-dl-01) → <b>검품</b>(cdcw-qc-01) → <b>상차</b>(cdcw-ld-01, 도크 스캔)
+          </li>
+          <li>상차완료가 되면 시뮬레이터가 출차 → 출발 검증까지</li>
         </ol>
       )}
       <button className="lr-go" onClick={go} disabled={busy}>
-        {busy ? (waitingPda ? 'PDA 피킹 기다리는 중…' : '도는 중…') : '새 TRF 로 시작'}
+        {busy ? (waitingPda ? `PDA 기다리는 중 — ${steps?.at(-1)?.name.replace(/^PDA /, '').split(' — ')[0]}` : '도는 중…') : '새 TRF 로 시작'}
       </button>
       {steps && steps.length > 0 && (
         <ol className="lr-steps">

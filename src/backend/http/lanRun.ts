@@ -123,85 +123,107 @@ export async function runLanOne(
       const r = await deps.backend.releaseWave(wave.waveId, key('release'), wave.version);
       return { v: r, detail: `${r.status}` };
     });
-    // 4) 피킹 — 이 Wave 작업을 받아 계획 수량대로
     const worker = deps.operatorId() ?? 'claude-cdc-sup';
-    const picked: { sku: string; lot: string; qty: number }[] = [];
-    if (opt.pda)
-      await step('PDA 피킹 기다림 — PDA 앱에서 DC 업무 → 피킹 → 다음 작업 받기', async () => {
-        const until = Date.now() + (opt.pdaWaitMin ?? 30) * 60_000;
-        const TERM = ['DONE', 'PARTIAL', 'CANCELLED', 'EXCEPTION'];
-        for (;;) {
-          const ts = (await deps.backend.listTasks(wave.waveId)).filter((t) => t.kind === 'PICK' || !t.kind);
-          const done = ts.filter((t) => TERM.includes(t.state));
-          const run = ts.filter((t) => !TERM.includes(t.state));
-          const live = steps[steps.length - 1];
-          live.detail = `작업 ${ts.length}개 — 끝 ${done.length} · ${run.map((t) => `${t.state}${t.assigneeId ? ` (${t.assigneeId})` : ''}`).join(', ') || '없음'}`;
-          onStep([...steps]);
-          if (ts.length && !run.length) {
-            for (const t of ts) for (const l of t.lines) for (const sh of l.shares) if (sh.trfId === trfId && sh.pickedQty > 0) picked.push({ sku: l.sku, lot: l.lot, qty: sh.pickedQty });
-            if (!picked.length) throw new Error('PDA 작업이 끝났는데 집은 수량이 0');
-            return { v: ts.length, detail: `PDA 로 작업 ${ts.length}개 끝 · ${picked.reduce((a, x) => a + x.qty, 0)}개 집음 · 담당 ${[...new Set(ts.map((t) => t.assigneeId).filter(Boolean))].join(', ')}` };
+    type Order = { orderId: string; trfIds?: string[]; stops?: { trfIds?: string[] }[]; vehicleId?: string | null; dockCode?: string | null; state: string; version: number; reason?: string | null };
+    // 배차 생성 → 이 TRF 가 든 지시서 계획완료(차량·도크 예약)
+    const dispatch = async (): Promise<Order> => {
+      const order = await step('배차 생성 (transport-orders/generations)', async () => {
+        const r = await deps.gateway.call<{ orders?: Order[]; requests?: Record<string, number>; unplannedReasons?: { routeId: string; tempClass: string; reason: string }[] }>('POST', `/cdcs/${CENTER_ID}/transport-orders/generations`, { body: { shipDate }, idempotencyKey: key('gen') });
+        const o = (r.body.orders ?? []).find((x) => (x.trfIds ?? []).includes(trfId) || (x.stops ?? []).some((s) => (s.trfIds ?? []).includes(trfId)));
+        if (!o) throw new Error(`이 TRF 가 든 지시서 없음 — 요청서 ${JSON.stringify(r.body.requests ?? {})} · 미계획 ${JSON.stringify(r.body.unplannedReasons ?? [])}`);
+        return { v: o, detail: `${o.orderId} ${o.state}` };
+      });
+      return step('계획완료 (confirmations — 차량·도크 예약)', async () => {
+        const o = (await deps.gateway.call<Order>('POST', `/cdcs/${CENTER_ID}/transport-orders/${encodeURIComponent(order.orderId)}/confirmations`, { body: {}, idempotencyKey: key('confirm'), expectedVersion: order.version })).body;
+        return { v: o, detail: `${o.state} · 차량 ${o.vehicleId ?? '-'} · 도크 ${o.dockCode ?? '-'}` };
+      });
+    };
+    const checkIn = (tid: string) =>
+      step('입차 (trips check-ins)', async () => {
+        const r = await deps.gateway.call<{ state?: string }>('POST', `/trips/${encodeURIComponent(tid)}/check-ins`, { body: {}, idempotencyKey: key('checkin') });
+        return { v: r.body, detail: `${r.body.state ?? r.status}` };
+      });
+    let tripId = '';
+    if (opt.pda) {
+      // PDA 모드 — 피킹·분배/패킹·검품·상차는 PDA 앱(사람), 시뮬레이터는 TRF·Wave·배차·입차·출차만(사용자 2026-11-26 "PDA 앱에 DC 기능 추가했어").
+      // 차가 먼저 도크에 들어와 있어야 PDA 상차(도크 스캔 → 운행)가 되므로 배차·입차를 먼저 한다
+      const confirmed = await dispatch();
+      tripId = confirmed.orderId;
+      await checkIn(tripId);
+      const until = Date.now() + (opt.pdaWaitMin ?? 60) * 60_000;
+      const sum = (t: TransferIntake, k: 'approvedQty' | 'allocatedQty' | 'pickedQty' | 'sortedQty' | 'inspectedQty' | 'loadedQty') => t.progress.reduce((a, p) => a + p[k], 0);
+      /** 인수 진행을 3초마다 보며 기다림 — 다 되면 그 단계 끝 */
+      const waitStage = (name: string, hint: string, done: (t: TransferIntake) => boolean, show: (t: TransferIntake) => string) =>
+        step(name, async () => {
+          for (;;) {
+            const t = await deps.internal.getTransferIntake(trfId);
+            const live = steps[steps.length - 1];
+            live.detail = `${hint} · 지금 ${t.state} · ${show(t)}`;
+            onStep([...steps]);
+            if (done(t)) return { v: t, detail: `${t.state} · ${show(t)}` };
+            if (Date.now() > until) throw new Error(`${opt.pdaWaitMin ?? 60}분 안에 끝나지 않음 — ${t.state}`);
+            await wait(3000);
           }
-          if (Date.now() > until) throw new Error(`${opt.pdaWaitMin ?? 30}분 안에 PDA 피킹이 끝나지 않음`);
+        });
+      await waitStage('PDA 피킹', 'DC 업무 → 피킹 → 다음 작업 받기 → 칸·상품 스캔', (t) => sum(t, 'allocatedQty') > 0 && sum(t, 'pickedQty') >= sum(t, 'allocatedQty'), (t) => `집음 ${sum(t, 'pickedQty')}/${sum(t, 'allocatedQty')}`);
+      await waitStage('PDA 분배·패킹', 'DC 업무 → 분배 → 박스(LPN) 닫기', (t) => sum(t, 'pickedQty') > 0 && sum(t, 'sortedQty') >= sum(t, 'pickedQty'), (t) => `박스에 담음 ${sum(t, 'sortedQty')}/${sum(t, 'pickedQty')}`);
+      await waitStage('PDA 검품', 'DC 업무 → 검품 → 출고대기 박스 스캔', (t) => sum(t, 'sortedQty') > 0 && sum(t, 'inspectedQty') >= sum(t, 'sortedQty'), (t) => `합격 ${sum(t, 'inspectedQty')}/${sum(t, 'sortedQty')}`);
+      await step('PDA 상차 — 도크 스캔 → 운행 → 박스 스캔 → 상차완료', async () => {
+        for (;;) {
+          const trip = (await deps.gateway.call<{ state?: string }>('GET', `/trips/${encodeURIComponent(tripId)}`)).body;
+          const t = await deps.internal.getTransferIntake(trfId);
+          const live = steps[steps.length - 1];
+          live.detail = `도크 ${confirmed.dockCode ?? '-'} · 운행 ${tripId} ${trip.state ?? ''} · 실음 ${sum(t, 'loadedQty')}/${sum(t, 'inspectedQty')}`;
+          onStep([...steps]);
+          if (trip.state === 'LOADED' || trip.state === 'DEPARTED') return { v: trip, detail: `운행 ${trip.state} · 실음 ${sum(t, 'loadedQty')}개` };
+          if (Date.now() > until) throw new Error(`${opt.pdaWaitMin ?? 60}분 안에 상차완료가 안 됨 — 운행 ${trip.state}`);
           await wait(3000);
         }
       });
-    else await step('피킹 (next-tasks → starts → pick-results)', async () => {
-      let n = 0;
-      for (let i = 0; i < 20; i++) {
-        let task: Task;
-        try {
-          task = (await deps.backend.pullNextTask(CENTER_ID, worker, { kind: 'PICK' }, key(`next-${i}`))).task;
-        } catch (e) {
-          if (e instanceof ApiProblem && e.problem.code === 'NO_TASK_AVAILABLE') break;
-          throw e;
+    } else {
+      // 자동 — 시뮬레이터가 피킹·분류·검품·상차까지
+      const picked: { sku: string; lot: string; qty: number }[] = [];
+      await step('피킹 (next-tasks → starts → pick-results)', async () => {
+        let n = 0;
+        for (let i = 0; i < 20; i++) {
+          let task: Task;
+          try {
+            task = (await deps.backend.pullNextTask(CENTER_ID, worker, { kind: 'PICK' }, key(`next-${i}`))).task;
+          } catch (e) {
+            if (e instanceof ApiProblem && e.problem.code === 'NO_TASK_AVAILABLE') break;
+            throw e;
+          }
+          if (task.waveId !== wave.waveId) throw new Error(`다른 Wave 작업을 받음 ${task.taskId}(${task.waveId}) — 옛 Wave 작업이 남아 있음`);
+          if (task.state === 'ACCEPTED' || task.state === 'ASSIGNED' || task.state === 'CREATED') task = await deps.backend.startTask(task.taskId, worker, key(`start-${i}`), task.version);
+          const lines = task.lines.map((l) => ({ sku: l.sku, lot: l.lot, locationCode: l.locationCode, pickedQty: l.plannedQty - l.pickedQty - l.shortQty }));
+          await deps.backend.reportPickResult(task.taskId, { workerId: worker, lines }, key(`pick-${i}`), task.version);
+          for (const l of lines) picked.push({ sku: l.sku, lot: l.lot, qty: l.pickedQty });
+          n++;
         }
-        if (task.waveId !== wave.waveId) throw new Error(`다른 Wave 작업을 받음 ${task.taskId}(${task.waveId}) — 옛 Wave 작업이 남아 있음`);
-        if (task.state === 'ACCEPTED' || task.state === 'ASSIGNED' || task.state === 'CREATED') task = await deps.backend.startTask(task.taskId, worker, key(`start-${i}`), task.version);
-        const lines = task.lines.map((l) => ({ sku: l.sku, lot: l.lot, locationCode: l.locationCode, pickedQty: l.plannedQty - l.pickedQty - l.shortQty }));
-        await deps.backend.reportPickResult(task.taskId, { workerId: worker, lines }, key(`pick-${i}`), task.version);
-        for (const l of lines) picked.push({ sku: l.sku, lot: l.lot, qty: l.pickedQty });
-        n++;
-      }
-      if (!n) throw new Error('받을 작업이 없음');
-      return { v: n, detail: `작업 ${n}개 · ${picked.reduce((a, p) => a + p.qty, 0)}개` };
-    });
-    // 5) 분류(박스 하나) → 검품
-    const lpn = `LPN-SIM-${runId.toUpperCase()}-1`;
-    await step('분류 (sorting-results — 박스 1)', async () => {
-      const r = await deps.backend.reportSortingResult({ waveId: wave.waveId, trfId, workerId: worker, lpns: [{ lpn, unitType: 'BOX', state: 'SEALED', temperatureZone: 'AMBIENT', contents: picked }] }, key('sort'));
-      return { v: r, detail: `${lpn} · ${r.status}` };
-    });
-    await step('검품 (inspection-results — 합격)', async () => {
-      const r = await deps.backend.reportInspectionResult({ trfId, inspectorId: worker, items: [{ lpn, result: 'PASSED' }] }, key('inspect'));
-      return { v: r, detail: `${r.status}` };
-    });
-    // 6) 배차 생성 → 이 TRF 가 든 지시서 계획완료
-    type Order = { orderId: string; trfIds?: string[]; stops?: { trfIds?: string[] }[]; vehicleId?: string | null; dockCode?: string | null; state: string; version: number; reason?: string | null };
-    const order = await step('배차 생성 (transport-orders/generations)', async () => {
-      const r = await deps.gateway.call<{ orders?: Order[]; requests?: Record<string, number>; unplannedReasons?: { routeId: string; tempClass: string; reason: string }[] }>('POST', `/cdcs/${CENTER_ID}/transport-orders/generations`, { body: { shipDate }, idempotencyKey: key('gen') });
-      const o = (r.body.orders ?? []).find((x) => (x.trfIds ?? []).includes(trfId) || (x.stops ?? []).some((s) => (s.trfIds ?? []).includes(trfId)));
-      if (!o) throw new Error(`이 TRF 가 든 지시서 없음 — 요청서 ${JSON.stringify(r.body.requests ?? {})} · 미계획 ${JSON.stringify(r.body.unplannedReasons ?? [])}`);
-      return { v: o, detail: `${o.orderId} ${o.state}` };
-    });
-    const confirmed = await step('계획완료 (confirmations — 차량·도크 예약)', async () => {
-      const o = (await deps.gateway.call<Order>('POST', `/cdcs/${CENTER_ID}/transport-orders/${encodeURIComponent(order.orderId)}/confirmations`, { body: {}, idempotencyKey: key('confirm'), expectedVersion: order.version })).body;
-      return { v: o, detail: `${o.state} · 차량 ${o.vehicleId ?? '-'} · 도크 ${o.dockCode ?? '-'}` };
-    });
-    const tripId = confirmed.orderId;
-    // 7) 상차(CDC) → 입차·상차완료·출차(TMS)
-    await step('상차 실적 (loading-results)', async () => {
-      const r = await deps.backend.reportLoadingResult({ trfId, tripId, vehicleId: confirmed.vehicleId ?? '', ...(confirmed.dockCode ? { dockCode: confirmed.dockCode } : {}), workerId: worker, action: 'LOADED', lpns: [{ lpn }] }, key('load'));
-      return { v: r, detail: `${r.status}` };
-    });
-    await step('입차 (trips check-ins)', async () => {
-      const r = await deps.gateway.call<{ state?: string }>('POST', `/trips/${encodeURIComponent(tripId)}/check-ins`, { body: {}, idempotencyKey: key('checkin') });
-      return { v: r.body, detail: `${r.body.state ?? r.status}` };
-    });
-    await step('상차완료 (trips loading-completions)', async () => {
-      const r = await deps.gateway.call<{ state?: string }>('POST', `/trips/${encodeURIComponent(tripId)}/loading-completions`, { body: { transfers: [{ trfId, lpns: [lpn], rtCount: 1 }] }, idempotencyKey: key('loaded') });
-      return { v: r.body, detail: `${r.body.state ?? r.status}` };
-    });
+        if (!n) throw new Error('받을 작업이 없음');
+        return { v: n, detail: `작업 ${n}개 · ${picked.reduce((a, p) => a + p.qty, 0)}개` };
+      });
+      const lpn = `LPN-SIM-${runId.toUpperCase()}-1`;
+      await step('분류 (sorting-results — 박스 1)', async () => {
+        const r = await deps.backend.reportSortingResult({ waveId: wave.waveId, trfId, workerId: worker, lpns: [{ lpn, unitType: 'BOX', state: 'SEALED', temperatureZone: 'AMBIENT', contents: picked }] }, key('sort'));
+        return { v: r, detail: `${lpn} · ${r.status}` };
+      });
+      await step('검품 (inspection-results — 합격)', async () => {
+        const r = await deps.backend.reportInspectionResult({ trfId, inspectorId: worker, items: [{ lpn, result: 'PASSED' }] }, key('inspect'));
+        return { v: r, detail: `${r.status}` };
+      });
+      const confirmed = await dispatch();
+      tripId = confirmed.orderId;
+      await step('상차 실적 (loading-results)', async () => {
+        const r = await deps.backend.reportLoadingResult({ trfId, tripId, vehicleId: confirmed.vehicleId ?? '', ...(confirmed.dockCode ? { dockCode: confirmed.dockCode } : {}), workerId: worker, action: 'LOADED', lpns: [{ lpn }] }, key('load'));
+        return { v: r, detail: `${r.status}` };
+      });
+      await checkIn(tripId);
+      await step('상차완료 (trips loading-completions)', async () => {
+        const r = await deps.gateway.call<{ state?: string }>('POST', `/trips/${encodeURIComponent(tripId)}/loading-completions`, { body: { transfers: [{ trfId, lpns: [lpn], rtCount: 1 }] }, idempotencyKey: key('loaded') });
+        return { v: r.body, detail: `${r.body.state ?? r.status}` };
+      });
+    }
     await step('출차 (trips departures → 출발 검증)', async () => {
       const r = await deps.gateway.call<{ state?: string; departureId?: string; outboundLinkage?: unknown }>('POST', `/trips/${encodeURIComponent(tripId)}/departures`, { body: { source: 'SIMULATED' }, idempotencyKey: key('depart') });
       return { v: r.body, detail: `${r.body.state ?? r.status} · ${r.body.departureId ?? ''} · 출발 검증 ${JSON.stringify(r.body.outboundLinkage ?? '-')}` };
