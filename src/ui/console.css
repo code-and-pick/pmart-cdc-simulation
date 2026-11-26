@@ -1823,3 +1823,16 @@ tr.ex td { color: var(--muted); font-style: italic; }
 .lan-trf .lt-pick button { height: 24px; padding: 0 9px; border-radius: 999px; border: 1px solid var(--line); background: transparent; color: var(--muted); font-size: 11.5px; cursor: pointer; }
 .lan-trf .lt-pick button.on { border-color: #2f80ed; color: #2f80ed; font-weight: 700; }
 .lt-sec-h { margin: 6px 0 2px; font-size: 12px; font-weight: 700; color: var(--muted); }
+/* 새 TRF 들어옴 알림(실서버) */
+.lan-in { position: fixed; z-index: 70; top: 64px; right: 16px; width: 320px; display: grid; gap: 8px; padding: 12px 14px; border-radius: 12px; border: 1px solid #27ae60; background: var(--panel-solid, var(--panel)); box-shadow: 0 14px 36px rgba(0,0,0,.4); }
+.lan-in-h { display: flex; align-items: center; gap: 6px; font-size: 13px; }
+.lan-in-h i { color: #27ae60; font-style: normal; animation: lanInBlink 1.2s infinite; }
+.lan-in-h span { margin-left: auto; color: var(--muted); font-size: 11.5px; }
+.lan-in-b { display: grid; gap: 2px; font-size: 12.5px; }
+.lan-in-b small { color: var(--muted); font-size: 11.5px; }
+.lan-in-a { display: grid; grid-template-columns: 1fr 1fr auto; gap: 6px; }
+.lan-in-a button { height: 30px; border-radius: 8px; border: 0; background: #2f80ed; color: #fff; font-weight: 700; font-size: 12px; cursor: pointer; }
+.lan-in-a button:nth-child(2) { background: #27ae60; }
+.lan-in-a button.ghost { background: transparent; border: 1px solid var(--line); color: var(--muted); font-weight: 500; padding: 0 8px; }
+.lan-in-a button:disabled { opacity: .5; cursor: default; }
+@keyframes lanInBlink { 50% { opacity: .3; } }

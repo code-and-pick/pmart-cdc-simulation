@@ -1,7 +1,7 @@
 // 왼쪽 패널 — 설정(센터 고정값·시간표) · 구역(층·칸 정보) · 도움말. MFC 시뮬레이터 LeftPanel 의 sec/srow 모양을 쓴다.
 import { Fragment, lazy, Suspense, useEffect, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { runLanOne } from '../backend/http/lanRun';
+import { startLanRun } from './LanIncoming';
 import { setLanRun, useLanRun } from './lanRunStore';
 import { checkReadiness, READINESS_KO, type ProbeResult } from '../backend/http/readiness';
 import { useApp, useTick, useView } from '../app/context';
@@ -721,13 +721,8 @@ function LanRun() {
   // 상태는 패널 밖(lanRunStore) — 탭이 바뀌어도 진행·팝업이 남는다
   const { mfcId, mode, steps, busy, hideScan } = useLanRun();
   if (!real) return null;
-  const go = (resumeTrfId?: string) => {
-    setLanRun({ busy: true, steps: [], ...(resumeTrfId ? { trfId: resumeTrfId } : {}) });
-    void runLanOne({ gateway: real.backend.client, backend: real.backend, internal: real.internal, operatorId: () => real.tokens.operatorId }, { mfcId, skus: 3, qty: 2, pda: mode === 'pda' || !!resumeTrfId, pdaWaitMin: 60, ...(resumeTrfId ? { resumeTrfId } : {}) }, (st) => {
-      const id = [...st].reverse().find((x) => x.trfId)?.trfId;
-      setLanRun({ steps: st, ...(id ? { trfId: id } : {}) });
-    }).finally(() => setLanRun({ busy: false }));
-  };
+  // 새 TRF 로 시작 · 이어 하기(PDA) — 새 TRF 알림과 같은 시작 함수(LanIncoming.startLanRun)
+  const go = (resumeTrfId?: string) => startLanRun(real, { mfcId, pda: mode === 'pda' || !!resumeTrfId, ...(resumeTrfId ? { resumeTrfId } : {}) });
   const waitingPda = busy && steps?.at(-1)?.name.startsWith('PDA');
   const cur = steps?.at(-1);
   const scanCodes = busy && cur?.state === 'run' && cur.scan?.length ? cur.scan : null;

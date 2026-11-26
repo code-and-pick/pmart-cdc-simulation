@@ -79,13 +79,13 @@ export async function runLanOne(
       ? await step(`이어 하기 — ${opt.resumeTrfId} 지금 상태 읽기`, async () => {
           const it = await deps.internal.getTransferIntake(opt.resumeTrfId!);
           if (it.state === 'DEPARTED' || it.state === 'CANCELLED') throw new Error(`이미 ${it.state}`);
-          if (!it.waveId) throw new Error(`Wave 없음(${it.state}) — 이어 할 수 없음`);
+          // Wave 가 없으면(새로 들어온 TRF) 할당 확인 → Wave 만들기·배포부터(사용자 2026-11-26 "새 TRF 들어오면 가상 작업자 or PDA 로 작업하기")
           // 출고일 = 도착 기한(다음 날 06:00) − 30시간
           const day = kst(new Date(new Date(it.dueAt).getTime() - 30 * 3600_000));
           const r = await deps.gateway.call<{ items?: Ord0[] } | Ord0[]>('GET', `/cdcs/${CENTER_ID}/transport-orders`, { query: { shipDate: day } });
           const list = Array.isArray(r.body) ? r.body : (r.body.items ?? []);
           const order = list.find((x) => (x.trfIds ?? []).includes(it.trfId) || (x.stops ?? []).some((st) => (st.trfIds ?? []).includes(it.trfId))) ?? null;
-          return { v: { intake: it, shipDate: day, order }, detail: `${it.state} · Wave ${it.waveId} · 출고일 ${day} · 지시서 ${order ? `${order.orderId} ${order.state}` : '없음'}` };
+          return { v: { intake: it, shipDate: day, order }, detail: `${it.state} · Wave ${it.waveId ?? '아직 없음'} · 출고일 ${day} · 지시서 ${order ? `${order.orderId} ${order.state}` : '없음'}` };
         })
       : null;
     // 0) 재고에서 고르기
@@ -142,7 +142,9 @@ export async function runLanOne(
       return { v: r, detail: `${trfId} → ${opt.mfcId} · ${picks.length}줄 × ${opt.qty} · ${r.status ?? ''}` };
     });
     // 2) 할당 기다림
-    let intake: TransferIntake = res
+    const hasWave = !!res?.intake.waveId;
+    const zone = ((res?.intake.conditions ?? []).find((c) => c.kind === 'TEMPERATURE_ZONE')?.value ?? 'AMBIENT') as 'AMBIENT' | 'CHILLED' | 'FROZEN';
+    let intake: TransferIntake = res && (hasWave || !['RECEIVED', 'ALLOCATING'].includes(res.intake.state))
       ? res.intake
       : await step('할당 (인수 상태 확인)', async () => {
       for (let i = 0; i < 15; i++) {
@@ -154,13 +156,13 @@ export async function runLanOne(
     });
     if (intake.state === 'ALLOCATION_FAILED') throw new Error('ALLOCATION_FAILED');
     // 3) Wave
-    const wave = res
+    const wave = res && hasWave
       ? ({ waveId: res.intake.waveId! } as Awaited<ReturnType<HttpBackend['createWave']>>)
       : await step('Wave 만들기 (POST /waves)', async () => {
-      const w = await deps.backend.createWave({ cdcId: CENTER_ID, trfIds: [trfId], temperatureZone: 'AMBIENT' }, key('wave'));
+      const w = await deps.backend.createWave({ cdcId: CENTER_ID, trfIds: [trfId], temperatureZone: zone }, key('wave'));
       return { v: w, detail: `${w.waveId} ${w.state}` };
     });
-    if (!res) await step('Wave 배포 (releases)', async () => {
+    if (!(res && hasWave)) await step('Wave 배포 (releases)', async () => {
       const r = await deps.backend.releaseWave(wave.waveId, key('release'), wave.version);
       return { v: r, detail: `${r.status}` };
     });

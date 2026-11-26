@@ -2,6 +2,7 @@ import { useEffect, useSyncExternalStore } from 'react';
 import { SiteScene } from '../render/scene/SiteScene';
 import { IssueBar } from '../ui/IssueBar';
 import { LanScanPopup, LeftPanel } from '../ui/LeftPanel';
+import { LanIncoming } from '../ui/LanIncoming';
 import { ScanZoom } from '../ui/Barcode';
 import { Pda } from '../ui/Pda';
 import { Rail } from '../ui/Rail';
@@ -37,6 +38,8 @@ export function App({ app }: { app: AppCtx }) {
           <ScanZoom />
           {/* PDA 로 찍을 코드 — 어느 탭에서도 떠 있음 */}
           <LanScanPopup />
+          {/* 실서버 — 새 TRF 들어옴 알림(PDA 로 · 가상 작업자로) */}
+          <LanIncoming />
         </div>
       </div>
     </AppContext.Provider>
