@@ -13,7 +13,7 @@ describe('공급 요청 → TRF 다리', () => {
     const made = new Set<string>();
     const notFound = () => new ApiProblem({ status: 404, code: 'NOT_FOUND', title: 'x' } as never);
     const deps = {
-      mfcGateway: { call: async () => ({ status: 200, body: { items: [{ supplyRequestId: 'SR-1', mfcId: 'MFC-BJG-01', state: 'APPROVED', approvedLines: [{ sku: 'A', requestedQty: 3, approvedQty: 2 }, { sku: 'B', requestedQty: 1, approvedQty: 0 }] }] } }) },
+      mfcGateway: () => ({ call: async () => ({ status: 200, body: { items: [{ supplyRequestId: 'SR-1', mfcId: 'MFC-BJG-01', state: 'APPROVED', approvedLines: [{ sku: 'A', requestedQty: 3, approvedQty: 2 }, { sku: 'B', requestedQty: 1, approvedQty: 0 }] }] } }) }),
       gateway: { call: async () => ({ status: 200, body: { items: [] } }) },
       internal: {
         inventory: { call: async () => ({ status: 200, body: { items: [{ sku: 'A', lots: [{ locations: [{ locationCode: 'CDC01-G-5-01-01-1-1' }] }] }] } }) },

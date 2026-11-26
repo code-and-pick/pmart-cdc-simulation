@@ -4,6 +4,7 @@
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useApp, type AppCtx } from '../app/context';
+import { MFC_SUP_ACCOUNTS } from '../backend/http/accounts';
 import { HttpClient } from '../backend/http/client';
 import { runLanOne } from '../backend/http/lanRun';
 import { bridgeOnce } from '../backend/http/supplyBridge';
@@ -49,8 +50,16 @@ export function LanIncoming() {
   useEffect(() => {
     if (!real || !bridgeOn) return;
     let on = true;
-    const mfcTokens = new TokenSource('claude-mfc-sup', 90);
-    const mfcGateway = new HttpClient({ baseUrl: '/api/v1', token: () => mfcTokens.get(), sourceSystem: 'pmart-cdc-simulation', now: () => 0, timeoutMs: 8000, retries: 2 });
+    const gw = new Map<string, HttpClient>();
+    const mfcGateway = (mfcId: string) => {
+      const acc = MFC_SUP_ACCOUNTS[mfcId];
+      if (!acc) return null;
+      if (!gw.has(mfcId)) {
+        const tk = new TokenSource(acc, 90);
+        gw.set(mfcId, new HttpClient({ baseUrl: '/api/v1', token: () => tk.get(), sourceSystem: 'pmart-cdc-simulation', now: () => 0, timeoutMs: 8000, retries: 2 }));
+      }
+      return gw.get(mfcId)!;
+    };
     const tick = () =>
       bridgeOnce({ mfcGateway, gateway: real.backend.client, internal: real.internal }, MFCS.filter((m) => !m.id.startsWith('ETC-')).map((m) => m.id))
         .then((r) => on && setLanRun({ bridgeLog: r, bridgeAt: Date.now() }))

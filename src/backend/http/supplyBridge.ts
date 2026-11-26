@@ -33,7 +33,7 @@ const tempOfLoc = (code: string) => {
 };
 
 /** 한 바퀴 — 읽을 수 있는 MFC 마다 APPROVED 요청을 보고 TRF 가 없는 것만 인수 */
-export async function bridgeOnce(deps: { mfcGateway: HttpClient; gateway: HttpClient; internal: HttpInternal }, mfcIds: string[]): Promise<BridgeResult[]> {
+export async function bridgeOnce(deps: { mfcGateway: (mfcId: string) => HttpClient | null; gateway: HttpClient; internal: HttpInternal }, mfcIds: string[]): Promise<BridgeResult[]> {
   const out: BridgeResult[] = [];
   let snap: Map<string, string> | null = null;
   const tempOf = async (sku: string) => {
@@ -50,7 +50,10 @@ export async function bridgeOnce(deps: { mfcGateway: HttpClient; gateway: HttpCl
   for (const mfcId of mfcIds) {
     let reqs: SupplyRequest[];
     try {
-      const r = await deps.mfcGateway.call<{ items?: SupplyRequest[] }>('GET', '/supply-requests', { query: { mfcId, state: 'APPROVED' } });
+      // 지점마다 그 센터 관리자 계정으로 읽음(지점 권한)
+      const g = deps.mfcGateway(mfcId);
+      if (!g) continue;
+      const r = await g.call<{ items?: SupplyRequest[] }>('GET', '/supply-requests', { query: { mfcId, state: 'APPROVED' } });
       reqs = r.body.items ?? [];
     } catch {
       continue; // 이 계정으로 못 읽는 MFC(403) — 건너뜀

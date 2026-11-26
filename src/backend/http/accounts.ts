@@ -13,12 +13,17 @@ export function passwordFileFor(account: string): string | null {
   if (short === 'claude-cdc-sup') return 'keycloak-claude-cdc-sup-password';
   // MFC 센터 관리자(다섯 센터) — 실서버 한 건 돌리기 뒤 MFC 입고 예정·도착 운행 조회용(사용자 2026-11-26 "입고 예정 MFC 계정으로 보면", lan-test-accounts.md)
   if (short === 'claude-mfc-sup') return 'keycloak-claude-mfc-sup-password';
+  // 나머지 네 지점 센터 관리자 — 공급 요청 다리가 지점마다 읽음(mfc 시뮬 config MFC_SITES 와 같은 이름, 2026-11-26)
+  if (/^claude-mfc-sup-(mk|sj|cc|bn)$/.test(short)) return `keycloak-${short}-password`;
   if (/^cdcw-(fc-(0[1-9]|10)|(dl|qc|ld)-0[1-5]|fk-0[1-3])$/.test(short)) return 'keycloak-cdc-test-workers-password';
   return null;
 }
 
 /** 실서버 모드 운영자 계정 [확정 — lan-test-accounts.md §2-5] */
 export const CDC_OPERATOR_ACCOUNT = 'claude-cdc-sup';
+
+/** MFC 지점 → 센터 관리자 계정(공급 요청 읽기, mfc 시뮬 MFC_SITES) */
+export const MFC_SUP_ACCOUNTS: Record<string, string> = { 'MFC-BJG-01': 'claude-mfc-sup', 'MFC-MOKPO-01': 'claude-mfc-sup-mk', 'MFC-SEJ-01': 'claude-mfc-sup-sj', 'MFC-CHC-01': 'claude-mfc-sup-cc', 'MFC-BNG-01': 'claude-mfc-sup-bn' };
 
 /** 가상 작업자 계정 이름 [확정 — lan-test-accounts.md §2-5] — 시뮬레이터 역할 → 계정 */
 export const CDC_WORKER_ACCOUNTS = {
