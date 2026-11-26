@@ -89,7 +89,9 @@ export function LanIncoming() {
     };
   }, [real]);
   if (!real) return null;
-  const list = rows.filter((x) => !seen().includes(x.trfId));
+  // 지금 이 화면이 돌리고 있는 TRF(새 TRF 로 시작 직후 Wave 만들기 전 1~2초)는 알리지 않음
+  const mine = busy ? lanRunSnapshot().trfId : undefined;
+  const list = rows.filter((x) => !seen().includes(x.trfId) && x.trfId !== mine);
   if (!list.length) return null;
   const x = list[0];
   const later = () => {
