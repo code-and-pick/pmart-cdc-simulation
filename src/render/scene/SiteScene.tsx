@@ -11,6 +11,7 @@ import { SCENE, zoneBoxColor } from '../colors';
 import { boxTexture, palletTexture, plateTexture } from '../sprites';
 import { Agents, SimDriver } from './Agents';
 import { RollLayer } from './RollLayer';
+import { DcTruck } from './Truck3D';
 import { AutoBatch } from './AutoBatch';
 import { Facility, Lights } from './Facility';
 import { EquipmentModel, FreightLift, RollContainer, WorkLights } from './Equipment3D';
@@ -364,7 +365,6 @@ function FloorDocks({ f }: { f: FloorLayout }) {
   const { sim } = useApp();
   useTick();
   const DOOR_Z = 0.05;
-  const T0 = -12.5;
   const T1 = -1.2;
   const rolls = sim.atDock.filter((r) => r.floor === f.floor);
   const yardX = f.docks.length ? (Math.min(...f.docks.map((d) => d.pos.x)) + Math.max(...f.docks.map((d) => d.pos.x))) / 2 : 0;
@@ -421,38 +421,24 @@ function FloorDocks({ f }: { f: FloorLayout }) {
           const rts = Math.ceil(r.loaded.length / OUTBOUND.boxesPerRt);
           const name = `${r.plan.region.replace(/권$/, '')} ${TEMP_KO[r.plan.temp]}`;
           return (
-            <group key={r.plan.tripId} position={[r.dock.pos.x, 0, 0]}>
-              <mesh position={[0, 1.7, (T0 + T1 + 2) / 2]}>
-                <boxGeometry args={[2.4, 2.6, T1 - T0 - 2]} />
-                <meshStandardMaterial color={r.plan.temp === 'AMBIENT' ? 0xf4f6fa : r.plan.temp === 'CHILLED' ? 0xd8ecff : 0xcfe0f5} />
-              </mesh>
-              <mesh position={[0, 1.4, T0 + 0.8]}>
-                <boxGeometry args={[2.3, 2.2, 1.6]} />
-                <meshStandardMaterial color={0x2f6fd6} />
-              </mesh>
-              <sprite position={[0, 4.4, (T0 + T1) / 2]} scale={[4.2, 1.7, 1]}>
+            // 5톤 탑차(MFC 시뮬레이터 모형) — 뒷문을 도크에(사용자 2026-11-26 "트럭 UI")
+            <DcTruck key={r.plan.tripId} x={r.dock.pos.x} rearZ={T1} temp={r.plan.temp}>
+              <sprite position={[0, 4.2, 0]} scale={[4.2, 1.7, 1]}>
                 <spriteMaterial map={plateTexture(`${name}\n${rts}/${TMS.vehicle.maxRt} R/T`, { w: 384, h: 156 })} depthWrite={false} />
               </sprite>
-            </group>
+            </DcTruck>
           );
         })}
       {/* 아침 입고 차 — 팔레트를 다 내릴 때까지 도크에(화면 흐름만, config INBOUND) */}
       {sim.inboundTrucks
         .filter((t) => t.floor === f.floor && t.left > 0 && sim.time / 60 >= t.arriveMin)
         .map((t) => (
-          <group key={`${t.dock.code}-${t.arriveMin}`} position={[t.dock.pos.x, 0, 0]}>
-            <mesh position={[0, 1.7, (T0 + T1 + 2) / 2]}>
-              <boxGeometry args={[2.4, 2.6, T1 - T0 - 2]} />
-              <meshStandardMaterial color={0xf4f6fa} />
-            </mesh>
-            <mesh position={[0, 1.4, T0 + 0.8]}>
-              <boxGeometry args={[2.3, 2.2, 1.6]} />
-              <meshStandardMaterial color={0xd9822b} />
-            </mesh>
-            <sprite position={[0, 4.4, (T0 + T1) / 2]} scale={[4.2, 1.7, 1]}>
+          // 입고 차 — 같은 탑차, 운전칸 주황(출고 차와 구분)
+          <DcTruck key={`${t.dock.code}-${t.arriveMin}`} x={t.dock.pos.x} rearZ={T1} temp={t.dock.temp} cabColor={0xd9822b}>
+            <sprite position={[0, 4.2, 0]} scale={[4.2, 1.7, 1]}>
               <spriteMaterial map={plateTexture(`입고 차\n팔레트 ${t.left}`, { w: 384, h: 156 })} depthWrite={false} />
             </sprite>
-          </group>
+          </DcTruck>
         ))}
     </group>
   );

@@ -17,6 +17,8 @@ export interface RunStep {
   detail: string;
   /** PDA 가 이 단계에서 찍을 코드(화면 팝업 — 사용자 2026-11-26 "지역 카드 찍으라는데 어딨어? 팝업으로") */
   scan?: { label: string; value: string }[];
+  /** 이 단계가 다루는 TRF(팝업 제목) */
+  trfId?: string;
 }
 
 interface SnapLoc {
@@ -45,7 +47,7 @@ const why = (e: unknown) => (e instanceof ApiProblem ? `${e.problem.status} ${e.
 export async function runLanOne(
   deps: { gateway: HttpClient; backend: HttpBackend; internal: HttpInternal; operatorId: () => string | null },
   /** pda = 피킹은 PDA 앱(사람)이 한다 — Wave 배포 뒤 그 Wave 작업이 다 끝날 때까지 기다렸다가 이어서(사용자 2026-11-26 "PDA 로 작업 되는지 확인") */
-  opt: { mfcId: string; skus: number; qty: number; pda?: boolean; pdaWaitMin?: number },
+  opt: { mfcId: string; skus: number; qty: number; pda?: boolean; pdaWaitMin?: number; /** LAN 에 이미 있는 TRF 를 지금 단계부터 이어서(PDA 모드) — 새로고침으로 끊긴 실행·다른 TRF 를 PDA 로 하고 있을 때(사용자 2026-11-26 "출고대기로 넘어갔는데 계속 피킹 팝업") */ resumeTrfId?: string },
   onStep: (steps: RunStep[]) => void,
 ): Promise<RunStep[]> {
   const steps: RunStep[] = [];
@@ -70,8 +72,24 @@ export async function runLanOne(
   };
   const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
   try {
+    type Ord0 = { orderId: string; trfIds?: string[]; stops?: { trfIds?: string[] }[]; vehicleId?: string | null; dockCode?: string | null; state: string; version: number };
+    const res = opt.resumeTrfId
+      ? await step(`이어 하기 — ${opt.resumeTrfId} 지금 상태 읽기`, async () => {
+          const it = await deps.internal.getTransferIntake(opt.resumeTrfId!);
+          if (it.state === 'DEPARTED' || it.state === 'CANCELLED') throw new Error(`이미 ${it.state}`);
+          if (!it.waveId) throw new Error(`Wave 없음(${it.state}) — 이어 할 수 없음`);
+          // 출고일 = 도착 기한(다음 날 06:00) − 30시간
+          const day = kst(new Date(new Date(it.dueAt).getTime() - 30 * 3600_000));
+          const r = await deps.gateway.call<{ items?: Ord0[] } | Ord0[]>('GET', `/cdcs/${CENTER_ID}/transport-orders`, { query: { shipDate: day } });
+          const list = Array.isArray(r.body) ? r.body : (r.body.items ?? []);
+          const order = list.find((x) => (x.trfIds ?? []).includes(it.trfId) || (x.stops ?? []).some((st) => (st.trfIds ?? []).includes(it.trfId))) ?? null;
+          return { v: { intake: it, shipDate: day, order }, detail: `${it.state} · Wave ${it.waveId} · 출고일 ${day} · 지시서 ${order ? `${order.orderId} ${order.state}` : '없음'}` };
+        })
+      : null;
     // 0) 재고에서 고르기
-    const picks = await step('시작 재고에서 상품 고르기', async () => {
+    const picks = res
+      ? res.intake.lines.map((l) => ({ sku: l.sku, loc: { locationCode: '', onHand: 0, reserved: 0, lot: '' } as unknown as SnapLoc & { lot: string } }))
+      : await step('시작 재고에서 상품 고르기', async () => {
       const r = await deps.internal.inventory.call<{ items: SnapItem[] }>('GET', '/internal/snapshots', { query: { cdcId: CENTER_ID } });
       const cand = (r.body.items ?? [])
         .map((it) => {
@@ -86,7 +104,9 @@ export async function runLanOne(
     // 1) 인수
     // 출고일 고르기 — 그 MFC 노선·상온 운송지시서가 이미 계획완료(닫힘)인 날은 새 TRF 가 HELD ORDER_CLOSED 로 남는다(2026-11-26 두 번째 시험에서 막힘).
     // 오늘부터 하루씩 보며 닫힌 지시서가 없는 첫 날을 쓴다
-    const shipDate = await step('출고일 고르기 (닫히지 않은 운송지시서)', async () => {
+    const shipDate = res
+      ? res.shipDate
+      : await step('출고일 고르기 (닫히지 않은 운송지시서)', async () => {
       type Ord = { orderId: string; tempClass?: string; state: string; stops?: { mfcId?: string }[] };
       const base = new Date(`${kst(new Date())}T00:00:00+09:00`);
       for (let d = 0; d < 14; d++) {
@@ -100,8 +120,8 @@ export async function runLanOne(
     });
     const due = new Date(`${shipDate}T00:00:00+09:00`);
     due.setTime(due.getTime() + (24 + 6) * 3600_000); // 다음 날 06:00 KST — [출고일 12:00, 다음 날 12:00) 안
-    const trfId = `TRF-SIM-${runId.toUpperCase()}`;
-    await step('TRF 인수 (POST /internal/transfer-intakes)', async () => {
+    const trfId = res ? res.intake.trfId : `TRF-SIM-${runId.toUpperCase()}`;
+    if (!res) await step('TRF 인수 (POST /internal/transfer-intakes)', async () => {
       const r = await deps.internal.intakeTransfer(
         {
           trfId,
@@ -119,7 +139,9 @@ export async function runLanOne(
       return { v: r, detail: `${trfId} → ${opt.mfcId} · ${picks.length}줄 × ${opt.qty} · ${r.status ?? ''}` };
     });
     // 2) 할당 기다림
-    let intake: TransferIntake = await step('할당 (인수 상태 확인)', async () => {
+    let intake: TransferIntake = res
+      ? res.intake
+      : await step('할당 (인수 상태 확인)', async () => {
       for (let i = 0; i < 15; i++) {
         const t = await deps.internal.getTransferIntake(trfId);
         if (t.state !== 'RECEIVED' && t.state !== 'ALLOCATING') return { v: t, detail: `${t.state} · 할당 ${t.progress.reduce((a, p) => a + p.allocatedQty, 0)} / 승인 ${t.progress.reduce((a, p) => a + p.approvedQty, 0)}` };
@@ -129,11 +151,13 @@ export async function runLanOne(
     });
     if (intake.state === 'ALLOCATION_FAILED') throw new Error('ALLOCATION_FAILED');
     // 3) Wave
-    const wave = await step('Wave 만들기 (POST /waves)', async () => {
+    const wave = res
+      ? ({ waveId: res.intake.waveId! } as Awaited<ReturnType<HttpBackend['createWave']>>)
+      : await step('Wave 만들기 (POST /waves)', async () => {
       const w = await deps.backend.createWave({ cdcId: CENTER_ID, trfIds: [trfId], temperatureZone: 'AMBIENT' }, key('wave'));
       return { v: w, detail: `${w.waveId} ${w.state}` };
     });
-    await step('Wave 배포 (releases)', async () => {
+    if (!res) await step('Wave 배포 (releases)', async () => {
       const r = await deps.backend.releaseWave(wave.waveId, key('release'), wave.version);
       return { v: r, detail: `${r.status}` };
     });
@@ -171,9 +195,11 @@ export async function runLanOne(
     if (opt.pda) {
       // PDA 모드 — 피킹·분배/패킹·검품·상차는 PDA 앱(사람), 시뮬레이터는 TRF·Wave·배차·입차·출차만(사용자 2026-11-26 "PDA 앱에 DC 기능 추가했어").
       // 차가 먼저 도크에 들어와 있어야 PDA 상차(도크 스캔 → 운행)가 되므로 배차·입차를 먼저 한다
-      const confirmed = await dispatch();
+      const confirmed: Order = res?.order && res.order.state !== 'PLANNING' ? res.order : await dispatch();
       tripId = confirmed.orderId;
-      await checkIn(tripId);
+      // 이어 하기 — 이미 입차했으면 건너뜀
+      const tripNow = res ? (await deps.gateway.call<{ state?: string }>('GET', `/trips/${encodeURIComponent(tripId)}`).catch(() => null))?.body.state : undefined;
+      if (!tripNow || tripNow === 'SCHEDULED') await checkIn(tripId);
       const until = Date.now() + (opt.pdaWaitMin ?? 60) * 60_000;
       const sum = (t: TransferIntake, k: 'approvedQty' | 'allocatedQty' | 'pickedQty' | 'sortedQty' | 'inspectedQty' | 'loadedQty') => t.progress.reduce((a, p) => a + p[k], 0);
       /** 인수 진행을 3초마다 보며 기다림 — 다 되면 그 단계 끝 */
@@ -184,6 +210,7 @@ export async function runLanOne(
             const live = steps[steps.length - 1];
             live.detail = `${hint} · 지금 ${t.state} · ${show(t)}`;
             if (codes) live.scan = await codes().catch(() => live.scan);
+            live.trfId = trfId;
             onStep([...steps]);
             if (done(t)) return { v: t, detail: `${t.state} · ${show(t)}` };
             if (Date.now() > until) throw new Error(`${opt.pdaWaitMin ?? 60}분 안에 끝나지 않음 — ${t.state}`);
@@ -217,6 +244,7 @@ export async function runLanOne(
           const t = await deps.internal.getTransferIntake(trfId);
           const live = steps[steps.length - 1];
           live.detail = `도크 ${confirmed.dockCode ?? '-'} · 운행 ${tripId} ${trip.state ?? ''} · 실음 ${sum(t, 'loadedQty')}/${sum(t, 'inspectedQty')}`;
+          live.trfId = trfId;
           live.scan = [...(confirmed.dockCode ? [{ label: '도크', value: confirmed.dockCode }] : []), ...(await lpnCodes('실을 박스').catch(() => []))];
           onStep([...steps]);
           if (trip.state === 'LOADED' || trip.state === 'DEPARTED') return { v: trip, detail: `운행 ${trip.state} · 실음 ${sum(t, 'loadedQty')}개` };

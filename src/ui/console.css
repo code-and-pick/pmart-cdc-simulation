@@ -1766,3 +1766,8 @@ tr.ex td { color: var(--muted); font-style: italic; }
 .scan-pop-mini span { color: var(--muted); }
 .scan-pop-mini em { font-style: normal; color: #2f80ed; font-weight: 700; }
 .scan-pop-h button { font-size: 16px; }
+/* 하던 TRF 이어 하기 */
+.lr-open { display: grid; gap: 6px; padding: 10px; border: 1px solid var(--line); border-radius: 10px; font-size: 12px; }
+.lr-open-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.lr-open-row span { color: var(--muted); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lr-open-row button { flex: none; height: 26px; padding: 0 10px; border-radius: 7px; border: 1px solid #2f80ed; background: transparent; color: #2f80ed; cursor: pointer; font-size: 12px; }

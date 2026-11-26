@@ -721,9 +721,9 @@ function LanRun() {
   // 상태는 패널 밖(lanRunStore) — 탭이 바뀌어도 진행·팝업이 남는다
   const { mfcId, mode, steps, busy, hideScan } = useLanRun();
   if (!real) return null;
-  const go = () => {
+  const go = (resumeTrfId?: string) => {
     setLanRun({ busy: true, steps: [] });
-    void runLanOne({ gateway: real.backend.client, backend: real.backend, internal: real.internal, operatorId: () => real.tokens.operatorId }, { mfcId, skus: 3, qty: 2, pda: mode === 'pda', pdaWaitMin: 60 }, (st) => setLanRun({ steps: st })).finally(() => setLanRun({ busy: false }));
+    void runLanOne({ gateway: real.backend.client, backend: real.backend, internal: real.internal, operatorId: () => real.tokens.operatorId }, { mfcId, skus: 3, qty: 2, pda: mode === 'pda' || !!resumeTrfId, pdaWaitMin: 60, ...(resumeTrfId ? { resumeTrfId } : {}) }, (st) => setLanRun({ steps: st })).finally(() => setLanRun({ busy: false }));
   };
   const waitingPda = busy && steps?.at(-1)?.name.startsWith('PDA');
   const cur = steps?.at(-1);
@@ -765,7 +765,7 @@ function LanRun() {
           <li>상차완료가 되면 시뮬레이터가 출차 → 출발 검증까지</li>
         </ol>
       )}
-      <button className="lr-go" onClick={go} disabled={busy}>
+      <button className="lr-go" onClick={() => go()} disabled={busy}>
         {busy ? (waitingPda ? `PDA 기다리는 중 — ${steps?.at(-1)?.name.replace(/^PDA /, '').split(' — ')[0]}` : '도는 중…') : '새 TRF 로 시작'}
       </button>
       {scanCodes && hideScan && (
@@ -773,6 +773,7 @@ function LanRun() {
           찍을 코드 {scanCodes.length}개 보기
         </button>
       )}
+      {!busy && <LanOpenTrfs onResume={go} />}
       {steps && steps.length > 0 && (
         <ol className="lr-steps">
           {steps.map((st, i) => (
@@ -791,6 +792,41 @@ function LanRun() {
 }
 
 /** PDA 가 찍을 코드 팝업 — 앱 맨 위에 늘 붙어 있어 어느 탭·3D 를 눌러도 남는다(사용자 2026-11-26 "지역 카드 어딨어? 팝업으로", "화면 누르니까 팝업 없어졌어") */
+/** LAN 에 출발 전으로 남은 시험 TRF — PDA 로 하던 걸 그 단계부터 이어서(사용자 2026-11-26 "출고대기로 넘어갔는데 계속 피킹 팝업") */
+function LanOpenTrfs({ onResume }: { onResume: (trfId: string) => void }) {
+  const { real } = useApp();
+  const [rows, setRows] = useState<{ trfId: string; trfNumber?: string; state: string; mfcId: string; pickedQty: number; allocatedQty: number }[]>([]);
+  useEffect(() => {
+    if (!real) return;
+    let on = true;
+    const load = () =>
+      real.backend.client
+        .call<{ items?: { trfId: string; trfNumber?: string; state: string; mfcId: string; pickedQty: number; allocatedQty: number }[] }>('GET', '/cdcs/CDC01/transfers', { query: { size: '50' } })
+        .then((r) => on && setRows((r.body.items ?? []).filter((x) => x.trfId.startsWith('TRF-SIM-') && ['IN_WAVE', 'PICKED', 'SORTED', 'INSPECTED', 'LOADED'].includes(x.state))))
+        .catch(() => undefined);
+    void load();
+    const t = setInterval(load, 10_000);
+    return () => {
+      on = false;
+      clearInterval(t);
+    };
+  }, [real]);
+  if (!rows.length) return null;
+  return (
+    <div className="lr-open">
+      <b>하던 TRF 이어 하기</b>
+      {rows.map((x) => (
+        <div key={x.trfId} className="lr-open-row">
+          <span>
+            {x.trfNumber ?? x.trfId} · {x.state} · 집음 {x.pickedQty}/{x.allocatedQty}
+          </span>
+          <button onClick={() => onResume(x.trfId)}>이어 하기</button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function LanScanPopup() {
   const { steps, busy, hideScan } = useLanRun();
   const cur = steps?.at(-1);
@@ -812,7 +848,7 @@ export function LanScanPopup() {
     <div className="scan-pop" role="dialog" aria-label="PDA 로 찍을 코드">
       <div className="scan-pop-h">
         <b>{title}</b>
-        <span>PDA 로 이 코드를 찍으세요 · {now}</span>
+        <span>{cur?.trfId ? `${cur.trfId} · ` : ''}PDA 로 이 코드를 찍으세요 · {now}</span>
         <button onClick={() => setLanRun({ hideScan: true })} aria-label="접기" title="접기">
           ▴
         </button>
