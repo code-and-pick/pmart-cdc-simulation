@@ -1790,3 +1790,13 @@ tr.ex td { color: var(--muted); font-style: italic; }
 .lr-open-row button.ghost { border-color: var(--line); color: inherit; }
 .lr-open-row { justify-content: flex-start; }
 .lr-open-row span { flex: 1; }
+/* 이어 하기 목록이 패널을 밀어 넓히던 것(사용자 2026-11-26 "버튼 튀어나가네") — 그리드 칸 최소 폭 0, 줄은 [글 | 흐름 | 이어 하기] */
+.lr-open { grid-template-columns: minmax(0, 1fr); min-width: 0; }
+.lr-open-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 6px; min-width: 0; }
+.lr-open-row span { min-width: 0; }
+.lr-open-row button { height: 24px; padding: 0 8px; font-size: 11.5px; }
+.sec.lr { min-width: 0; }
+.sec.lr > * { min-width: 0; }
+.lr { grid-template-columns: minmax(0, 1fr); }
+.lr-form { grid-template-columns: 34px minmax(0, 1fr); }
+.lr-sel { min-width: 0; width: 100%; }
