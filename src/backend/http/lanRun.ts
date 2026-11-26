@@ -232,9 +232,10 @@ export async function runLanOne(
         return out.filter((c, i, a) => a.findIndex((y) => y.value === c.value) === i);
       };
       // 이 TRF 의 박스(LPN)
-      const lpnCodes = async (label: string) => {
-        const r = await deps.gateway.call<{ items?: { lpn: string }[] }>('GET', `/cdcs/${CENTER_ID}/lpns`, { query: { trfId, size: '50' } });
-        return (r.body.items ?? []).map((x) => ({ label, value: x.lpn }));
+      // 남은 박스만(검품은 검품 전, 상차는 안 실은 것) — 다 보이면 카메라가 옆 QR 을 읽음(사용자 2026-11-26 "BOX-… QR 인식이 안돼")
+      const lpnCodes = async (label: string, left: (x: { inspection?: string | null; loaded?: boolean }) => boolean = () => true) => {
+        const r = await deps.gateway.call<{ items?: { lpn: string; inspection?: string | null; loaded?: boolean }[] }>('GET', `/cdcs/${CENTER_ID}/lpns`, { query: { trfId, size: '50' } });
+        return (r.body.items ?? []).filter(left).map((x) => ({ label, value: x.lpn }));
       };
       const box = `BOX-${runId.toUpperCase()}-1`;
       const t0Items = () => picks.map((x) => ({ label: `상품 ${x.sku}`, value: x.sku }));
@@ -244,10 +245,10 @@ export async function runLanOne(
         const loc = ts.flatMap((x) => x.lines.map((l) => l.locationCode))[0];
         const mfcNo = Math.max(0, MFCS.findIndex((m) => m.id === (res?.intake.mfcId ?? opt.mfcId))) + 1;
         const stage = loc ? [{ label: '출고대기 자리(먼저)', value: stagingCodeFor(loc, mfcNo) }] : [];
-        return [...stage, ...(await lpnCodes('검품할 박스'))];
+        return [...stage, ...(await lpnCodes('검품할 박스', (x) => !x.inspection))];
       };
       await waitStage('PDA 피킹', 'DC 업무 → 피킹 → 다음 작업 받기 → 칸·상품 스캔', (t) => sum(t, 'allocatedQty') > 0 && sum(t, 'pickedQty') >= sum(t, 'allocatedQty'), (t) => `집음 ${sum(t, 'pickedQty')}/${sum(t, 'allocatedQty')}`, pickCodes);
-      await waitStage('PDA 분배·패킹', 'DC 업무 → 분배 → 박스(LPN) 닫기', (t) => sum(t, 'pickedQty') > 0 && sum(t, 'sortedQty') >= sum(t, 'pickedQty'), (t) => `박스에 담음 ${sum(t, 'sortedQty')}/${sum(t, 'pickedQty')}`, async () => [{ label: '새 박스(LPN)', value: box }, ...t0Items()]);
+      await waitStage('PDA 분배·패킹', 'DC 업무 → 분배 → 박스(LPN) 닫기', (t) => sum(t, 'pickedQty') > 0 && sum(t, 'sortedQty') >= sum(t, 'pickedQty'), (t) => `박스에 담음 ${sum(t, 'sortedQty')}/${sum(t, 'pickedQty')}`, async () => [...picks.map((_, i) => ({ label: `새 박스(LPN) ${i + 1} — 박스 찍으라 할 때만`, value: `${box.replace(/-1$/, '')}-${i + 1}` })), ...t0Items()]);
       await waitStage('PDA 검품', 'DC 업무 → 검품 → 출고대기 박스 스캔', (t) => sum(t, 'sortedQty') > 0 && sum(t, 'inspectedQty') >= sum(t, 'sortedQty'), (t) => `합격 ${sum(t, 'inspectedQty')}/${sum(t, 'sortedQty')}`, inspectCodes);
       await step('PDA 상차 — 도크 스캔 → 운행 → 박스 스캔 → 상차완료', async () => {
         for (;;) {
@@ -256,7 +257,7 @@ export async function runLanOne(
           const live = steps[steps.length - 1];
           live.detail = `도크 ${confirmed.dockCode ?? '-'} · 운행 ${tripId} ${trip.state ?? ''} · 실음 ${sum(t, 'loadedQty')}/${sum(t, 'inspectedQty')}`;
           live.trfId = trfId;
-          live.scan = [...(confirmed.dockCode ? [{ label: '도크', value: confirmed.dockCode }] : []), ...(await lpnCodes('실을 박스').catch(() => []))];
+          live.scan = [...(confirmed.dockCode ? [{ label: '도크', value: confirmed.dockCode }] : []), ...(await lpnCodes('실을 박스', (x) => !x.loaded).catch(() => []))];
           onStep([...steps]);
           if (trip.state === 'LOADED' || trip.state === 'DEPARTED') return { v: trip, detail: `운행 ${trip.state} · 실음 ${sum(t, 'loadedQty')}개` };
           if (Date.now() > until) throw new Error(`${opt.pdaWaitMin ?? 60}분 안에 상차완료가 안 됨 — 운행 ${trip.state}`);
