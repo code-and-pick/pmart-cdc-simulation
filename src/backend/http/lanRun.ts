@@ -177,7 +177,35 @@ export async function runLanOne(
     const worker = deps.operatorId() ?? 'claude-cdc-sup';
     type Order = { orderId: string; trfIds?: string[]; stops?: { trfIds?: string[] }[]; vehicleId?: string | null; dockCode?: string | null; state: string; version: number; reason?: string | null };
     // 배차 생성 → 이 TRF 가 든 지시서 계획완료(차량·도크 예약)
+    // 그날 정규차가 이미 닫혔으면(같은 날 같은 MFC·온도대 두 번째 TRF) 용차(추가 운행)를 불러 바로 보냄 — 사용자 2026-11-27 "지금처럼 바로 PDA 로 작업하고 도착 보내기"·"응".
+    // transport-planning 0.6.0(R-30) spot-orders → confirmations. 차량은 그 온도대 차를 차례로, 기사는 짝(VH-5T-04A ↔ DR-04A), 겹치면(409) 취소하고 다음 차
+    const spotOrder = (tempClass: string) =>
+      step('용차 부르기 (그날 차가 이미 떠나 추가 운행)', async () => {
+        const vr = await deps.gateway.call<{ items?: { vehicleId: string; active?: boolean }[] } | { vehicleId: string; active?: boolean }[]>('GET', '/vehicles', { query: { tempClass } });
+        const vs = (Array.isArray(vr.body) ? vr.body : (vr.body.items ?? [])).filter((v) => v.active !== false);
+        let last = '';
+        for (const v of vs) {
+          const driverId = `DR-${v.vehicleId.split('-').pop()}`;
+          let o: Order;
+          try {
+            o = (await deps.gateway.call<Order>('POST', `/cdcs/${CENTER_ID}/transport-orders/spot-orders`, { body: { shipDate, vehicleId: v.vehicleId, driverId, trfIds: [trfId], reason: '그날 정규차가 이미 떠나 추가 운행(DC 시뮬레이터)' }, idempotencyKey: `sim-spot-${trfId}-${v.vehicleId}` })).body;
+          } catch (e) {
+            if (e instanceof ApiProblem && (e.problem.status === 404 || e.problem.status === 405)) throw new Error('같은 날 두 번째 차(용차) 기능이 아직 LAN 에 배포 전이에요(R-30) — 배포되면 그대로 다시 누르면 됩니다');
+            last = `${v.vehicleId}: ${why(e)}`;
+            continue;
+          }
+          try {
+            const c = (await deps.gateway.call<Order>('POST', `/cdcs/${CENTER_ID}/transport-orders/${encodeURIComponent(o.orderId)}/confirmations`, { body: {}, idempotencyKey: `sim-spot-confirm-${o.orderId}`, expectedVersion: o.version })).body;
+            return { v: c, detail: `${c.orderId} 용차 · 차량 ${c.vehicleId ?? v.vehicleId} · 도크 ${c.dockCode ?? '-'}` };
+          } catch (e) {
+            last = `${v.vehicleId}: ${why(e)}`;
+            await deps.gateway.call('POST', `/cdcs/${CENTER_ID}/transport-orders/${encodeURIComponent(o.orderId)}/cancellations`, { body: { reason: '차량 겹침 — 다른 차로(DC 시뮬레이터)' }, idempotencyKey: `sim-spot-cancel-${o.orderId}` }).catch(() => undefined);
+          }
+        }
+        throw new Error(`비어 있는 ${tempClass} 차가 없어 용차를 못 부름 — ${last}`);
+      });
     const dispatch = async (): Promise<Order> => {
+      let closed: string | null = null;
       const order = await step('배차 생성 (transport-orders/generations)', async () => {
         const r = await deps.gateway.call<{ orders?: Order[]; requests?: Record<string, number>; unplannedReasons?: { routeId: string; tempClass: string; reason: string }[] }>('POST', `/cdcs/${CENTER_ID}/transport-orders/generations`, { body: { shipDate }, idempotencyKey: key('gen') });
         const o = (r.body.orders ?? []).find((x) => (x.trfIds ?? []).includes(trfId) || (x.stops ?? []).some((s) => (s.trfIds ?? []).includes(trfId)));
@@ -185,8 +213,13 @@ export async function runLanOne(
           // 이 TRF 요청서가 왜 빠졌는지(보류 사유) 바로 보여 준다
           let why = '';
           try {
-            const req = (await deps.gateway.call<{ state?: string; reason?: string | null }>('GET', `/cdcs/${CENTER_ID}/transport-requests/${encodeURIComponent(trfId)}`)).body;
+            const req = (await deps.gateway.call<{ state?: string; reason?: string | null; tempClass?: string }>('GET', `/cdcs/${CENTER_ID}/transport-requests/${encodeURIComponent(trfId)}`)).body;
             why = ` · 이 TRF 요청서 ${req.state ?? '?'}${req.reason ? ` (${req.reason})` : ''}`;
+            // 그날 차가 이미 닫힘 → 아래에서 용차로
+            if (req.state === 'HELD' && (req.reason === 'ORDER_CLOSED' || req.reason === 'READY_UNREACHABLE')) {
+              closed = req.tempClass ?? zone;
+              return { v: null as unknown as Order, detail: '그날 정규차가 이미 떠남 → 용차로' };
+            }
           } catch {
             /* 사유 조회 실패는 넘어감 */
           }
@@ -194,6 +227,7 @@ export async function runLanOne(
         }
         return { v: o, detail: `${o.orderId} ${o.state}` };
       });
+      if (closed) return spotOrder(closed);
       return step('계획완료 (confirmations — 차량·도크 예약)', async () => {
         const o = (await deps.gateway.call<Order>('POST', `/cdcs/${CENTER_ID}/transport-orders/${encodeURIComponent(order.orderId)}/confirmations`, { body: {}, idempotencyKey: key('confirm'), expectedVersion: order.version })).body;
         return { v: o, detail: `${o.state} · 차량 ${o.vehicleId ?? '-'} · 도크 ${o.dockCode ?? '-'}` };

@@ -156,3 +156,47 @@ describe('실서버 한 건 — PDA 모드 단계·팝업 코드', () => {
 });
 
 void ApiProblem;
+
+describe('실서버 한 건 — 그날 정규차가 이미 떠났으면 용차', () => {
+  it('배차 생성에 이 TRF 가 없고 요청서가 HELD ORDER_CLOSED 면 용차(spot-orders → confirmations)로 싣고 이어 감', async () => {
+    vi.useFakeTimers();
+    const srv = fakeServer();
+    const g = (srv.deps as { gateway: { call: (m: string, p: string, o?: { body?: unknown }) => Promise<unknown> } }).gateway;
+    const base = g.call;
+    const sent: string[] = [];
+    g.call = async (m: string, p: string, o?: { body?: unknown }) => {
+      if (p.endsWith('/generations')) return { status: 200, body: { orders: [] } };
+      if (p.startsWith('/cdcs/CDC01/transport-requests/')) return { status: 200, body: { state: 'HELD', reason: 'ORDER_CLOSED', tempClass: 'AMBIENT', shipDate: '2026-11-27' } };
+      if (p === '/vehicles') return { status: 200, body: { items: [{ vehicleId: 'VH-5T-04A' }, { vehicleId: 'VH-5T-07A' }] } };
+      if (p.endsWith('/spot-orders')) {
+        const b = o?.body as { vehicleId: string };
+        sent.push(`spot ${b.vehicleId}`);
+        return { status: 201, body: { orderId: b.vehicleId === 'VH-5T-04A' ? 'SPOT-1' : 'TO-1', version: 1, state: 'PLANNING' } };
+      }
+      if (p === '/cdcs/CDC01/transport-orders/SPOT-1/confirmations') throw new ApiProblem({ status: 409, code: 'VEHICLE_BUSY', title: 'x' } as never);
+      if (p.endsWith('/cancellations')) {
+        sent.push(`cancel ${p}`);
+        return { status: 200, body: {} };
+      }
+      return base(m, p);
+    };
+    const onStep = (st: RunStep[]) => {
+      const cur = st.at(-1)!;
+      if (cur.state !== 'run' || !cur.scan?.length) return;
+      if (cur.name.startsWith('PDA 피킹')) srv.setStage('PICKED');
+      else if (cur.name.startsWith('PDA 분배')) srv.setStage('SORTED');
+      else if (cur.name.startsWith('PDA 검품')) srv.setStage('INSPECTED');
+      else if (cur.name.startsWith('PDA 상차')) srv.setStage('LOADED');
+    };
+    const p = runLanOne(srv.deps, { mfcId: 'MFC-BJG-01', skus: 2, qty: 2, pda: true, pdaWaitMin: 60, resumeTrfId: TRF }, onStep);
+    for (let i = 0; i < 60 && srv.stage !== 'DEPARTED'; i++) await vi.advanceTimersByTimeAsync(2100);
+    await vi.advanceTimersByTimeAsync(15_000);
+    const steps = await p;
+    vi.useRealTimers();
+    expect(steps.find((s) => s.state === 'fail')?.detail ?? '').toBe('');
+    expect(steps.some((s) => s.name.startsWith('용차 부르기'))).toBe(true);
+    // 첫 차는 겹쳐(409) 취소, 다음 차로
+    expect(sent).toEqual(['spot VH-5T-04A', 'cancel /cdcs/CDC01/transport-orders/SPOT-1/cancellations', 'spot VH-5T-07A']);
+    expect(steps.at(-1)!.detail).toContain('DEPARTED');
+  });
+});
