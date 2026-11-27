@@ -186,11 +186,16 @@ export async function runLanOne(
           let why = '';
           try {
             const req = (await deps.gateway.call<{ state?: string; reason?: string | null }>('GET', `/cdcs/${CENTER_ID}/transport-requests/${encodeURIComponent(trfId)}`)).body;
-            why = ` · 이 TRF 요청서 ${req.state ?? '?'}${req.reason ? ` (${req.reason})` : ''}`;
+            // 사람이 읽는 말로 — 보류 사유(사용자 2026-11-27 "이거 뭔데")
+            const REASON: Record<string, string> = {
+              ORDER_CLOSED: '그날 이 MFC·온도대 차가 이미 계획완료(닫힘)라 실을 차가 없음',
+              READY_UNREACHABLE: '준비 시각까지 갈 수 있는 출고일 차가 이미 닫힘',
+            };
+            why = ` · 운송 요청서 ${req.state ?? '?'}${req.reason ? ` — ${REASON[req.reason] ?? req.reason}` : ''}`;
           } catch {
             /* 사유 조회 실패는 넘어감 */
           }
-          throw new Error(`이 TRF 가 든 지시서 없음${why} — 출고일 ${shipDate} 요청서 ${JSON.stringify(r.body.requests ?? {})}`);
+          throw new Error(`배차 안 됨(출고일 ${shipDate})${why}. 지금은 다른 날 차로 옮기는 기능이 없어 백엔드 처리가 필요합니다`);
         }
         return { v: o, detail: `${o.orderId} ${o.state}` };
       });
@@ -299,7 +304,8 @@ export async function runLanOne(
         }
       });
     } else {
-      // 자동 — 시뮬레이터가 피킹·분류·검품·상차까지
+      // 자동 — 시뮬레이터가 피킹·분류·검품·상차까지. 실을 차(배차)부터 확인 — 차가 없으면 집기 전에 멈춤(2026-11-27 T830694: 검품까지 하고 배차에서 막힘)
+      const confirmedEarly = await dispatch();
       const picked: { sku: string; lot: string; qty: number }[] = [];
       await step('피킹 (next-tasks → starts → pick-results)', async () => {
         let n = 0;
@@ -332,7 +338,7 @@ export async function runLanOne(
         const r = await deps.backend.reportInspectionResult({ trfId, inspectorId: worker, items: lpnIds.map((lpn) => ({ lpn, result: 'PASSED' as const })) }, key('inspect'));
         return { v: r, detail: `${r.status}` };
       });
-      const confirmed = await dispatch();
+      const confirmed = confirmedEarly;
       tripId = confirmed.orderId;
       await step('상차 실적 (loading-results)', async () => {
         const r = await deps.backend.reportLoadingResult({ trfId, tripId, vehicleId: confirmed.vehicleId ?? '', ...(confirmed.dockCode ? { dockCode: confirmed.dockCode } : {}), workerId: worker, action: 'LOADED', lpns: lpnIds.map((lpn) => ({ lpn })) }, key('load'));
