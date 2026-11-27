@@ -1934,3 +1934,7 @@ details.lr > summary::before { content: '›'; display: inline-block; margin-rig
 details.lr[open] > summary::before { transform: rotate(90deg); }
 details.lr > summary { display: flex; align-items: center; justify-content: flex-start; gap: 8px; }
 details.lr > summary .lr-tag { margin-left: auto; }
+.lan-trf .lt-held { display: grid; gap: 3px; padding: 10px; border-radius: 10px; border: 1px solid #eb5757; background: color-mix(in srgb, #eb5757 10%, transparent); }
+.lan-trf .lt-held b { color: #eb5757; font-size: 13px; }
+.lan-trf .lt-held span { font-size: 12px; }
+.lan-trf .lt-held small { color: var(--muted); font-size: 11px; }

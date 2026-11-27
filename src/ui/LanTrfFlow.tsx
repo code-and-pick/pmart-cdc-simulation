@@ -135,6 +135,8 @@ interface Data {
   trip: Trip | null;
   /** MFC 쪽(입고 예정·작업·재고 이력) — 못 읽으면 null */
   mfc: MfcSide | null;
+  /** TMS 운송 요청서 — 보류(HELD)면 실을 차가 없음 */
+  treq: { state?: string; reason?: string | null; shipDate?: string } | null;
   at: number;
 }
 
@@ -247,9 +249,11 @@ export function LanTrfFlow({ open = true }: { open?: boolean }) {
         const trip = trips.find((x) => x.stops.some((st) => (st.trfIds ?? []).includes(trfId))) ?? null;
         const taskIds = new Set(tasks.map((t) => t.taskId));
         // 출발한 뒤부터 MFC 쪽을 읽음(입고 예정은 출발 사건으로 생김)
+        const treq = await c.call<{ state?: string; reason?: string | null; shipDate?: string }>('GET', `/cdcs/CDC01/transport-requests/${encodeURIComponent(trfId)}`).then((r) => r.body).catch(() => null);
         const mfc = ['LOADED', 'DEPARTED'].includes(intake.state) ? await readMfcSide(trfId, intake.mfcId, intake.lines.map((l) => l.sku)).catch(() => null) : null;
         if (!on) return;
         setD({
+          treq,
           mfc,
           intake,
           trfNumber: sum?.trfNumber,
@@ -361,7 +365,17 @@ export function LanTrfFlow({ open = true }: { open?: boolean }) {
         </button>
       </div>
       {/* 이 TRF 바로 작업 — 알림을 놓쳐도 카드에서 시작(사용자 2026-11-27 "어딨냐고 방금 알림 받은 거 작업해야 된다고") */}
-      {d?.intake && !['DEPARTED', 'CANCELLED', 'ALLOCATION_FAILED'].includes(d.intake.state) && (
+      {/* 배차 보류 — 실을 차가 없으면 작업 단추 대신 이유(눌러도 같은 데서 멈춤, 사용자 2026-11-27 "이거 처리하라고") */}
+      {d?.treq?.state === 'HELD' && d.intake.state !== 'DEPARTED' && (
+        <div className="lt-held">
+          <b>배차 보류 — 실을 차 없음</b>
+          <span>
+            출고일 {d.treq.shipDate ?? '-'} · {d.treq.reason === 'ORDER_CLOSED' ? '그날 이 MFC·온도대 차가 이미 계획완료' : d.treq.reason === 'READY_UNREACHABLE' ? '준비 시각까지 갈 차가 이미 닫힘' : (d.treq.reason ?? '')}
+          </span>
+          <small>다른 날 차·추가 운행으로 옮기는 기능을 백엔드에 요청함(R-30). 들어가면 여기 단추가 다시 생겨요</small>
+        </div>
+      )}
+      {d?.intake && !['DEPARTED', 'CANCELLED', 'ALLOCATION_FAILED'].includes(d.intake.state) && d.treq?.state !== 'HELD' && (
         <div className="lt-go">
           {runningThis ? (
             <span>작업 중 — {[...(steps ?? [])].at(-1)?.name.split(' (')[0]}</span>
