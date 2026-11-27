@@ -8,7 +8,7 @@ import { TEMP_KO } from '../sim/simulation';
 import { trfTemp } from '../sim/supply';
 import { Barcode } from './Barcode';
 import { scanView, useScanView } from './scanView';
-import { LanHandoverTable } from './lanAdmin';
+import { LanHandoverTable, LanPastTable, LanRtTable, LanTasksTable } from './lanAdmin';
 
 const clock = (sec: number) => `${String(Math.floor(sec / 3600) % 24).padStart(2, '0')}:${String(Math.floor(sec / 60) % 60).padStart(2, '0')}`;
 const isoClock = (iso: string) => new Date(iso).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Seoul' });
@@ -278,7 +278,8 @@ export function AdminBoard() {
           )}
         </label>
       </div>
-      {tab === 'past' && (
+      {tab === 'past' && real && <LanPastTable q={q} mfcFilter={view.mfcFilter} day={day} />}
+      {tab === 'past' && !real && (
         <table className="inv">
           <thead>
             <tr>
@@ -317,8 +318,9 @@ export function AdminBoard() {
           </tbody>
         </table>
       )}
-      {tab === 'past' && !hasPast && <ExampleNote when="첫 차가 출발하는 새벽(01:00~)" />}
-      {tab === 'tasks' && (
+      {tab === 'past' && !real && !hasPast && <ExampleNote when="첫 차가 출발하는 새벽(01:00~)" />}
+      {tab === 'tasks' && real && <LanTasksTable q={q} />}
+      {tab === 'tasks' && !real && (
         // 카드 — 작업 번호·상태(한글)·담당·TRF·줄 진행 막대(사용자 2026-11-26 "못 알아보겠다" — 표가 좁아 줄이 꺾이고 상태가 영어였음)
         <div className="tk-list">
           {(hasTasks
@@ -360,7 +362,7 @@ export function AdminBoard() {
           ))}
         </div>
       )}
-      {tab === 'tasks' && !hasTasks && <ExampleNote when="석간 Wave 배포(13:00) 뒤" />}
+      {tab === 'tasks' && !real && !hasTasks && <ExampleNote when="석간 Wave 배포(13:00) 뒤" />}
       {/* 실서버 모드 — LAN 운행·인계·MFC 수령(사용자 2026-11-27 "실시간 반영이 안 되나") */}
       {tab === 'handover' && real && <LanHandoverTable q={q} mfcFilter={view.mfcFilter} />}
       {tab === 'handover' && !real && (
@@ -409,7 +411,8 @@ export function AdminBoard() {
         </table>
       )}
       {tab === 'handover' && !real && !hasHand && <ExampleNote when="차가 MFC 에 도착하는 새벽(05:00~)" />}
-      {tab === 'rt' && (
+      {tab === 'rt' && real && <LanRtTable mfcFilter={view.mfcFilter} />}
+      {tab === 'rt' && !real && (
         <>
           <div className="ad-hint">인계 때 빈 R/T 같은 수만큼 회수 → 칠곡 도크</div>
           <table className="inv">
