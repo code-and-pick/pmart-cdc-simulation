@@ -2,7 +2,7 @@
 import { Fragment, lazy, Suspense, useEffect, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { startLanRun } from './LanIncoming';
-import { productsText, rememberTransfers, shortIds, TrfWaveRef, useRefs, useTrfDetail } from './lanRefs';
+import { productsText, rememberTransfers, shortIds, TrfRef, TrfWaveRef, useRefs, useTrfDetail } from './lanRefs';
 import { setLanRun, useLanRun } from './lanRunStore';
 import { checkReadiness, READINESS_KO, type ProbeResult } from '../backend/http/readiness';
 import { useApp, useTick, useView } from '../app/context';
@@ -211,6 +211,7 @@ function Settings() {
   useTick();
   return (
     <>
+      {real && <LanNewWork />}
       {real && <RealCheck />}
       {real && <LanRun />}
       <VirtualWorkers />
@@ -730,11 +731,12 @@ function LanRun() {
   const scanCodes = busy && cur?.state === 'run' && cur.scan?.length ? cur.scan : null;
   return (
     // 실서버 한 건 — 새 TRF 1건을 LAN 에 실제로 넣어 출발까지. 피킹은 자동(시뮬레이터) 또는 PDA 앱(사람)으로(사용자 2026-11-26 "PDA 로 작업 되는지 확인")
-    <section className="sec lr">
-      <div className="lr-h">
-        <b>실서버 한 건 돌리기</b>
+    // 시험용은 접어 둠 — 진짜 들어온 작업(새 작업)이 위(사용자 2026-11-27 "시험 trf UI 는 좀 줄여")
+    <details className="sec lr" open={busy}>
+      <summary className="lr-h">
+        <b>시험 TRF 돌리기</b>
         <span className="lr-tag">LAN 에 씀</span>
-      </div>
+      </summary>
       <div className="lr-form">
         <span>피킹</span>
         <div className="wk-seg c2">
@@ -787,6 +789,66 @@ function LanRun() {
           ))}
         </ol>
       )}
+    </details>
+  );
+}
+
+/** 새 작업 — LAN 에 들어와 Wave 전인 TRF(MFC 입고 신청 등). 설정 탭 맨 위에 늘(사용자 2026-11-27 "진짜 넣은 작업이 중요한 거니까 … 새 작업 탭이 바로 뜨게") */
+function LanNewWork() {
+  const { real } = useApp();
+  const { busy, steps } = useLanRun();
+  const [rows, setRows] = useState<{ trfId: string; trfNumber?: string; state: string; mfcId: string; createdAt?: string; waveId?: string | null }[]>([]);
+  useEffect(() => {
+    if (!real) return;
+    let on = true;
+    const load = () =>
+      real.backend.client
+        .call<{ items?: { trfId: string; trfNumber?: string; state: string; mfcId: string; createdAt?: string; waveId?: string | null; waveNumber?: string | null }[] }>('GET', '/cdcs/CDC01/transfers', { query: { size: '100' } })
+        .then((r) => {
+          rememberTransfers(r.body.items ?? []);
+          if (on) setRows((r.body.items ?? []).filter((x) => ['RECEIVED', 'ALLOCATING', 'ALLOCATED', 'PARTIALLY_ALLOCATED'].includes(x.state) && !x.waveId && !/^TRF-SIM-/.test(x.trfId)).sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? '')));
+        })
+        .catch(() => undefined);
+    void load();
+    const t = setInterval(load, 5000);
+    return () => {
+      on = false;
+      clearInterval(t);
+    };
+  }, [real]);
+  if (!real) return null;
+  const runId = busy ? [...(steps ?? [])].reverse().find((x) => x.trfId)?.trfId : undefined;
+  return (
+    <section className={`sec nw${rows.length ? ' has' : ''}`}>
+      <h4>
+        새 작업
+        <span>{rows.length ? `${rows.length}건 기다림` : '없음'}</span>
+      </h4>
+      {!rows.length && <div className="note">MFC 가 입고 신청을 승인하면 여기 바로 뜹니다(5초마다 확인)</div>}
+      {rows.map((x) => (
+        <div key={x.trfId} className="nw-row">
+          <div className="nw-t">
+            <TrfRef trfId={x.trfId} {...(x.trfNumber ? { number: x.trfNumber } : {})} />
+            <span>{MFCS.find((m) => m.id === x.mfcId)?.name ?? x.mfcId}</span>
+          </div>
+          <div className="nw-p">
+            <TrfProducts trfId={x.trfId} />
+          </div>
+          <div className="nw-a">
+            <button className="main" disabled={busy} onClick={() => startLanRun(real, { mfcId: x.mfcId, pda: false, resumeTrfId: x.trfId })}>
+              가상 작업자
+            </button>
+            <button disabled={busy} onClick={() => startLanRun(real, { mfcId: x.mfcId, pda: true, resumeTrfId: x.trfId })}>
+              PDA 로 직접
+            </button>
+          </div>
+        </div>
+      ))}
+      {busy && runId && (
+        <div className="note">
+          작업 중: <TrfRef trfId={runId} /> — {[...(steps ?? [])].at(-1)?.name.split(' (')[0]}
+        </div>
+      )}
     </section>
   );
 }
@@ -810,7 +872,7 @@ function LanOpenTrfs({ onResume, busy }: { onResume: (trfId: string) => void; bu
         .call<{ items?: { trfId: string; trfNumber?: string; state: string; mfcId: string; pickedQty: number; allocatedQty: number; updatedAt?: string }[] }>('GET', '/cdcs/CDC01/transfers', { query: { size: '50' } })
         // 출발한 것도 오늘 것은 남김(도착·인계를 이어 봄) — 단추는 [흐름]만
         .then((r) => (rememberTransfers(r.body.items ?? []), r))
-        .then((r) => on && setRows((r.body.items ?? []).filter((x) => /^TRF-(SIM|SR)-/.test(x.trfId) && (['RECEIVED', 'ALLOCATED', 'PARTIALLY_ALLOCATED', 'IN_WAVE', 'PICKED', 'SORTED', 'INSPECTED', 'LOADED'].includes(x.state) || (x.state === 'DEPARTED' && Date.now() - new Date(x.updatedAt ?? 0).getTime() < 24 * 3600_000))).reverse()))
+        .then((r) => on && setRows((r.body.items ?? []).filter((x) => /^TRF-SIM-/.test(x.trfId) && ['IN_WAVE', 'PICKED', 'SORTED', 'INSPECTED', 'LOADED'].includes(x.state)).reverse()))
         .catch(() => undefined);
     void load();
     const t = setInterval(load, 10_000);
@@ -824,7 +886,7 @@ function LanOpenTrfs({ onResume, busy }: { onResume: (trfId: string) => void; bu
   const KO: Record<string, string> = { RECEIVED: '새로 들어옴', ALLOCATED: '새로 들어옴', PARTIALLY_ALLOCATED: '새로 들어옴(일부 할당)', IN_WAVE: '피킹 전·중', PICKED: '분배 전', SORTED: '검품 전', INSPECTED: '상차 전', LOADED: '출차 전', DEPARTED: '출발함' };
   return (
     <div className="lr-open">
-      <b>시험 TRF (최근 순)</b>
+      <b>하던 시험 TRF</b>
       {rows.map((x) => (
         <div key={x.trfId} className={`lr-open-row${x.trfId === viewing ? ' on' : ''}`}>
           <span title={x.trfId}>
@@ -938,7 +1000,25 @@ function RealCheck() {
   useEffect(run, [real]);
   if (!real) return null;
   return (
-    <Sec title="실서버 연결 점검" aside={busy ? '점검 중…' : <button onClick={run}>다시</button>}>
+    // 접어 둠 — 한 줄 요약만(사용자 2026-11-27 "길다랗게 자리 차지할 정도로 중요한 거 아니니까 접었다 펼 수 있게")
+    <details className="sec rc-fold">
+      <summary>
+        <h4>
+          실서버 연결 {rows ? `${rows.filter((r) => r.state === 'READY').length}/${rows.length} 준비됨` : '점검 중…'}
+          <span>
+            {!busy && (
+              <button
+                onClick={(e) => {
+                  e.preventDefault();
+                  run();
+                }}
+              >
+                다시
+              </button>
+            )}
+          </span>
+        </h4>
+      </summary>
       <div className="help">
         <p>실서버 모드에선 3D 가상 작업자가 움직이지 않습니다(LAN 에 함부로 쓰지 않게). 여기서 LAN 연결을 보고, 아래 "한 건 돌리기"로 실제 흐름을 시험합니다.</p>
         {real.tokens.lastError && <p>토큰: {real.tokens.lastError}</p>}
@@ -959,7 +1039,7 @@ function RealCheck() {
         ))}
         {!rows && <div className="note">점검 중…</div>}
       </div>
-    </Sec>
+    </details>
   );
 }
 

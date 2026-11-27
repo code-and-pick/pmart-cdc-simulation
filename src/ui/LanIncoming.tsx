@@ -4,7 +4,7 @@
 // "mfc 백오피스에서 입고신청하면 … 자동으로 새 trf 들어왔다고 … 가상작업자 or pda 로 작업하기"). DC 백오피스는 같은 서버를 읽으니 따로 맞출 것 없음.
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { useApp, type AppCtx } from '../app/context';
+import { useApp, useView, type AppCtx } from '../app/context';
 import { runLanOne } from '../backend/http/lanRun';
 import { MFCS } from '../config';
 import { rememberTransfers, setTrfDetailGetter, TrfRef, useTrfDetail, type TrfDetail } from './lanRefs';
@@ -38,6 +38,8 @@ interface Row {
 }
 /** 아직 Wave 에 안 든(새로 들어온) 상태 */
 const NEW_STATES = ['RECEIVED', 'ALLOCATING', 'ALLOCATED', 'PARTIALLY_ALLOCATED'];
+/** 이 탭에서 새 작업 탭을 이미 열어 준 TRF */
+const opened = new Set<string>();
 const SEEN = 'cdc-sim-lan-incoming-seen';
 const seen = (): string[] => JSON.parse(sessionStorage.getItem(SEEN) ?? '[]') as string[];
 
@@ -67,6 +69,14 @@ export function LanIncoming() {
       clearInterval(t);
     };
   }, [real]);
+  // 새 TRF 가 생기면 왼쪽 설정 탭(맨 위 "새 작업")을 바로 연다 — 한 TRF 에 한 번(사용자 2026-11-27 "새 작업 탭이 바로 뜨게")
+  const view = useView();
+  const newest = rows[0]?.trfId;
+  useEffect(() => {
+    if (!newest || opened.has(newest)) return;
+    opened.add(newest);
+    view.openLeft('settings');
+  }, [newest, view]);
   // 지금 이 화면이 돌리고 있는 TRF(새 TRF 로 시작 직후 Wave 만들기 전 1~2초)는 알리지 않음
   const mine = busy ? lanRunSnapshot().trfId : undefined;
   const list = rows.filter((x) => !seen().includes(x.trfId) && x.trfId !== mine);

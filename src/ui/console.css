@@ -1913,3 +1913,24 @@ a.ref:hover { text-decoration: underline; }
 .dc-alert-a button:disabled { opacity: .45; cursor: default; }
 .dc-alert-later { position: absolute; top: 8px; right: 10px; border: 0; background: none; color: #8592a6; font-size: 16px; cursor: pointer; }
 .dc-alert a.ref { color: #7fb0ff; }
+/* 새 작업(실서버) — 설정 탭 맨 위 */
+.sec.nw.has { border-color: #4d8eff; box-shadow: 0 0 0 1px rgba(77, 142, 255, .25); }
+.sec.nw h4 > span { color: var(--muted); }
+.sec.nw.has h4 > span { color: #4d8eff; font-weight: 700; }
+.nw-row { display: grid; gap: 6px; padding: 10px; border: 1px solid var(--line); border-radius: 10px; margin-top: 8px; }
+.nw-t { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; }
+.nw-t span { color: var(--muted); font-size: 12px; }
+.nw-p { font-size: 12.5px; font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nw-a { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.nw-a button { height: 32px; border-radius: 8px; border: 1px solid var(--line); background: transparent; color: inherit; font-weight: 700; font-size: 12.5px; cursor: pointer; }
+.nw-a button.main { background: #2a4f86; border-color: #4d8eff; color: #fff; }
+.nw-a button:disabled { opacity: .45; cursor: default; }
+/* 접히는 칸(연결 점검·시험 TRF) */
+details.rc-fold > summary, details.lr > summary { list-style: none; cursor: pointer; }
+details.rc-fold > summary::-webkit-details-marker, details.lr > summary::-webkit-details-marker { display: none; }
+details.rc-fold > summary h4 { margin: 0; }
+details.rc-fold[open] > summary h4, details.lr[open] > summary { margin-bottom: 8px; }
+details.lr > summary::before { content: '›'; display: inline-block; margin-right: 6px; transition: transform .15s; color: var(--muted); }
+details.lr[open] > summary::before { transform: rotate(90deg); }
+details.lr > summary { display: flex; align-items: center; justify-content: flex-start; gap: 8px; }
+details.lr > summary .lr-tag { margin-left: auto; }

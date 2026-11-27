@@ -257,6 +257,13 @@ export class ViewController extends Emitter {
     this.focusZone(key);
   }
 
+  /** 왼쪽 패널을 그 탭으로 열기(이미 열려 있으면 그대로) */
+  openLeft(v: LeftView) {
+    if (this.leftView === v) return;
+    this.leftView = v;
+    this.emit();
+  }
+
   toggleLeft(v: LeftView) {
     this.leftView = this.leftView === v ? null : v;
     this.emit();
