@@ -2,6 +2,7 @@
 // 이어서 "저게 최선이야?"). 한 화면에 ① 지금(무엇·어디·몇 초째) ② 단계 세로 흐름(단계마다 이번 회차 걸린 시간 / 평균) ③ 층 미니맵(지나온 길·지금·가는 곳)
 // ④ 최근 30분 띠(단계별 색) ⑤ 오늘 숫자 ⑥ 기록(접기). [따라가기]를 켜면 3D 카메라가 그 사람을 따라간다.
 // 단계 정의는 시뮬레이션 엔진(simulation.ts 의 역할별 *Once)이 쓰는 activity 글에 맞춘다. 기록은 Agent.history.
+import { useEffect, useRef, useState } from 'react';
 import { useApp, useTick, useView } from '../app/context';
 import { FLOW, WORK } from '../config';
 import type { FloorLayout } from '../domain/layout';
@@ -169,6 +170,16 @@ export function WorkerFlow() {
   const { sim, layout } = useApp();
   const view = useView();
   useTick();
+  // 접기 — 따라가는 중 다른 탭을 누르면 작게 접혀 그 탭 내용이 보이게(사용자 2026-11-27 "작업 따라가기 하니까 다른 탭 눌러도 이 화면에 가려서 안 떠"). 다른 사람을 고르면 다시 펼침
+  const [fold, setFold] = useState(false);
+  const seenTab = useRef(view.rightView);
+  useEffect(() => {
+    if (view.rightView !== seenTab.current) {
+      seenTab.current = view.rightView;
+      if (view.rightView) setFold(true);
+    }
+  }, [view.rightView]);
+  useEffect(() => setFold(false), [view.selectedWorker]);
   const a: Agent | undefined = sim.agents.find((x) => x.id === view.selectedWorker);
   if (!a) return null;
   const f = layout.floors.find((x) => x.floor === a.floor);
@@ -219,6 +230,9 @@ export function WorkerFlow() {
         <button className={`wf-btn${following ? ' on' : ''}`} onClick={() => view.setFollow(following ? null : a.id, a.pos)} title="3D 카메라가 이 사람을 따라갑니다">
           {following ? '따라가는 중' : '따라가기'}
         </button>
+        <button className="wf-btn fold" onClick={() => setFold(!fold)} title={fold ? '펼치기' : '접기'}>
+          {fold ? '펼치기 ▾' : '접기 ▴'}
+        </button>
         <button className="wf-btn x" onClick={() => view.selectWorker(null)} aria-label="닫기">
           ×
         </button>
@@ -247,6 +261,8 @@ export function WorkerFlow() {
         )}
       </div>
 
+      {!fold && (
+        <>
       {/* ② 단계 흐름(세로) */}
       <div className="wf-flow-h">
         <span>{flow.title}</span>
@@ -313,6 +329,8 @@ export function WorkerFlow() {
           })}
         </div>
       </details>
+        </>
+      )}
     </section>
   );
 }
