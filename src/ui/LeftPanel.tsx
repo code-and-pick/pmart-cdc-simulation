@@ -348,6 +348,8 @@ function ZoneInfo() {
   const r = zone?.rect;
   return (
     <section className="sec zone-panel">
+      {/* 누른 칸(랙·선반)의 상품 — 맨 위에(구역 요약 아래 맨 끝에 있어 스크롤해야 보이던 것, 사용자 2026-11-27 "랙 클릭하면 적치된 상품 정보가 안 나와") */}
+      {loc && <CellCard />}
       {/* 구역 고르기 — 종류별 묶음(보관 랙 · 피킹 선반 · 설비 · 작업장), 짧은 이름 + 온도 점. 긴 설명은 마우스를 올리면(사용자 2026-11-26 "구역 왼쪽 탭 UI 수정") */}
       <div className="zone-groups">
         {ZONE_GROUPS.map(([kind, title]) => {
@@ -387,7 +389,6 @@ function ZoneInfo() {
           구역을 고르면(위 칩 또는 3D 바닥) 칸 수·현물·채움률, 보충 남은 칸, 지금 일하는 사람이 여기에 나옵니다. {layout.floors.length}개 층 · 층 고르기는 위 층 단추.
         </div>
       )}
-      {loc && <CellCard />}
     </section>
   );
 }
