@@ -357,10 +357,17 @@ export async function runLanOne(
       });
     } else {
       // 자동 — 시뮬레이터가 피킹·분류·검품·상차까지
+      // 이어 하기 — 이미 끝난 피킹·분류·검품은 건너뜀(검품까지 끝나고 배차에서 멈춘 TRF 를 다시 누르면 상차부터, 2026-11-27 T830694 "이 Wave 에 집을 작업이 없음")
+      const t0 = await deps.internal.getTransferIntake(trfId);
+      const q0 = (k: 'allocatedQty' | 'pickedQty' | 'sortedQty' | 'inspectedQty') => t0.progress.reduce((a, x) => a + x[k], 0);
+      const pickedDone = q0('pickedQty') > 0 && q0('pickedQty') >= q0('allocatedQty');
+      const sortedDone = q0('sortedQty') > 0 && q0('sortedQty') >= q0('pickedQty');
+      const inspectedDone = q0('inspectedQty') > 0 && q0('inspectedQty') >= q0('sortedQty');
       const picked: { sku: string; lot: string; qty: number }[] = [];
+      if (pickedDone) for (const tk of await deps.backend.listTasks(wave.waveId)) for (const l of tk.lines) if (l.pickedQty > 0) picked.push({ sku: l.sku, lot: l.lot, qty: l.pickedQty });
       // 이 Wave 작업만 집음 — next-tasks 는 Wave 를 못 골라 다른 TRF 작업을 받아 착수만 해 두고 멈추던 것(2026-11-27 K20543: starts 만 있고 pick-results 없음, PC1 백엔드 신고).
       // 작업마다: 담당이 다르면 운영자 재배정(PDA 에서 이미 하는 중이면 건드리지 않음) → 착수 → 실적
-      await step('피킹 (이 Wave 작업 재배정 → starts → pick-results)', async () => {
+      if (!pickedDone) await step('피킹 (이 Wave 작업 재배정 → starts → pick-results)', async () => {
         const DONE = ['DONE', 'PARTIAL', 'CANCELLED', 'EXCEPTION'];
         const todo = (await deps.backend.listTasks(wave.waveId)).filter((x) => x.kind === 'PICK' && !DONE.includes(x.state));
         let n = 0;
@@ -381,16 +388,17 @@ export async function runLanOne(
       });
       // 상품(SKU·LOT)마다 박스 하나 — 섞인 박스는 MFC PDA 수령이 상품 수만큼 세어 막힘(mfc 시뮬 C-5, 2026-11-26). 온도대는 TRF 온도대
       const boxes = [...new Map(picked.map((p) => [`${p.sku}|${p.lot}`, { ...p, qty: picked.filter((x) => x.sku === p.sku && x.lot === p.lot).reduce((a, x) => a + x.qty, 0) }])).values()].map((p, i) => ({ lpn: `LPN-SIM-${runId.toUpperCase()}-${i + 1}`, contents: [p] }));
-      const lpnIds = boxes.map((b) => b.lpn);
-      await step(`분류 (sorting-results — 박스 ${boxes.length})`, async () => {
+      const existing = sortedDone ? ((await deps.gateway.call<{ items?: { lpn: string }[] }>('GET', `/cdcs/${CENTER_ID}/lpns`, { query: { trfId, size: '50' } })).body.items ?? []) : [];
+      const lpnIds = sortedDone ? existing.map((x) => x.lpn) : boxes.map((b) => b.lpn);
+      if (!sortedDone) await step(`분류 (sorting-results — 박스 ${boxes.length})`, async () => {
         const r = await deps.backend.reportSortingResult({ waveId: wave.waveId, trfId, workerId: worker, lpns: boxes.map((b) => ({ lpn: b.lpn, unitType: 'BOX' as const, state: 'SEALED' as const, temperatureZone: zone, contents: b.contents })) }, key('sort'));
         return { v: r, detail: `${lpnIds.join(', ')} · ${r.status}` };
       });
-      await step('검품 (inspection-results — 합격)', async () => {
+      if (!inspectedDone) await step('검품 (inspection-results — 합격)', async () => {
         const r = await deps.backend.reportInspectionResult({ trfId, inspectorId: worker, items: lpnIds.map((lpn) => ({ lpn, result: 'PASSED' as const })) }, key('inspect'));
         return { v: r, detail: `${r.status}` };
       });
-      const confirmed = await dispatch();
+      const confirmed: Order = res?.order && res.order.state !== 'PLANNING' ? res.order : await dispatch();
       tripId = confirmed.orderId;
       await step('상차 실적 (loading-results)', async () => {
         const r = await deps.backend.reportLoadingResult({ trfId, tripId, vehicleId: confirmed.vehicleId ?? '', ...(confirmed.dockCode ? { dockCode: confirmed.dockCode } : {}), workerId: worker, action: 'LOADED', lpns: lpnIds.map((lpn) => ({ lpn })) }, key('load'));
