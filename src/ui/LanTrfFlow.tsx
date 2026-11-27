@@ -8,6 +8,7 @@ import { Barcode } from './Barcode';
 import { startLanRun } from './LanIncoming';
 import { productsText, rememberTransfers, TrfLine, TrfRef, useTrfDetail, WaveRef } from './lanRefs';
 import { MFCS } from '../config';
+import { mfcStage, readMfcSide, type MfcLedgerItem, type MfcSide } from './lanMfc';
 
 const mfcName = (id: string) => MFCS.find((m) => m.id === id)?.name ?? id;
 const md = (iso: string) => new Date(iso).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
@@ -132,6 +133,8 @@ interface Data {
   lpns: Lpn[];
   events: Ev[];
   trip: Trip | null;
+  /** MFC 쪽(입고 예정·작업·재고 이력) — 못 읽으면 null */
+  mfc: MfcSide | null;
   at: number;
 }
 
@@ -242,8 +245,11 @@ export function LanTrfFlow({ open = true }: { open?: boolean }) {
         ]);
         const trip = trips.find((x) => x.stops.some((st) => (st.trfIds ?? []).includes(trfId))) ?? null;
         const taskIds = new Set(tasks.map((t) => t.taskId));
+        // 출발한 뒤부터 MFC 쪽을 읽음(입고 예정은 출발 사건으로 생김)
+        const mfc = ['LOADED', 'DEPARTED'].includes(intake.state) ? await readMfcSide(trfId, intake.mfcId, intake.lines.map((l) => l.sku)).catch(() => null) : null;
         if (!on) return;
         setD({
+          mfc,
           intake,
           trfNumber: sum?.trfNumber,
           waveNumber: sum?.waveNumber,
@@ -295,6 +301,10 @@ export function LanTrfFlow({ open = true }: { open?: boolean }) {
         who: who(e.actorId),
       };
     }),
+    // MFC 쪽 — 도착·수령(재고 +)·품질검사·적치(판매 가능)·입고 끝
+    ...(d?.mfc?.promise?.arrivedAt ? [{ at: d.mfc.promise.arrivedAt, what: 'MFC 입고 도착', who: 'MFC' }] : []),
+    ...(d?.mfc?.ledger ?? []).map((x) => ({ at: x.occurredAt, what: ledgerText(x), who: 'MFC' })),
+    ...(d?.mfc?.promise?.closure?.closedAt ? [{ at: d.mfc.promise.closure.closedAt, what: 'MFC 입고 끝(종결)', who: 'MFC' }] : []),
     ...(trip?.events ?? [])
       .filter((e) => e.stopSeq == null || e.stopSeq === stop?.seq)
       .map((e) => ({
@@ -394,6 +404,8 @@ export function LanTrfFlow({ open = true }: { open?: boolean }) {
           </ol>
 
           {trip && stop && t?.state === 'DEPARTED' && <TripActions trip={trip} stop={stop} boxes={loadedLpns.map((l) => l.lpn)} />}
+
+          {d?.mfc && <MfcBlock m={d.mfc} />}
 
           {!!d?.tasks.length && (
             <>
@@ -619,5 +631,76 @@ export function LanTransport() {
         );
       })}
     </div>
+  );
+}
+
+const MFC_STAGES = ['입고 예정', 'MFC 도착', '수령(재고 반영)', '품질검사', '적치(판매 가능)', '입고 끝'] as const;
+/** 재고 이력 한 줄 — "수령 +4 · RCV-C-01" / "적치 C-R1-01-2-02 · 판매 가능 +4" */
+function ledgerText(x: MfcLedgerItem): string {
+  const into = x.entries.filter((e) => e.delta > 0).map((e) => e.locationCode);
+  const where = [...new Set(into)].join(', ');
+  if (x.cause === 'TIN') return `MFC 수령 ${x.sku} 재고 +${x.delta.H} · ${where}`;
+  if (x.sourceRef?.startsWith('TSK-PUT')) return `MFC 적치 ${x.sku} → ${where}${x.delta.E ? ` · 판매 가능 +${x.delta.E}` : ''}`;
+  if (x.sourceRef?.startsWith('TSK-INS')) return `MFC 품질검사 ${x.sku}${x.delta.Q ? ` · 격리 +${x.delta.Q}` : ' 통과'}`;
+  return `MFC 재고 ${x.cause} ${x.sku}`;
+}
+
+/** MFC 작업 현황 — 단계·상품별 받은 수량·작업·지금 재고(3초마다) */
+function MfcBlock({ m }: { m: MfcSide }) {
+  const cur = mfcStage(m);
+  const p = m.promise;
+  const name = MFCS.find((x) => x.id === m.mfcId)?.name ?? m.mfcId;
+  return (
+    <>
+      <div className="wf-flow-h">
+        <span>MFC 작업 · {name}</span>
+        <small>{p ? '실시간(3초)' : '입고 예정 아직 없음'}</small>
+      </div>
+      {p && (
+        <>
+          <ol className="wf-stepper">
+            {MFC_STAGES.map((sname, i) => (
+              <li key={sname} className={i === cur ? 'now' : i < cur ? 'done' : ''} style={{ ['--c' as string]: ['#8e9aaf', '#2d9cdb', '#27ae60', '#f2994a', '#9b51e0', '#219653'][i] }}>
+                <i>{i < cur ? '✓' : i + 1}</i>
+                <span className="l">{sname}</span>
+                <span className="t" />
+              </li>
+            ))}
+          </ol>
+          <div className="lt-list">
+            {p.lines.map((l) => {
+              const puts = m.tasks.filter((t) => t.sku === l.sku && t.taskType === 'PUTAWAY');
+              const stored = m.ledger.filter((x) => x.sku === l.sku && x.sourceRef?.startsWith('TSK-PUT')).flatMap((x) => x.entries.filter((e) => e.delta > 0 && e.workState === 'STORED').map((e) => e.locationCode));
+              const st = m.stock[l.sku];
+              return (
+                <div key={l.sku} className="lt-card">
+                  <div className="lt-h">
+                    <b>{l.productName ?? l.sku}</b>
+                    <em className={l.receivedQty >= l.expectedQty && l.expectedQty > 0 ? 'ok' : ''}>
+                      받음 {l.receivedQty}/{l.expectedQty}
+                      {l.quarantinedQty ? ` · 격리 ${l.quarantinedQty}` : ''}
+                    </em>
+                  </div>
+                  <div className="lt-line">
+                    <span>적치</span>
+                    <span>{[...new Set(stored)].join(', ') || (puts.length ? '진행 중' : '-')}</span>
+                    <b className={puts.length && puts.every((t) => t.state === 'COMPLETED') ? 'ok' : ''}>{puts.length ? `${puts.reduce((a, t) => a + t.doneQty, 0)}/${puts.reduce((a, t) => a + t.plannedQty, 0)}` : ''}</b>
+                  </div>
+                  {st && (
+                    <div className="lt-line">
+                      <span>지금 MFC 재고</span>
+                      <span>{l.sku}</span>
+                      <b>
+                        {st.onHandQty}개 · 판매 가능 {st.sellableQty}
+                      </b>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
+    </>
   );
 }
