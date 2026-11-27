@@ -356,8 +356,8 @@ export function LanTrfFlow({ open = true }: { open?: boolean }) {
           </small>
         </div>
         <span className={`wf-pill ${t?.state === 'DEPARTED' ? 'off' : 'busy'}`}>{t?.state ?? '읽는 중'}</span>
-        <button className="wf-btn x" onClick={() => setFold(!fold)} aria-label={fold ? '펼치기' : '접기'} title={fold ? '펼치기' : '접기'}>
-          {fold ? '▾' : '▴'}
+        <button className="wf-btn fold" onClick={() => setFold(!fold)} aria-label={fold ? '펼치기' : '접기'} title={fold ? '펼치기' : '접기'}>
+          {fold ? '펼치기 ▾' : '접기 ▴'}
         </button>
       </div>
       {/* 이 TRF 바로 작업 — 알림을 놓쳐도 카드에서 시작(사용자 2026-11-27 "어딨냐고 방금 알림 받은 거 작업해야 된다고") */}

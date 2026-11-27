@@ -706,7 +706,10 @@ export function RightPanel() {
           {/* 실서버 모드에선 시뮬레이션 요약을 접어 둠(멈춘 시뮬레이션 숫자) — 눌러서 펼침 */}
           {real ? (
             <details className="sum-fold">
-              <summary>시뮬레이션 요약(실서버 모드에선 멈춤)</summary>
+              <summary>
+                <span>가상 현장 요약</span>
+                <small>실서버 모드에선 3D 가상 작업자를 멈춰 둠 — 숫자가 안 바뀜</small>
+              </summary>
               <Summary />
             </details>
           ) : (

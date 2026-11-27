@@ -1936,6 +1936,10 @@ details.lr > summary { display: flex; align-items: center; justify-content: flex
 details.lr > summary .lr-tag { margin-left: auto; }
 /* 실서버 모드 — 시뮬레이션 요약 접힘 */
 details.sum-fold { margin: 0 0 8px; }
-details.sum-fold > summary { cursor: pointer; font-size: 12px; color: var(--muted); padding: 6px 2px; list-style: none; }
-details.sum-fold > summary::before { content: '› '; }
-details.sum-fold[open] > summary::before { content: '⌄ '; }
+details.sum-fold > summary { cursor: pointer; list-style: none; display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 2px 8px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 10px; background: color-mix(in srgb, var(--line) 30%, transparent); }
+details.sum-fold > summary span { font-size: 12.5px; font-weight: 700; }
+details.sum-fold > summary small { grid-column: 1 / -1; grid-row: 2; color: var(--muted); font-size: 11px; }
+details.sum-fold > summary::-webkit-details-marker { display: none; }
+details.sum-fold > summary::after { content: "펼치기 ▾"; grid-column: 3; grid-row: 1; font-size: 11.5px; font-weight: 700; color: #2f80ed; }
+details.sum-fold[open] > summary::after { content: "접기 ▴"; }
+.lan-trf .wf-btn.fold { padding: 4px 10px; border-radius: 999px; border: 1px solid #2f80ed; color: #2f80ed; background: transparent; font-weight: 700; font-size: 11.5px; white-space: nowrap; cursor: pointer; }
