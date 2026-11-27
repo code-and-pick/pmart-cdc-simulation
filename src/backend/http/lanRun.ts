@@ -358,24 +358,25 @@ export async function runLanOne(
     } else {
       // 자동 — 시뮬레이터가 피킹·분류·검품·상차까지
       const picked: { sku: string; lot: string; qty: number }[] = [];
-      await step('피킹 (next-tasks → starts → pick-results)', async () => {
+      // 이 Wave 작업만 집음 — next-tasks 는 Wave 를 못 골라 다른 TRF 작업을 받아 착수만 해 두고 멈추던 것(2026-11-27 K20543: starts 만 있고 pick-results 없음, PC1 백엔드 신고).
+      // 작업마다: 담당이 다르면 운영자 재배정(PDA 에서 이미 하는 중이면 건드리지 않음) → 착수 → 실적
+      await step('피킹 (이 Wave 작업 재배정 → starts → pick-results)', async () => {
+        const DONE = ['DONE', 'PARTIAL', 'CANCELLED', 'EXCEPTION'];
+        const todo = (await deps.backend.listTasks(wave.waveId)).filter((x) => x.kind === 'PICK' && !DONE.includes(x.state));
         let n = 0;
-        for (let i = 0; i < 20; i++) {
-          let task: Task;
-          try {
-            task = (await deps.backend.pullNextTask(CENTER_ID, worker, { kind: 'PICK' }, key(`next-${i}`))).task;
-          } catch (e) {
-            if (e instanceof ApiProblem && e.problem.code === 'NO_TASK_AVAILABLE') break;
-            throw e;
+        for (const [i, t0] of todo.entries()) {
+          let task: Task = t0;
+          if (task.assigneeId && task.assigneeId !== worker && task.state === 'IN_PROGRESS') throw new Error(`작업 ${(task as { taskNumber?: string }).taskNumber ?? task.taskId} 를 PDA(${task.assigneeId})에서 하는 중 — PDA 로 마저 하거나 그 작업자가 끝낸 뒤 다시`);
+          if (task.assigneeId !== worker) {
+            task = (await deps.gateway.call<Task>('POST', `/cdcs/${CENTER_ID}/tasks/${encodeURIComponent(task.taskId)}/reassignments`, { body: { workerId: worker, reason: '가상 작업자(시뮬레이터)가 피킹' }, idempotencyKey: key(`reassign-${i}`), expectedVersion: task.version })).body;
           }
-          if (task.waveId !== wave.waveId) throw new Error(`다른 Wave 작업을 받음 ${task.taskId}(${task.waveId}) — 옛 Wave 작업이 남아 있음`);
-          if (task.state === 'ACCEPTED' || task.state === 'ASSIGNED' || task.state === 'CREATED') task = await deps.backend.startTask(task.taskId, worker, key(`start-${i}`), task.version);
-          const lines = task.lines.map((l) => ({ sku: l.sku, lot: l.lot, locationCode: l.locationCode, pickedQty: l.plannedQty - l.pickedQty - l.shortQty }));
+          if (task.state !== 'IN_PROGRESS') task = await deps.backend.startTask(task.taskId, worker, key(`start-${i}`), task.version);
+          const lines = task.lines.map((l) => ({ sku: l.sku, lot: l.lot, locationCode: l.locationCode, pickedQty: l.plannedQty - l.pickedQty - l.shortQty })).filter((l) => l.pickedQty > 0);
           await deps.backend.reportPickResult(task.taskId, { workerId: worker, lines }, key(`pick-${i}`), task.version);
           for (const l of lines) picked.push({ sku: l.sku, lot: l.lot, qty: l.pickedQty });
           n++;
         }
-        if (!n) throw new Error('받을 작업이 없음');
+        if (!n) throw new Error('이 Wave 에 집을 작업이 없음');
         return { v: n, detail: `작업 ${n}개 · ${picked.reduce((a, p) => a + p.qty, 0)}개` };
       });
       // 상품(SKU·LOT)마다 박스 하나 — 섞인 박스는 MFC PDA 수령이 상품 수만큼 세어 막힘(mfc 시뮬 C-5, 2026-11-26). 온도대는 TRF 온도대
