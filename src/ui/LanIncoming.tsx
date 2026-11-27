@@ -7,7 +7,7 @@ import { createPortal } from 'react-dom';
 import { useApp, type AppCtx } from '../app/context';
 import { runLanOne } from '../backend/http/lanRun';
 import { MFCS } from '../config';
-import { productsText, rememberTransfers, setTrfDetailGetter, TrfRef, useTrfDetail, type TrfDetail } from './lanRefs';
+import { rememberTransfers, setTrfDetailGetter, TrfRef, useTrfDetail, type TrfDetail } from './lanRefs';
 import { lanRunSnapshot, setLanRun, useLanRun } from './lanRunStore';
 
 type Real = NonNullable<AppCtx['real']>;
@@ -83,29 +83,50 @@ export function LanIncoming() {
     startLanRun(real, { mfcId: x.mfcId, pda, resumeTrfId: x.trfId });
   };
   const mfc = MFCS.find((m) => m.id === x.mfcId)?.name ?? x.mfcId;
+  // 화면 가운데 작업 팝업 — 오른쪽 위 작은 알림은 놓침(사용자 2026-11-27 "자동으로 받아지게 할 거면 작업 팝업이라도 바로 띄워주던가")
   return createPortal(
-    <div className="lan-in" role="alert">
-      <div className="lan-in-h">
-        <i>●</i>
-        <b>{x.trfId.startsWith('TRF-SR-') ? 'MFC 입고 신청 → 새 TRF' : '새 TRF 들어옴'}</b>
-        <span>{list.length > 1 ? `외 ${list.length - 1}건` : ''}</span>
-      </div>
-      <div className="lan-in-b">
-        <b>
-          <TrfRef trfId={x.trfId} {...(x.trfNumber ? { number: x.trfNumber } : {})} />
-        </b>{' '}
-        → {mfc}
-        <small>{productsText(detailOf) || `${x.lineCount ?? '-'}줄 · 승인 ${x.approvedQty ?? '-'}개`}</small>
-      </div>
-      <div className="lan-in-a">
-        <button disabled={busy} onClick={() => go(true)} title={busy ? '지금 도는 실행이 끝나야 함' : undefined}>
-          PDA 로 작업
-        </button>
-        <button disabled={busy} onClick={() => go(false)} title={busy ? '지금 도는 실행이 끝나야 함' : '시뮬레이터가 피킹·분류·검품·상차를 계약 API 로 대신'}>
-          가상 작업자(자동)로
-        </button>
-        <button className="ghost" onClick={later}>
-          나중에
+    <div className="in-pop-back">
+      <div className="in-pop" role="alertdialog" aria-label="새 작업">
+        <div className="in-pop-h">
+          <i>●</i>
+          <div>
+            <b>새 작업 — {x.trfId.startsWith('TRF-SR-') ? 'MFC 입고 신청' : '새 TRF'}</b>
+            <span>
+              <TrfRef trfId={x.trfId} {...(x.trfNumber ? { number: x.trfNumber } : {})} /> → {mfc}
+              {list.length > 1 ? ` · 기다리는 TRF ${list.length - 1}건 더` : ''}
+            </span>
+          </div>
+        </div>
+        <ul className="in-pop-lines">
+          {(detailOf?.lines ?? []).map((l) => (
+            <li key={l.sku}>
+              <b>{l.productName ?? l.sku}</b>
+              <span>
+                {l.sku} · {l.approvedQty}개
+              </span>
+            </li>
+          ))}
+          {!detailOf && (
+            <li>
+              <span>
+                {x.lineCount ?? '-'}줄 · 승인 {x.approvedQty ?? '-'}개
+              </span>
+            </li>
+          )}
+        </ul>
+        <div className="in-pop-a">
+          <button disabled={busy} onClick={() => go(true)} title={busy ? '지금 도는 실행이 끝나야 함' : undefined}>
+            PDA 로 작업
+            <small>피킹부터 단계마다 찍을 QR</small>
+          </button>
+          <button disabled={busy} onClick={() => go(false)} title={busy ? '지금 도는 실행이 끝나야 함' : undefined}>
+            가상 작업자(자동)로
+            <small>시뮬레이터가 출발까지</small>
+          </button>
+        </div>
+        {busy && <p className="in-pop-note">다른 TRF 작업이 도는 중 — 끝나면 누를 수 있어요</p>}
+        <button className="in-pop-later" onClick={later}>
+          나중에(오른쪽 TRF 카드·설정 탭 목록에서 다시 시작)
         </button>
       </div>
     </div>,
