@@ -63,8 +63,8 @@ const app: AppCtx = {
 };
 app.controller.focusZone('ALL');
 // 실서버 모드: 백엔드에 cdc-outbound·TMS 가 아직 없어(2026-11-25) 엔진을 돌리지 않는다 — 설정 탭의 연결 점검만
+// 실서버 모드에서도 가상 현장(3D 작업자·요약)을 그대로 돌린다 — 엔진은 늘 MockBackend 라 LAN 에 쓰지 않음(사용자 2026-11-27 "실서버 버전에서도 localhost 에서 뜨는 거 다 뜨게")
 if (app.real) {
-  app.sim.speed = 0;
   app.controller.leftView = 'settings';
 }
 

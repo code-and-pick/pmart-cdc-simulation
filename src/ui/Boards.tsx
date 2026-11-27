@@ -279,7 +279,8 @@ export function AdminBoard() {
         </label>
       </div>
       {tab === 'past' && real && <LanPastTable q={q} mfcFilter={view.mfcFilter} day={day} />}
-      {tab === 'past' && !real && (
+      {tab === 'past' && real && <div className="lt-sec-h">가상 현장</div>}
+      {tab === 'past' && (
         <table className="inv">
           <thead>
             <tr>
@@ -318,9 +319,10 @@ export function AdminBoard() {
           </tbody>
         </table>
       )}
-      {tab === 'past' && !real && !hasPast && <ExampleNote when="첫 차가 출발하는 새벽(01:00~)" />}
+      {tab === 'past' && !hasPast && <ExampleNote when="첫 차가 출발하는 새벽(01:00~)" />}
       {tab === 'tasks' && real && <LanTasksTable q={q} />}
-      {tab === 'tasks' && !real && (
+      {tab === 'tasks' && real && <div className="lt-sec-h">가상 현장</div>}
+      {tab === 'tasks' && (
         // 카드 — 작업 번호·상태(한글)·담당·TRF·줄 진행 막대(사용자 2026-11-26 "못 알아보겠다" — 표가 좁아 줄이 꺾이고 상태가 영어였음)
         <div className="tk-list">
           {(hasTasks
@@ -362,10 +364,11 @@ export function AdminBoard() {
           ))}
         </div>
       )}
-      {tab === 'tasks' && !real && !hasTasks && <ExampleNote when="석간 Wave 배포(13:00) 뒤" />}
+      {tab === 'tasks' && !hasTasks && <ExampleNote when="석간 Wave 배포(13:00) 뒤" />}
       {/* 실서버 모드 — LAN 운행·인계·MFC 수령(사용자 2026-11-27 "실시간 반영이 안 되나") */}
       {tab === 'handover' && real && <LanHandoverTable q={q} mfcFilter={view.mfcFilter} />}
-      {tab === 'handover' && !real && (
+      {tab === 'handover' && real && <div className="lt-sec-h">가상 현장</div>}
+      {tab === 'handover' && (
         <table className="inv">
           <thead>
             <tr>
@@ -410,9 +413,10 @@ export function AdminBoard() {
           </tbody>
         </table>
       )}
-      {tab === 'handover' && !real && !hasHand && <ExampleNote when="차가 MFC 에 도착하는 새벽(05:00~)" />}
+      {tab === 'handover' && !hasHand && <ExampleNote when="차가 MFC 에 도착하는 새벽(05:00~)" />}
       {tab === 'rt' && real && <LanRtTable mfcFilter={view.mfcFilter} />}
-      {tab === 'rt' && !real && (
+      {tab === 'rt' && real && <div className="lt-sec-h">가상 현장</div>}
+      {tab === 'rt' && (
         <>
           <div className="ad-hint">인계 때 빈 R/T 같은 수만큼 회수 → 칠곡 도크</div>
           <table className="inv">
