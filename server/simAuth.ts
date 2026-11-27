@@ -100,11 +100,25 @@ function send(res: ServerResponse, status: number, body: unknown) {
   res.end(JSON.stringify(body));
 }
 
+/** 최근 토큰 요청(누가·결과) — 다른 PC 에서 실서버가 안 될 때 이 PC 에서 원인 보기(토큰·비밀번호는 남기지 않음, 2026-11-27 "다른 pc 에서 알림 안 뜬다") */
+const recent: { at: string; ip: string; account: string; result: string }[] = [];
+const note = (req: IncomingMessage, account: string, result: string) => {
+  recent.unshift({ at: new Date().toISOString(), ip: (req.socket.remoteAddress ?? '').replace(/^::ffff:/, ''), account, result });
+  recent.length = Math.min(recent.length, 50);
+};
+
 export function simAuthPlugin(): Plugin {
   return {
     name: 'pmart-cdc-sim-auth',
     configureServer(server) {
+      // 이 PC 에서만 — 최근 토큰 요청 목록
+      server.middlewares.use('/sim-auth/recent', (req, res) => {
+        const a = (req.socket.remoteAddress ?? '').replace(/^::ffff:/, '');
+        if (a !== '127.0.0.1' && a !== '::1') return send(res, 403, { code: 'LOOPBACK_ONLY' });
+        send(res, 200, recent);
+      });
       server.middlewares.use('/sim-auth/tokens', (req, res) => {
+        if (!isLoopback(req)) note(req, '-', 'LOOPBACK_ONLY');
         if (!isLoopback(req)) return send(res, 403, { code: 'LOOPBACK_ONLY', detail: `이 PC 와 .sim-auth-allow 에 적은 IP 만 토큰을 받음 — 지금 ${(req.socket.remoteAddress ?? '').replace(/^::ffff:/, '')}` });
         if (req.method !== 'POST') return send(res, 405, { code: 'METHOD_NOT_ALLOWED' });
         let raw = '';
@@ -117,9 +131,13 @@ export function simAuthPlugin(): Plugin {
             return send(res, 400, { code: 'BAD_JSON' });
           }
           issue(account)
-            .then((t) => send(res, 200, t))
+            .then((t) => {
+              note(req, account, 'OK');
+              send(res, 200, t);
+            })
             .catch((e: unknown) => {
               if (e instanceof AuthError) {
+                note(req, account, e.code);
                 server.config.logger.warn(`[sim-auth] ${account}: ${e.code}`);
                 return send(res, e.status, { code: e.code, detail: e.message });
               }
