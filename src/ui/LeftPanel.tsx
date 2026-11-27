@@ -802,7 +802,7 @@ function LanOpenTrfs({ onResume, busy }: { onResume: (trfId: string) => void; bu
       real.backend.client
         .call<{ items?: { trfId: string; trfNumber?: string; state: string; mfcId: string; pickedQty: number; allocatedQty: number; updatedAt?: string }[] }>('GET', '/cdcs/CDC01/transfers', { query: { size: '50' } })
         // 출발한 것도 오늘 것은 남김(도착·인계를 이어 봄) — 단추는 [흐름]만
-        .then((r) => on && setRows((r.body.items ?? []).filter((x) => /^TRF-(SIM|SR)-/.test(x.trfId) && (['IN_WAVE', 'PICKED', 'SORTED', 'INSPECTED', 'LOADED'].includes(x.state) || (x.state === 'DEPARTED' && Date.now() - new Date(x.updatedAt ?? 0).getTime() < 24 * 3600_000))).reverse()))
+        .then((r) => on && setRows((r.body.items ?? []).filter((x) => /^TRF-(SIM|SR)-/.test(x.trfId) && (['RECEIVED', 'ALLOCATED', 'PARTIALLY_ALLOCATED', 'IN_WAVE', 'PICKED', 'SORTED', 'INSPECTED', 'LOADED'].includes(x.state) || (x.state === 'DEPARTED' && Date.now() - new Date(x.updatedAt ?? 0).getTime() < 24 * 3600_000))).reverse()))
         .catch(() => undefined);
     void load();
     const t = setInterval(load, 10_000);
@@ -813,7 +813,7 @@ function LanOpenTrfs({ onResume, busy }: { onResume: (trfId: string) => void; bu
   }, [real]);
   if (!rows.length) return null;
   // 단계 이름으로 — 어느 TRF 가 어디까지 왔는지 한눈에(사용자 2026-11-26 "상차하고 있었는데 웬 피킹" — 다른 TRF 를 이어 하기로 눌렀음)
-  const KO: Record<string, string> = { IN_WAVE: '피킹 전·중', PICKED: '분배 전', SORTED: '검품 전', INSPECTED: '상차 전', LOADED: '출차 전', DEPARTED: '출발함' };
+  const KO: Record<string, string> = { RECEIVED: '새로 들어옴', ALLOCATED: '새로 들어옴', PARTIALLY_ALLOCATED: '새로 들어옴(일부 할당)', IN_WAVE: '피킹 전·중', PICKED: '분배 전', SORTED: '검품 전', INSPECTED: '상차 전', LOADED: '출차 전', DEPARTED: '출발함' };
   return (
     <div className="lr-open">
       <b>시험 TRF (최근 순)</b>
@@ -839,6 +839,27 @@ export function LanScanPopup() {
   // 한 번에 QR 하나만 크게 — 여러 QR 이 한 화면에 있으면 카메라가 옆 QR 을 읽음(사용자 2026-11-26 "BOX-… 인식이 안돼", "문제 해결해").
   // 고른 코드는 값으로 기억(목록이 바뀌어도 그대로), 없어지면 첫 코드
   const [pick, setPick] = useState<string | null>(null);
+  // 실행이 멈췄으면(실패) 화면 가운데에 알림 — 설정 탭 단계 목록만 보면 PDA 를 들고 있는 사람은 모름(사용자 2026-11-27 "pda 로 작업하기 눌렀는데 작업도 QR 도 안 떠")
+  const [shut, setShut] = useState('');
+  const failed = !busy && cur?.state === 'fail' ? cur : null;
+  const failKey = failed ? `${cur?.trfId ?? ''}|${failed.name}|${failed.detail}` : '';
+  if (failed && shut !== failKey)
+    return createPortal(
+      <div className="scan-pop fail" role="alert">
+        <div className="scan-pop-h">
+          <b>멈춤 — {failed.name.split(' (')[0]}</b>
+          <span>{cur?.trfId ?? ''}</span>
+          <button onClick={() => setShut(failKey)} aria-label="닫기" title="닫기">
+            ×
+          </button>
+        </div>
+        <div className="scan-pop-fail">
+          <p>{failed.detail}</p>
+          <small>설정 탭 → 시험 TRF 목록에서 [이어 하기]로 이 단계부터 다시 할 수 있어요</small>
+        </div>
+      </div>,
+      document.body,
+    );
   if (!codes) return null;
   const selIdx = Math.max(0, codes.findIndex((c) => c.value === pick));
   const sel = codes[selIdx];

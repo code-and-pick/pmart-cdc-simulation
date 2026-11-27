@@ -1858,3 +1858,9 @@ tr.ex td { color: var(--muted); font-style: italic; }
 .scan-pop-rest code { color: var(--muted); font-size: 11px; }
 .scan-pop-rest li.on button { background: color-mix(in srgb, #2f80ed 14%, transparent); }
 .scan-pop-rest li.on code { color: #2f80ed; }
+/* 실행 멈춤 알림 */
+.scan-pop.fail { border-color: #eb5757; }
+.scan-pop.fail .scan-pop-h b { color: #eb5757; }
+.scan-pop-fail { padding: 12px 14px 14px; display: grid; gap: 8px; }
+.scan-pop-fail p { margin: 0; font-size: 12.5px; line-height: 1.5; word-break: break-all; }
+.scan-pop-fail small { color: var(--muted); font-size: 11.5px; }

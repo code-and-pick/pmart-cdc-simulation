@@ -43,7 +43,7 @@ function fakeServer() {
   const lpns = () =>
     stage === 'ALLOC' || stage === 'WAVE' || stage === 'PICKED'
       ? []
-      : lines.map((l, i) => ({ lpn: `BOX-${i + 1}`, inspection: ['INSPECTED', 'LOADED', 'DEPARTED'].includes(stage) ? 'PASSED' : null, loaded: ['LOADED', 'DEPARTED'].includes(stage) }));
+      : lines.map((_l, i) => ({ lpn: `BOX-${i + 1}`, inspection: ['INSPECTED', 'LOADED', 'DEPARTED'].includes(stage) ? 'PASSED' : null, loaded: ['LOADED', 'DEPARTED'].includes(stage) }));
   const order = { orderId: 'TO-1', trfIds: [TRF], state: 'DISPATCHED', vehicleId: 'VH-1', dockCode: 'CDC01-A-6-90-01-0-1', version: 1 };
   const gateway = {
     call: async (method: string, path: string) => {
