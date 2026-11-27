@@ -136,7 +136,7 @@ interface Data {
   /** MFC 쪽(입고 예정·작업·재고 이력) — 못 읽으면 null */
   mfc: MfcSide | null;
   /** TMS 운송 요청서 — 보류(HELD)면 실을 차가 없음 */
-  treq: { state?: string; reason?: string | null; shipDate?: string } | null;
+  treq: { state?: string; reason?: string | null; shipDate?: string; tempClass?: string } | null;
   at: number;
 }
 
@@ -249,7 +249,7 @@ export function LanTrfFlow({ open = true }: { open?: boolean }) {
         const trip = trips.find((x) => x.stops.some((st) => (st.trfIds ?? []).includes(trfId))) ?? null;
         const taskIds = new Set(tasks.map((t) => t.taskId));
         // 출발한 뒤부터 MFC 쪽을 읽음(입고 예정은 출발 사건으로 생김)
-        const treq = await c.call<{ state?: string; reason?: string | null; shipDate?: string }>('GET', `/cdcs/CDC01/transport-requests/${encodeURIComponent(trfId)}`).then((r) => r.body).catch(() => null);
+        const treq = await c.call<{ state?: string; reason?: string | null; shipDate?: string; tempClass?: string }>('GET', `/cdcs/CDC01/transport-requests/${encodeURIComponent(trfId)}`).then((r) => r.body).catch(() => null);
         const mfc = ['LOADED', 'DEPARTED'].includes(intake.state) ? await readMfcSide(trfId, intake.mfcId, intake.lines.map((l) => l.sku)).catch(() => null) : null;
         if (!on) return;
         setD({
@@ -372,7 +372,7 @@ export function LanTrfFlow({ open = true }: { open?: boolean }) {
           <span>
             출고일 {d.treq.shipDate ?? '-'} · {d.treq.reason === 'ORDER_CLOSED' ? '그날 이 MFC·온도대 차가 이미 계획완료' : d.treq.reason === 'READY_UNREACHABLE' ? '준비 시각까지 갈 차가 이미 닫힘' : (d.treq.reason ?? '')}
           </span>
-          <small>다른 날 차·추가 운행으로 옮기는 기능을 백엔드에 요청함(R-30). 들어가면 여기 단추가 다시 생겨요</small>
+          <HeldActions trfId={trfId} tempClass={d.treq.tempClass ?? 'AMBIENT'} shipDate={d.treq.shipDate} />
         </div>
       )}
       {d?.intake && !['DEPARTED', 'CANCELLED', 'ALLOCATION_FAILED'].includes(d.intake.state) && d.treq?.state !== 'HELD' && (
@@ -718,5 +718,71 @@ function MfcBlock({ m }: { m: MfcSide }) {
         </>
       )}
     </>
+  );
+}
+
+/** 배차 보류 처리 — 이월(다음 열린 날 차) · 용차(그날 추가 운행). transport-planning 0.6.0(R-30, PR #549). 사용자 결정 "이월 + 용차" */
+function HeldActions({ trfId, tempClass, shipDate }: { trfId: string; tempClass: string; shipDate?: string }) {
+  const { real } = useApp();
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  if (!real) return null;
+  const c = real.backend.client;
+  const why = (e: unknown) => (e instanceof ApiProblem ? `${e.problem.status} ${e.problem.code}${e.problem.detail ? ` — ${e.problem.detail}` : ''}` : String(e));
+  const carry = async () => {
+    setBusy(true);
+    setMsg(null);
+    try {
+      const r = await c.call<{ shipDate?: string; state?: string }>('POST', `/cdcs/CDC01/transport-requests/${encodeURIComponent(trfId)}/carryovers`, { body: { reason: '그날 차가 닫혀 다음 열린 날 차로(DC 시뮬레이터)' }, idempotencyKey: `sim-carry-${trfId}` });
+      setMsg(`이월됨 — 출고일 ${r.body.shipDate ?? '?'} (${r.body.state ?? ''}). 이제 [PDA 로 작업]·[가상 작업자]로 이어 하면 그날 차로 갑니다`);
+    } catch (e) {
+      setMsg(`이월 막힘 — ${why(e)}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+  // 용차 — 그 온도대 차량을 차례로: 지시서 만들고 계획완료(fleet 점유). 차가 겹치면(409) 그 지시서 취소하고 다음 차
+  const spot = async () => {
+    setBusy(true);
+    setMsg(null);
+    try {
+      const vs = await c.call<{ items?: { vehicleId: string; active?: boolean }[] } | { vehicleId: string; active?: boolean }[]>('GET', '/vehicles', { query: { tempClass } }).then((r) => (Array.isArray(r.body) ? r.body : (r.body.items ?? [])).filter((v) => v.active !== false));
+      let last = '';
+      for (const v of vs) {
+        const driverId = `DR-${v.vehicleId.split('-').pop()}`; // VH-5T-04A ↔ DR-04A (LAN 정규차 짝)
+        type Ord = { orderId: string; version: number; state: string; vehicleId?: string };
+        let o: Ord;
+        try {
+          o = (await c.call<Ord>('POST', '/cdcs/CDC01/transport-orders/spot-orders', { body: { ...(shipDate ? { shipDate } : {}), vehicleId: v.vehicleId, driverId, trfIds: [trfId], reason: '그날 차가 닫혀 용차(DC 시뮬레이터)' }, idempotencyKey: `sim-spot-${trfId}-${v.vehicleId}` })).body;
+        } catch (e) {
+          last = `${v.vehicleId}: ${why(e)}`;
+          continue;
+        }
+        try {
+          const done = (await c.call<Ord>('POST', `/cdcs/CDC01/transport-orders/${encodeURIComponent(o.orderId)}/confirmations`, { body: {}, idempotencyKey: `sim-spot-confirm-${o.orderId}`, expectedVersion: o.version })).body;
+          setMsg(`용차 ${done.orderId} — 차량 ${done.vehicleId ?? v.vehicleId} 계획완료. 이제 [PDA 로 작업]·[가상 작업자]로 이어 하면 이 차에 실어 출발합니다`);
+          return;
+        } catch (e) {
+          last = `${v.vehicleId}: ${why(e)}`;
+          await c.call('POST', `/cdcs/CDC01/transport-orders/${encodeURIComponent(o.orderId)}/cancellations`, { body: { reason: '차량 겹침 — 다른 차로(DC 시뮬레이터)' }, idempotencyKey: `sim-spot-cancel-${o.orderId}` }).catch(() => undefined);
+        }
+      }
+      setMsg(`쓸 수 있는 ${tempClass} 차가 없음 — ${last}`);
+    } catch (e) {
+      setMsg(`용차 막힘 — ${why(e)}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="lt-held-a">
+      <button disabled={busy} onClick={() => void spot()} title="그날(출고일 그대로) 이 TRF 만 싣는 추가 운행 — 비어 있는 차·기사로">
+        용차로 그날 보내기
+      </button>
+      <button disabled={busy} onClick={() => void carry()} title="다음 날부터 7일 안 처음 열린 출고일 차로(늦음)">
+        다음 날 차로 이월
+      </button>
+      {msg && <small>{msg}</small>}
+    </div>
   );
 }

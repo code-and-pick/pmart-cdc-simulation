@@ -305,9 +305,16 @@ export async function runLanOne(
       });
     } else {
       // 자동 — 시뮬레이터가 피킹·분류·검품·상차까지. 실을 차(배차)부터 확인 — 차가 없으면 집기 전에 멈춤(2026-11-27 T830694: 검품까지 하고 배차에서 막힘)
-      const confirmedEarly = await dispatch();
+      const confirmedEarly: Order = res?.order && res.order.state !== 'PLANNING' ? res.order : await dispatch();
+      // 이어 하기 — 이미 한 단계는 건너뜀(검품까지 끝나고 배차에서 멈췄던 TRF 를 이월·용차 뒤 다시, 2026-11-27 T830694)
+      const t0 = await deps.internal.getTransferIntake(trfId);
+      const q0 = (k: 'allocatedQty' | 'pickedQty' | 'sortedQty' | 'inspectedQty') => t0.progress.reduce((a, x) => a + x[k], 0);
+      const pickedDone = q0('pickedQty') > 0 && q0('pickedQty') >= q0('allocatedQty');
+      const sortedDone = q0('sortedQty') > 0 && q0('sortedQty') >= q0('pickedQty');
+      const inspectedDone = q0('inspectedQty') > 0 && q0('inspectedQty') >= q0('sortedQty');
       const picked: { sku: string; lot: string; qty: number }[] = [];
-      await step('피킹 (next-tasks → starts → pick-results)', async () => {
+      if (pickedDone) for (const tk of await deps.backend.listTasks(wave.waveId)) for (const l of tk.lines) if (l.pickedQty > 0) picked.push({ sku: l.sku, lot: l.lot, qty: l.pickedQty });
+      if (!pickedDone) await step('피킹 (next-tasks → starts → pick-results)', async () => {
         let n = 0;
         for (let i = 0; i < 20; i++) {
           let task: Task;
@@ -329,12 +336,13 @@ export async function runLanOne(
       });
       // 상품(SKU·LOT)마다 박스 하나 — 섞인 박스는 MFC PDA 수령이 상품 수만큼 세어 막힘(mfc 시뮬 C-5, 2026-11-26). 온도대는 TRF 온도대
       const boxes = [...new Map(picked.map((p) => [`${p.sku}|${p.lot}`, { ...p, qty: picked.filter((x) => x.sku === p.sku && x.lot === p.lot).reduce((a, x) => a + x.qty, 0) }])).values()].map((p, i) => ({ lpn: `LPN-SIM-${runId.toUpperCase()}-${i + 1}`, contents: [p] }));
-      const lpnIds = boxes.map((b) => b.lpn);
-      await step(`분류 (sorting-results — 박스 ${boxes.length})`, async () => {
+      const existing = sortedDone ? (await deps.gateway.call<{ items?: { lpn: string }[] }>('GET', `/cdcs/${CENTER_ID}/lpns`, { query: { trfId, size: '50' } })).body.items ?? [] : [];
+      const lpnIds = sortedDone ? existing.map((x) => x.lpn) : boxes.map((b) => b.lpn);
+      if (!sortedDone) await step(`분류 (sorting-results — 박스 ${boxes.length})`, async () => {
         const r = await deps.backend.reportSortingResult({ waveId: wave.waveId, trfId, workerId: worker, lpns: boxes.map((b) => ({ lpn: b.lpn, unitType: 'BOX' as const, state: 'SEALED' as const, temperatureZone: zone, contents: b.contents })) }, key('sort'));
         return { v: r, detail: `${lpnIds.join(', ')} · ${r.status}` };
       });
-      await step('검품 (inspection-results — 합격)', async () => {
+      if (!inspectedDone) await step('검품 (inspection-results — 합격)', async () => {
         const r = await deps.backend.reportInspectionResult({ trfId, inspectorId: worker, items: lpnIds.map((lpn) => ({ lpn, result: 'PASSED' as const })) }, key('inspect'));
         return { v: r, detail: `${r.status}` };
       });
