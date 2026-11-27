@@ -8,6 +8,7 @@ import { TEMP_KO } from '../sim/simulation';
 import { trfTemp } from '../sim/supply';
 import { Barcode } from './Barcode';
 import { scanView, useScanView } from './scanView';
+import { LanHandoverTable } from './lanAdmin';
 
 const clock = (sec: number) => `${String(Math.floor(sec / 3600) % 24).padStart(2, '0')}:${String(Math.floor(sec / 60) % 60).padStart(2, '0')}`;
 const isoClock = (iso: string) => new Date(iso).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Seoul' });
@@ -223,7 +224,7 @@ export function TrfBoard() {
 
 /** 관리 — 탭 [지난 TRF / 진행 중 작업 / MFC 인계 확인 / R/T 회수], 날짜 필터, 번호 검색 (사용자 §6-5) */
 export function AdminBoard() {
-  const { sim, backend } = useApp();
+  const { sim, backend, real } = useApp();
   const view = useView();
   const [tab, setTab] = useState<'past' | 'tasks' | 'handover' | 'rt'>('past');
   const [q, setQ] = useState('');
@@ -360,7 +361,9 @@ export function AdminBoard() {
         </div>
       )}
       {tab === 'tasks' && !hasTasks && <ExampleNote when="석간 Wave 배포(13:00) 뒤" />}
-      {tab === 'handover' && (
+      {/* 실서버 모드 — LAN 운행·인계·MFC 수령(사용자 2026-11-27 "실시간 반영이 안 되나") */}
+      {tab === 'handover' && real && <LanHandoverTable q={q} mfcFilter={view.mfcFilter} />}
+      {tab === 'handover' && !real && (
         <table className="inv">
           <thead>
             <tr>
@@ -405,7 +408,7 @@ export function AdminBoard() {
           </tbody>
         </table>
       )}
-      {tab === 'handover' && !hasHand && <ExampleNote when="차가 MFC 에 도착하는 새벽(05:00~)" />}
+      {tab === 'handover' && !real && !hasHand && <ExampleNote when="차가 MFC 에 도착하는 새벽(05:00~)" />}
       {tab === 'rt' && (
         <>
           <div className="ad-hint">인계 때 빈 R/T 같은 수만큼 회수 → 칠곡 도크</div>

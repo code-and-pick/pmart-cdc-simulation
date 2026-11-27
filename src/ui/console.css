@@ -1943,3 +1943,12 @@ details.sum-fold > summary::-webkit-details-marker { display: none; }
 details.sum-fold > summary::after { content: "펼치기 ▾"; grid-column: 3; grid-row: 1; font-size: 11.5px; font-weight: 700; color: #2f80ed; }
 details.sum-fold[open] > summary::after { content: "접기 ▴"; }
 .lan-trf .wf-btn.fold { padding: 4px 10px; border-radius: 999px; border: 1px solid #2f80ed; color: #2f80ed; background: transparent; font-weight: 700; font-size: 11.5px; white-space: nowrap; cursor: pointer; }
+/* 관리 · MFC 인계(실서버) */
+.lho { display: grid; gap: 8px; }
+.lho-row { display: grid; gap: 4px; padding: 10px; border: 1px solid var(--line); border-radius: 10px; }
+.lho-h { display: flex; align-items: baseline; gap: 8px; font-size: 13px; }
+.lho-h span { color: var(--muted); font-size: 12px; }
+.lho-h em { margin-left: auto; font-style: normal; font-size: 11.5px; font-weight: 700; color: var(--muted); }
+.lho-h em.ok, .lho-n b.ok { color: #27ae60; }
+.lho-t { font-size: 11.5px; color: var(--muted); }
+.lho-n { display: flex; justify-content: space-between; font-size: 12px; }
