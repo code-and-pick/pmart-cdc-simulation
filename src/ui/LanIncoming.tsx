@@ -1,14 +1,11 @@
 // 새 TRF 들어옴 알림 — LAN 에 Wave 없이 새로 인수된 TRF 가 생기면 화면 위쪽에 띄우고, [PDA 로 작업]·[가상 작업자(자동)로] 를 누르면
 // "새 TRF 로 시작" 과 같은 과정(할당 확인 → Wave 만들기·배포 → 배차·입차 → 피킹 … 출발)을 그 TRF 로 시작한다(사용자 2026-11-26
+// R-27(2026-11-27 LAN 배포, mfc-inbound 0.23.0): MFC 공급 요청 승인 → 서버가 DC TRF(TRF-{요청 ID}) 인수 — 시뮬레이터 임시 다리는 지움.
 // "mfc 백오피스에서 입고신청하면 … 자동으로 새 trf 들어왔다고 … 가상작업자 or pda 로 작업하기"). DC 백오피스는 같은 서버를 읽으니 따로 맞출 것 없음.
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useApp, type AppCtx } from '../app/context';
-import { MFC_SUP_ACCOUNTS } from '../backend/http/accounts';
-import { HttpClient } from '../backend/http/client';
 import { runLanOne } from '../backend/http/lanRun';
-import { bridgeOnce } from '../backend/http/supplyBridge';
-import { TokenSource } from '../backend/http/tokens';
 import { MFCS } from '../config';
 import { lanRunSnapshot, setLanRun, useLanRun } from './lanRunStore';
 
@@ -45,32 +42,7 @@ const seen = (): string[] => JSON.parse(sessionStorage.getItem(SEEN) ?? '[]') as
 
 export function LanIncoming() {
   const { real } = useApp();
-  const { busy, bridgeOn } = useLanRun();
-  // 임시 다리 — 켜져 있으면 10초마다 APPROVED 공급 요청을 TRF 로(MFC 계정으로 읽기)
-  useEffect(() => {
-    if (!real || !bridgeOn) return;
-    let on = true;
-    const gw = new Map<string, HttpClient>();
-    const mfcGateway = (mfcId: string) => {
-      const acc = MFC_SUP_ACCOUNTS[mfcId];
-      if (!acc) return null;
-      if (!gw.has(mfcId)) {
-        const tk = new TokenSource(acc, 90);
-        gw.set(mfcId, new HttpClient({ baseUrl: '/api/v1', token: () => tk.get(), sourceSystem: 'pmart-cdc-simulation', now: () => 0, timeoutMs: 8000, retries: 2 }));
-      }
-      return gw.get(mfcId)!;
-    };
-    const tick = () =>
-      bridgeOnce({ mfcGateway, gateway: real.backend.client, internal: real.internal }, MFCS.filter((m) => !m.id.startsWith('ETC-')).map((m) => m.id))
-        .then((r) => on && setLanRun({ bridgeLog: r, bridgeAt: Date.now() }))
-        .catch(() => undefined);
-    void tick();
-    const t = setInterval(tick, 10_000);
-    return () => {
-      on = false;
-      clearInterval(t);
-    };
-  }, [real, bridgeOn]);
+  const { busy } = useLanRun();
   const [rows, setRows] = useState<Row[]>([]);
   const [, bump] = useState(0);
   useEffect(() => {

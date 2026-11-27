@@ -1,4 +1,4 @@
-// 실서버(LAN) 끝까지 점검 — MFC 입고 발주(공급 요청) → 승인 → (임시 다리) DC TRF 인수 → DC 피킹·분류·검품·상차·출발(자동) → MFC 도착.
+// 실서버(LAN) 끝까지 점검 — MFC 입고 발주(공급 요청) → 승인 → 서버가 DC TRF 인수(R-27, mfc-inbound 0.23.0) → DC 피킹·분류·검품·상차·출발(자동) → MFC 도착.
 // 하차·인계·입고 검수는 MFC 시뮬레이터(실서버 모드)가 도착(ARRIVED)을 보고 한다 — 여기서는 대신하지 않고 상태만 지켜봄.
 // npx vite-node scripts/lan-e2e-supply.ts [mfcId] [skus] — LAN 에 쓴다(사용자 2026-11-27 "연동 다시 제대로 확인해").
 import { MFC_SUP_ACCOUNTS } from '../src/backend/http/accounts';
@@ -6,7 +6,6 @@ import { HttpClient } from '../src/backend/http/client';
 import { HttpBackend } from '../src/backend/http/HttpBackend';
 import { HttpInternal } from '../src/backend/http/HttpInternal';
 import { runLanOne } from '../src/backend/http/lanRun';
-import { bridgeOnce, trfIdForSupply } from '../src/backend/http/supplyBridge';
 import { TokenSource } from '../src/backend/http/tokens';
 import { ApiProblem } from '../src/domain/contract';
 
@@ -50,21 +49,24 @@ try {
   log(`2. 승인 막힘 — ${why(e)}`);
   process.exit(1);
 }
-// 3) DC 로 — 백엔드 R-27 이 있으면 이미 인수됐을 것, 없으면 임시 다리
-const trfId = trfIdForSupply(sr.supplyRequestId);
-let had = false;
-try {
-  await internal.getTransferIntake(trfId);
-  had = true;
-} catch {
-  /* 없음 */
+// 3) DC 로 — 승인하면 서버(R-27)가 TRF-{요청 ID} 로 인수, 공급 요청 linkedTrfId 에 채움
+let trfId = '';
+for (let i = 0; i < 10 && !trfId; i++) {
+  const g = (await mfc.call<{ linkedTrfId?: string | null }>('GET', `/supply-requests/${sr.supplyRequestId}`)).body;
+  if (g.linkedTrfId) {
+    try {
+      const it = await internal.getTransferIntake(g.linkedTrfId);
+      trfId = g.linkedTrfId;
+      log(`3. 서버가 인수함 ${trfId} ${it.state} · ${it.deadlineMeaning} ${it.dueAt}`);
+    } catch {
+      /* 아직 */
+    }
+  }
+  if (!trfId) await new Promise((r) => setTimeout(r, 2000));
 }
-if (had) log(`3. 백엔드가 이미 인수함(R-27) — ${trfId}`);
-else {
-  const r = await bridgeOnce({ mfcGateway: (m) => (m === mfcId ? mfc : null), gateway: backend.client, internal }, [mfcId]);
-  const mine = r.find((x) => x.supplyRequestId === sr.supplyRequestId);
-  log(`3. 임시 다리 → ${trfId} ${mine?.state ?? '못 찾음'} — ${mine?.detail ?? JSON.stringify(r)}`);
-  if (mine?.state !== 'CREATED' && mine?.state !== 'EXISTS') process.exit(1);
+if (!trfId) {
+  log('3. 20초 안에 DC TRF 가 안 생김(R-27)');
+  process.exit(1);
 }
 // 4) DC 작업 — 새 TRF 알림의 [가상 작업자(자동)로] 와 같은 실행(할당 → Wave → 피킹 → 분류 → 검품 → 배차·상차 → 출발)
 const steps = await runLanOne({ gateway: backend.client, backend, internal, operatorId: () => cdcTok.operatorId }, { mfcId, skus: nSku, qty: 2, pda: false, resumeTrfId: trfId }, () => {});

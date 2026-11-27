@@ -719,7 +719,7 @@ function CellCard() {
 function LanRun() {
   const { real } = useApp();
   // 상태는 패널 밖(lanRunStore) — 탭이 바뀌어도 진행·팝업이 남는다
-  const { mfcId, mode, steps, busy, hideScan, bridgeOn, bridgeLog, bridgeAt } = useLanRun();
+  const { mfcId, mode, steps, busy, hideScan } = useLanRun();
   if (!real) return null;
   // 새 TRF 로 시작 · 이어 하기(PDA) — 새 TRF 알림과 같은 시작 함수(LanIncoming.startLanRun)
   const go = (resumeTrfId?: string) => startLanRun(real, { mfcId, pda: mode === 'pda' || !!resumeTrfId, ...(resumeTrfId ? { resumeTrfId } : {}) });
@@ -770,27 +770,6 @@ function LanRun() {
         <button className="scan-pop-open" onClick={() => setLanRun({ hideScan: false })}>
           찍을 코드 {scanCodes.length}개 보기
         </button>
-      )}
-      {/* MFC 입고 신청 받기 — 임시 다리(백엔드 R-27 전까지). 켜면 LAN 에 TRF 를 씀 */}
-      <div className="lr-bridge">
-        <div>
-          <b>MFC 입고 신청 받기</b>
-          <small>승인된 공급 요청을 TRF-SR-… 로 인수(임시 다리 · R-27 전까지){bridgeAt ? ` · ${new Date(bridgeAt).toLocaleTimeString('ko-KR', { hour12: false })} 확인` : ''}</small>
-        </div>
-        <button className={bridgeOn ? 'on' : ''} onClick={() => setLanRun({ bridgeOn: !bridgeOn })}>
-          {bridgeOn ? '켜짐' : '꺼짐'}
-        </button>
-      </div>
-      {bridgeOn && bridgeLog.filter((x) => x.state !== 'EXISTS').length > 0 && (
-        <ul className="lr-bridge-log">
-          {bridgeLog
-            .filter((x) => x.state !== 'EXISTS')
-            .map((x) => (
-              <li key={x.supplyRequestId} className={x.state === 'FAILED' ? 'bad' : ''}>
-                {x.mfcId} · {x.trfId} · {x.state === 'CREATED' ? '인수함' : x.state === 'SKIPPED' ? '건너뜀' : '실패'} — {x.detail}
-              </li>
-            ))}
-        </ul>
       )}
       <LanOpenTrfs onResume={go} busy={busy} />
       {steps && steps.length > 0 && (
