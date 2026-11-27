@@ -1934,3 +1934,8 @@ details.lr > summary::before { content: '›'; display: inline-block; margin-rig
 details.lr[open] > summary::before { transform: rotate(90deg); }
 details.lr > summary { display: flex; align-items: center; justify-content: flex-start; gap: 8px; }
 details.lr > summary .lr-tag { margin-left: auto; }
+/* 실서버 모드 — 시뮬레이션 요약 접힘 */
+details.sum-fold { margin: 0 0 8px; }
+details.sum-fold > summary { cursor: pointer; font-size: 12px; color: var(--muted); padding: 6px 2px; list-style: none; }
+details.sum-fold > summary::before { content: '› '; }
+details.sum-fold[open] > summary::before { content: '⌄ '; }

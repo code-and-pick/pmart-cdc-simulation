@@ -361,7 +361,7 @@ export function LanTrfFlow({ open = true }: { open?: boolean }) {
         </button>
       </div>
       {/* 이 TRF 바로 작업 — 알림을 놓쳐도 카드에서 시작(사용자 2026-11-27 "어딨냐고 방금 알림 받은 거 작업해야 된다고") */}
-      {d?.intake && !['DEPARTED', 'CANCELLED', 'ALLOCATION_FAILED'].includes(d.intake.state) && (
+      {!fold && d?.intake && !['DEPARTED', 'CANCELLED', 'ALLOCATION_FAILED'].includes(d.intake.state) && (
         <div className="lt-go">
           {runningThis ? (
             <span>작업 중 — {[...(steps ?? [])].at(-1)?.name.split(' (')[0]}</span>
@@ -377,7 +377,7 @@ export function LanTrfFlow({ open = true }: { open?: boolean }) {
           )}
         </div>
       )}
-      {recent.length > 1 && (
+      {!fold && recent.length > 1 && (
         <div className="lt-pick">
           {recent.map((x) => (
             <button key={x.trfId} className={x.trfId === trfId ? 'on' : ''} onClick={() => setLanRun({ trfId: x.trfId })} title={`${x.trfId} · ${x.state}`}>
