@@ -5,6 +5,7 @@ import { useApp } from '../app/context';
 import type { TransferIntake } from '../domain/contract';
 import { ApiProblem } from '../domain/contract';
 import { Barcode } from './Barcode';
+import { startLanRun } from './LanIncoming';
 import { lanRunSnapshot as useLanRunSnapshot, setLanRun, useLanRun } from './lanRunStore';
 
 const STAGES = ['인수', '할당', 'Wave 배포', '피킹', '분배·패킹', '검품', '상차', '출발', 'MFC 도착', '하차 인계', '운행 종료'] as const;
@@ -154,7 +155,8 @@ const EV_KO: Record<string, string> = {
 /** open = 이 탭에서 펼쳐 둘지(TRF 탭만 펼침, 다른 탭(운송 포함)은 접힌 띠 — 사용자 2026-11-26 "다른 탭 눌러도 운송탭만 떠 있어") */
 export function LanTrfFlow({ open = true }: { open?: boolean }) {
   const { real } = useApp();
-  const { trfId } = useLanRun();
+  const { trfId, busy, steps } = useLanRun();
+  const runningThis = busy && [...(steps ?? [])].reverse().find((x) => x.trfId)?.trfId === trfId;
   const [d, setD] = useState<Data | null>(null);
   const [err, setErr] = useState<string | null>(null);
   // 탭이 바뀌면 그 탭 기본값으로 — 직접 접거나 펼친 건 그 탭 안에서만
@@ -332,6 +334,23 @@ export function LanTrfFlow({ open = true }: { open?: boolean }) {
           {fold ? '▾' : '▴'}
         </button>
       </div>
+      {/* 이 TRF 바로 작업 — 알림을 놓쳐도 카드에서 시작(사용자 2026-11-27 "어딨냐고 방금 알림 받은 거 작업해야 된다고") */}
+      {d?.intake && !['DEPARTED', 'CANCELLED', 'ALLOCATION_FAILED'].includes(d.intake.state) && (
+        <div className="lt-go">
+          {runningThis ? (
+            <span>작업 중 — {[...(steps ?? [])].at(-1)?.name.split(' (')[0]}</span>
+          ) : (
+            <>
+              <button disabled={busy} title={busy ? '다른 TRF 실행이 끝나야 함' : undefined} onClick={() => real && startLanRun(real, { mfcId: d.intake.mfcId, pda: true, resumeTrfId: trfId })}>
+                PDA 로 작업
+              </button>
+              <button disabled={busy} title={busy ? '다른 TRF 실행이 끝나야 함' : '시뮬레이터가 피킹·분류·검품·상차를 대신'} onClick={() => real && startLanRun(real, { mfcId: d.intake.mfcId, pda: false, resumeTrfId: trfId })}>
+                가상 작업자(자동)로
+              </button>
+            </>
+          )}
+        </div>
+      )}
       {recent.length > 1 && (
         <div className="lt-pick">
           {recent.map((x) => (
