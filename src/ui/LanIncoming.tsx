@@ -71,6 +71,19 @@ export function LanIncoming() {
   const mine = busy ? lanRunSnapshot().trfId : undefined;
   const list = rows.filter((x) => !seen().includes(x.trfId) && x.trfId !== mine);
   const detailOf = useTrfDetail(list[0]?.trfId);
+  // 온도대 — 목록엔 없어 인수 조건(conditions)에서
+  const [zones, setZones] = useState<Record<string, string>>({});
+  const firstId = list[0]?.trfId;
+  useEffect(() => {
+    if (!real || !firstId || zones[firstId]) return;
+    void real.internal
+      .getTransferIntake(firstId)
+      .then((t) => {
+        const z = (t.conditions ?? []).find((c) => c.kind === 'TEMPERATURE_ZONE')?.value;
+        if (z) setZones((m) => ({ ...m, [firstId]: z }));
+      })
+      .catch(() => undefined);
+  }, [real, firstId, zones]);
   if (!real) return null;
   if (!list.length) return null;
   const x = list[0];
@@ -83,52 +96,37 @@ export function LanIncoming() {
     startLanRun(real, { mfcId: x.mfcId, pda, resumeTrfId: x.trfId });
   };
   const mfc = MFCS.find((m) => m.id === x.mfcId)?.name ?? x.mfcId;
-  // 화면 가운데 작업 팝업 — 오른쪽 위 작은 알림은 놓침(사용자 2026-11-27 "자동으로 받아지게 할 거면 작업 팝업이라도 바로 띄워주던가")
+  // MFC 시뮬레이터 "칠곡 DC 차량 도착" 알림과 같은 모양(사용자 2026-11-27 "이런 식으로 알람 뜨게 해") — 위쪽 가운데 카드, [가상 작업자] [PDA 로 직접]
+  const zoneKo = { AMBIENT: '상온', CHILLED: '냉장', FROZEN: '냉동' } as Record<string, string>;
+  const qty = (detailOf?.lines ?? []).reduce((a, l) => a + l.approvedQty, 0) || (x.approvedQty ?? 0);
+  const kinds = detailOf?.lines.length ?? x.lineCount ?? 0;
+  const first = detailOf?.lines[0];
   return createPortal(
-    <div className="in-pop-back">
-      <div className="in-pop" role="alertdialog" aria-label="새 작업">
-        <div className="in-pop-h">
-          <i>●</i>
-          <div>
-            <b>새 작업 — {x.trfId.startsWith('TRF-SR-') ? 'MFC 입고 신청' : '새 TRF'}</b>
-            <span>
-              <TrfRef trfId={x.trfId} {...(x.trfNumber ? { number: x.trfNumber } : {})} /> → {mfc}
-              {list.length > 1 ? ` · 기다리는 TRF ${list.length - 1}건 더` : ''}
-            </span>
-          </div>
-        </div>
-        <ul className="in-pop-lines">
-          {(detailOf?.lines ?? []).map((l) => (
-            <li key={l.sku}>
-              <b>{l.productName ?? l.sku}</b>
-              <span>
-                {l.sku} · {l.approvedQty}개
-              </span>
-            </li>
-          ))}
-          {!detailOf && (
-            <li>
-              <span>
-                {x.lineCount ?? '-'}줄 · 승인 {x.approvedQty ?? '-'}개
-              </span>
-            </li>
-          )}
-        </ul>
-        <div className="in-pop-a">
-          <button disabled={busy} onClick={() => go(true)} title={busy ? '지금 도는 실행이 끝나야 함' : undefined}>
-            PDA 로 작업
-            <small>피킹부터 단계마다 찍을 QR</small>
-          </button>
-          <button disabled={busy} onClick={() => go(false)} title={busy ? '지금 도는 실행이 끝나야 함' : undefined}>
-            가상 작업자(자동)로
-            <small>시뮬레이터가 출발까지</small>
-          </button>
-        </div>
-        {busy && <p className="in-pop-note">다른 TRF 작업이 도는 중 — 끝나면 누를 수 있어요</p>}
-        <button className="in-pop-later" onClick={later}>
-          나중에(오른쪽 TRF 카드·설정 탭 목록에서 다시 시작)
+    <div className="dc-alert" role="alertdialog" aria-label="새 작업">
+      <div className="dc-alert-h">
+        <b>📦 {x.trfId.startsWith('TRF-SR-') ? `${mfc} 입고 신청 도착` : '새 TRF 도착'}</b>
+        <span>
+          {zoneKo[zones[x.trfId] ?? ''] ?? ''}
+          {zones[x.trfId] ? ' · ' : ''}
+          {kinds}품목 {qty}개 · <TrfRef trfId={x.trfId} {...(x.trfNumber ? { number: x.trfNumber } : {})} />
+        </span>
+      </div>
+      <p>
+        {first ? `${first.productName ?? first.sku} × ${first.approvedQty}${kinds > 1 ? ` 외 ${kinds - 1}종` : ''}` : '상품 읽는 중…'} — 피킹부터 출발까지 남았어요
+        {list.length > 1 ? ` · 기다리는 TRF ${list.length - 1}건 더` : ''}
+      </p>
+      <p>{busy ? '다른 TRF 작업이 도는 중이에요 — 끝나면 시작할 수 있어요' : '작업을 누가 할까요?'}</p>
+      <div className="dc-alert-a">
+        <button className="main" disabled={busy} onClick={() => go(false)}>
+          가상 작업자
+        </button>
+        <button disabled={busy} onClick={() => go(true)}>
+          PDA 로 직접
         </button>
       </div>
+      <button className="dc-alert-later" onClick={later} aria-label="나중에" title="나중에(오른쪽 TRF 카드·설정 탭 목록에서 다시 시작)">
+        ×
+      </button>
     </div>,
     document.body,
   );

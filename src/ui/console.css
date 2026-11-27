@@ -1901,3 +1901,15 @@ a.ref:hover { text-decoration: underline; }
 .in-pop-note { margin: 0; font-size: 11.5px; color: #f2994a; text-align: center; }
 .in-pop-later { justify-self: center; border: 0; background: none; color: var(--muted); font-size: 11.5px; cursor: pointer; text-decoration: underline; }
 @keyframes inPopIn { from { transform: translateY(-8px); opacity: 0; } to { transform: none; opacity: 1; } }
+/* 새 TRF 알림 — MFC 시뮬레이터 "칠곡 DC 차량 도착" 카드와 같은 모양 */
+.dc-alert { position: fixed; z-index: 80; top: 64px; left: 50%; transform: translateX(-50%); width: min(460px, 94vw); display: grid; gap: 8px; padding: 14px 16px; border-radius: 14px; border: 1.5px solid #4d8eff; background: #161b26; color: #e8edf5; box-shadow: 0 16px 40px rgba(0,0,0,.45); animation: inPopIn .18s ease-out; }
+.dc-alert-h { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; padding-right: 18px; }
+.dc-alert-h b { font-size: 15px; white-space: nowrap; }
+.dc-alert-h span { font-size: 12px; color: #aab4c4; white-space: nowrap; }
+.dc-alert p { margin: 0; font-size: 12.5px; color: #c9d2df; }
+.dc-alert-a { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 4px; }
+.dc-alert-a button { height: 40px; border-radius: 9px; border: 1px solid #2c3647; background: #0f141d; color: #e8edf5; font-weight: 800; font-size: 14px; cursor: pointer; }
+.dc-alert-a button.main { background: #2a4f86; border-color: #4d8eff; }
+.dc-alert-a button:disabled { opacity: .45; cursor: default; }
+.dc-alert-later { position: absolute; top: 8px; right: 10px; border: 0; background: none; color: #8592a6; font-size: 16px; cursor: pointer; }
+.dc-alert a.ref { color: #7fb0ff; }
