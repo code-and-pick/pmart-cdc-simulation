@@ -2,7 +2,7 @@
 import { Fragment, lazy, Suspense, useEffect, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { startLanRun } from './LanIncoming';
-import { rememberTransfers, shortIds, TrfWaveRef, useRefs } from './lanRefs';
+import { productsText, rememberTransfers, shortIds, TrfWaveRef, useRefs, useTrfDetail } from './lanRefs';
 import { setLanRun, useLanRun } from './lanRunStore';
 import { checkReadiness, READINESS_KO, type ProbeResult } from '../backend/http/readiness';
 import { useApp, useTick, useView } from '../app/context';
@@ -791,6 +791,11 @@ function LanRun() {
   );
 }
 
+/** 그 TRF 상품(이름 × 수량) — 목록 줄 안(훅이라 따로 뺌) */
+function TrfProducts({ trfId }: { trfId: string }) {
+  return <>{productsText(useTrfDetail(trfId))}</>;
+}
+
 /** PDA 가 찍을 코드 팝업 — 앱 맨 위에 늘 붙어 있어 어느 탭·3D 를 눌러도 남는다(사용자 2026-11-26 "지역 카드 어딨어? 팝업으로", "화면 누르니까 팝업 없어졌어") */
 /** LAN 에 출발 전으로 남은 시험 TRF — PDA 로 하던 걸 그 단계부터 이어서(사용자 2026-11-26 "출고대기로 넘어갔는데 계속 피킹 팝업") */
 function LanOpenTrfs({ onResume, busy }: { onResume: (trfId: string) => void; busy: boolean }) {
@@ -823,7 +828,7 @@ function LanOpenTrfs({ onResume, busy }: { onResume: (trfId: string) => void; bu
       {rows.map((x) => (
         <div key={x.trfId} className={`lr-open-row${x.trfId === viewing ? ' on' : ''}`}>
           <span title={x.trfId}>
-            <b>{x.trfNumber ?? x.trfId}</b> {KO[x.state] ?? x.state} · 집음 {x.pickedQty}/{x.allocatedQty}
+            <b>{x.trfNumber ?? x.trfId}</b> {KO[x.state] ?? x.state} · <TrfProducts trfId={x.trfId} />
           </span>
           <button className="ghost" onClick={() => setLanRun({ trfId: x.trfId })}>
             흐름

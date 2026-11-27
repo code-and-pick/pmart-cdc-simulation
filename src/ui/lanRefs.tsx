@@ -83,3 +83,58 @@ export function shortIds(text: string, map: Record<string, Ref>): string {
   }
   return out;
 }
+
+// ── TRF 내용(상품 이름·수량) — 무슨 상품을 보냈는지(사용자 2026-11-27 "번호가 안 겹쳐서 뭐가 무슨 작업이고 내가 무슨 상품을 보냈는지 확인이 안 된다") ──
+export interface TrfDetail {
+  trfId: string;
+  trfNumber?: string;
+  waveId?: string | null;
+  waveNumber?: string | null;
+  state?: string;
+  mfcId?: string;
+  lines: { sku: string; productName?: string | null; approvedQty: number; pickedQty?: number }[];
+}
+type Getter = (trfId: string) => Promise<TrfDetail>;
+let getter: Getter | null = null;
+const details: Record<string, { at: number; d: TrfDetail | null }> = {};
+/** 실서버 연결이 정해지면 한 번 — GET /cdcs/CDC01/transfers/{trfId} */
+export function setTrfDetailGetter(g: Getter) {
+  getter = g;
+}
+function loadDetail(trfId: string) {
+  const c = details[trfId];
+  if (!getter || (c && Date.now() - c.at < 30_000)) return;
+  details[trfId] = { at: Date.now(), d: c?.d ?? null };
+  void getter(trfId)
+    .then((d) => {
+      details[trfId] = { at: Date.now(), d };
+      rememberTransfers([{ trfId, ...(d.trfNumber ? { trfNumber: d.trfNumber } : {}), waveNumber: d.waveNumber ?? null, waveId: d.waveId ?? null }]);
+      refs = { ...refs };
+      for (const f of subs) f();
+    })
+    .catch(() => undefined);
+}
+export function useTrfDetail(trfId: string | undefined): TrfDetail | null {
+  useRefs();
+  if (!trfId) return null;
+  loadDetail(trfId);
+  return details[trfId]?.d ?? null;
+}
+/** "신선한 동물복지 유정란 10구 × 4" — 여러 줄이면 첫 상품 외 n */
+export function productsText(d: TrfDetail | null): string {
+  if (!d || !d.lines.length) return '';
+  const one = (l: TrfDetail['lines'][number]) => `${l.productName ?? l.sku} × ${l.approvedQty}`;
+  return d.lines.length === 1 ? one(d.lines[0]) : `${one(d.lines[0])} 외 ${d.lines.length - 1}종`;
+}
+/** T286575 · W6307 · 신선한 동물복지 유정란 10구 × 4 */
+export function TrfLine({ trfId }: { trfId: string }) {
+  const d = useTrfDetail(trfId);
+  const r = useRefs()[trfId];
+  return (
+    <span className="trf-line" title={d?.lines.map((l) => `${l.sku} ${l.productName ?? ''} × ${l.approvedQty}`).join('\n')}>
+      <TrfRef trfId={trfId} />
+      {r?.waveId && <WaveRef waveId={r.waveId} number={r.wave} />}
+      {d && <em>{productsText(d)}</em>}
+    </span>
+  );
+}

@@ -7,7 +7,7 @@ import { createPortal } from 'react-dom';
 import { useApp, type AppCtx } from '../app/context';
 import { runLanOne } from '../backend/http/lanRun';
 import { MFCS } from '../config';
-import { rememberTransfers, TrfRef } from './lanRefs';
+import { productsText, rememberTransfers, setTrfDetailGetter, TrfRef, useTrfDetail, type TrfDetail } from './lanRefs';
 import { lanRunSnapshot, setLanRun, useLanRun } from './lanRunStore';
 
 type Real = NonNullable<AppCtx['real']>;
@@ -45,6 +45,10 @@ export function LanIncoming() {
   const { real } = useApp();
   const { busy } = useLanRun();
   const [rows, setRows] = useState<Row[]>([]);
+  // TRF 상세(상품 이름) 읽는 곳 — 실서버 연결이 있으면 한 번 정함
+  useEffect(() => {
+    if (real) setTrfDetailGetter((id) => real.backend.client.call<TrfDetail>('GET', `/cdcs/CDC01/transfers/${encodeURIComponent(id)}`).then((r) => r.body));
+  }, [real]);
   const [, bump] = useState(0);
   useEffect(() => {
     if (!real) return;
@@ -63,10 +67,11 @@ export function LanIncoming() {
       clearInterval(t);
     };
   }, [real]);
-  if (!real) return null;
   // 지금 이 화면이 돌리고 있는 TRF(새 TRF 로 시작 직후 Wave 만들기 전 1~2초)는 알리지 않음
   const mine = busy ? lanRunSnapshot().trfId : undefined;
   const list = rows.filter((x) => !seen().includes(x.trfId) && x.trfId !== mine);
+  const detailOf = useTrfDetail(list[0]?.trfId);
+  if (!real) return null;
   if (!list.length) return null;
   const x = list[0];
   const later = () => {
@@ -90,9 +95,7 @@ export function LanIncoming() {
           <TrfRef trfId={x.trfId} {...(x.trfNumber ? { number: x.trfNumber } : {})} />
         </b>{' '}
         → {mfc}
-        <small>
-          {x.lineCount ?? '-'}줄 · 승인 {x.approvedQty ?? '-'}개 · {x.state}
-        </small>
+        <small>{productsText(detailOf) || `${x.lineCount ?? '-'}줄 · 승인 ${x.approvedQty ?? '-'}개`}</small>
       </div>
       <div className="lan-in-a">
         <button disabled={busy} onClick={() => go(true)} title={busy ? '지금 도는 실행이 끝나야 함' : undefined}>

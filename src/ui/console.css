@@ -1874,3 +1874,10 @@ tr.ex td { color: var(--muted); font-style: italic; }
 a.ref { color: #2f80ed; text-decoration: none; font-weight: 700; font-variant-numeric: tabular-nums; }
 a.ref:hover { text-decoration: underline; }
 .refs { display: inline-flex; gap: 6px; }
+/* TRF 줄 — 번호·Wave·상품 */
+.trf-line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; font-size: 12px; min-width: 0; }
+.trf-line em { font-style: normal; color: inherit; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.lan-trf .lt-stop { display: grid; gap: 3px; padding: 6px 0; border-top: 1px solid var(--line); }
+.lan-trf .lt-stop:first-of-type { border-top: 0; }
+.lan-trf .lt-stop-h { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; }
+.lan-trf .lt-prod { color: inherit !important; font-weight: 600; }

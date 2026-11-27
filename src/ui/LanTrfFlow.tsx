@@ -6,7 +6,11 @@ import type { TransferIntake } from '../domain/contract';
 import { ApiProblem } from '../domain/contract';
 import { Barcode } from './Barcode';
 import { startLanRun } from './LanIncoming';
-import { rememberTransfers, TrfRef, WaveRef } from './lanRefs';
+import { productsText, rememberTransfers, TrfLine, TrfRef, useTrfDetail, WaveRef } from './lanRefs';
+import { MFCS } from '../config';
+
+const mfcName = (id: string) => MFCS.find((m) => m.id === id)?.name ?? id;
+const md = (iso: string) => new Date(iso).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
 import { lanRunSnapshot as useLanRunSnapshot, setLanRun, useLanRun } from './lanRunStore';
 
 const STAGES = ['인수', '할당', 'Wave 배포', '피킹', '분배·패킹', '검품', '상차', '출발', 'MFC 도착', '하차 인계', '운행 종료'] as const;
@@ -157,6 +161,7 @@ const EV_KO: Record<string, string> = {
 export function LanTrfFlow({ open = true }: { open?: boolean }) {
   const { real } = useApp();
   const { trfId, busy, steps } = useLanRun();
+  const detail = useTrfDetail(trfId);
   const runningThis = busy && [...(steps ?? [])].reverse().find((x) => x.trfId)?.trfId === trfId;
   const [d, setD] = useState<Data | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -333,7 +338,10 @@ export function LanTrfFlow({ open = true }: { open?: boolean }) {
             <TrfRef trfId={trfId} {...(d?.trfNumber ? { number: d.trfNumber } : {})} />
           </b>
           <small>
-            {t?.waveId ? <WaveRef waveId={t.waveId} number={d?.waveNumber ?? null} /> : 'Wave 전'} · {t?.mfcId ?? ''} · 실서버
+            {t?.waveId ? <WaveRef waveId={t.waveId} number={d?.waveNumber ?? null} /> : 'Wave 전'} · {t?.mfcId ? mfcName(t.mfcId) : ''} · 실서버
+          </small>
+          <small className="lt-prod">
+            {productsText(detail)}
           </small>
         </div>
         <span className={`wf-pill ${t?.state === 'DEPARTED' ? 'off' : 'busy'}`}>{t?.state ?? '읽는 중'}</span>
@@ -490,10 +498,13 @@ export function TripActions({ trip, stop, boxes }: { trip: Trip; stop: Stop; box
   return (
     <div className="lt-act">
       <div className="lt-act-h">
-        <b>운행 {trip.tripId}</b>
+        <b>
+          차량 {trip.vehicleId ?? '-'} · {mfcName(stop.mfcId)} {STOP_KO[stop.state] ?? stop.state}
+        </b>
         <span>
-          {trip.vehicleId ?? ''} · 정차 {stop.seq} {stop.mfcId} {stop.state}
-          {stop.plannedArrivalAt ? ` · 도착 예정 ${hm(stop.plannedArrivalAt)}` : ''}
+          운행 {trip.tripId}
+          {stop.plannedArrivalAt ? ` · 도착 예정 ${md(stop.plannedArrivalAt)}` : ''}
+          {stop.arrivedAt ? ` · 도착 ${md(stop.arrivedAt)}` : ''}
         </span>
       </div>
       {trip.state === 'DEPARTED' && stop.state === 'PLANNED' && (
@@ -586,16 +597,16 @@ export function LanTransport() {
               <em className={tr.state === 'COMPLETED' ? 'ok' : ''}>{TRIP_STATE_KO[tr.state] ?? tr.state}</em>
             </div>
             {tr.stops.map((st) => (
-              <div key={st.seq} className="lt-line">
-                <span>
-                  {st.seq}. {st.mfcId}
-                </span>
-                <span>
-                  {(st.trfIds ?? []).map((x) => (
-                    <TrfRef key={x} trfId={x} />
-                  ))}
-                </span>
-                <b className={st.state === 'DEPARTED' ? 'ok' : ''}>{STOP_KO[st.state] ?? st.state}</b>
+              <div key={st.seq} className="lt-stop">
+                <div className="lt-stop-h">
+                  <span>
+                    {st.seq}. {mfcName(st.mfcId)}
+                  </span>
+                  <b className={st.state === 'DEPARTED' ? 'ok' : ''}>{STOP_KO[st.state] ?? st.state}</b>
+                </div>
+                {(st.trfIds ?? []).map((x) => (
+                  <TrfLine key={x} trfId={x} />
+                ))}
               </div>
             ))}
             {tr.state === 'DEPARTED' &&
