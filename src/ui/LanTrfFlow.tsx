@@ -506,16 +506,9 @@ export function TripActions({ trip, stop, boxes }: { trip: Trip; stop: Stop; box
           </div>
         </>
       )}
-      {stop.state === 'HANDED_OVER' && (
-        <button disabled={busy} onClick={() => void send(`${base}/stops/${stop.seq}/departures`, '정차 출발', 'stop-depart')}>
-          정차 출발 보내기
-        </button>
-      )}
-      {trip.state !== 'COMPLETED' && trip.stops.every((st) => st.state === 'DEPARTED') && (
-        <button disabled={busy} onClick={() => void send(`${base}/physical-ends`, '운행 종료', 'end')}>
-          운행 종료 보내기(DC 복귀)
-        </button>
-      )}
+      {/* 정차 출발·운행 종료는 DC 가 누르는 게 아님 — MFC 하차 인계가 끝나면 자동(사용자 2026-11-27 "운행종료는 dc 에 있으면 안 되지, mfc 에서 하차완료해야 자동으로"). 백엔드 TE-2 요청 */}
+      {stop.state === 'HANDED_OVER' && <p>MFC 하차 인계 끝 — 정차 출발·운행 종료는 자동(백엔드 반영 대기)</p>}
+      {trip.state === 'COMPLETED' && <p>운행 종료</p>}
       {msg && <small>{msg}</small>}
     </div>
   );
