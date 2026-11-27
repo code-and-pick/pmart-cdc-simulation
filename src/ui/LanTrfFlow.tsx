@@ -6,6 +6,7 @@ import type { TransferIntake } from '../domain/contract';
 import { ApiProblem } from '../domain/contract';
 import { Barcode } from './Barcode';
 import { startLanRun } from './LanIncoming';
+import { rememberTransfers, TrfRef, WaveRef } from './lanRefs';
 import { lanRunSnapshot as useLanRunSnapshot, setLanRun, useLanRun } from './lanRunStore';
 
 const STAGES = ['인수', '할당', 'Wave 배포', '피킹', '분배·패킹', '검품', '상차', '출발', 'MFC 도착', '하차 인계', '운행 종료'] as const;
@@ -176,6 +177,7 @@ export function LanTrfFlow({ open = true }: { open?: boolean }) {
         })
         .then((r) => {
           if (!on) return;
+          rememberTransfers(r.body.items ?? []);
           const sims = (r.body.items ?? []).filter((x) => /^TRF-(SIM|SR)-/.test(x.trfId) && x.state !== 'CANCELLED').sort((a, b) => (b.updatedAt ?? '').localeCompare(a.updatedAt ?? ''));
           setRecent(sims.slice(0, 6));
           if (!useLanRunSnapshot().trfId && sims[0]) setLanRun({ trfId: sims[0].trfId });
@@ -205,7 +207,10 @@ export function LanTrfFlow({ open = true }: { open?: boolean }) {
                 waveNumber?: string;
               }[];
             }>('GET', '/cdcs/CDC01/transfers', { query: { size: '100' } })
-            .then((r) => (r.body.items ?? []).find((x) => x.trfId === trfId)),
+            .then((r) => {
+              rememberTransfers(r.body.items ?? []);
+              return (r.body.items ?? []).find((x) => x.trfId === trfId);
+            }),
           intake.waveId
             ? c
                 .call<{ items?: Task[] }>('GET', '/cdcs/CDC01/tasks', {
@@ -324,9 +329,11 @@ export function LanTrfFlow({ open = true }: { open?: boolean }) {
     <section className="sec wflow lan-trf">
       <div className="wf-head">
         <div>
-          <b>{d?.trfNumber ?? trfId}</b>
+          <b>
+            <TrfRef trfId={trfId} {...(d?.trfNumber ? { number: d.trfNumber } : {})} />
+          </b>
           <small>
-            {trfId} · {t?.mfcId ?? ''} · 실서버
+            {t?.waveId ? <WaveRef waveId={t.waveId} number={d?.waveNumber ?? null} /> : 'Wave 전'} · {t?.mfcId ?? ''} · 실서버
           </small>
         </div>
         <span className={`wf-pill ${t?.state === 'DEPARTED' ? 'off' : 'busy'}`}>{t?.state ?? '읽는 중'}</span>
@@ -583,7 +590,11 @@ export function LanTransport() {
                 <span>
                   {st.seq}. {st.mfcId}
                 </span>
-                <span>{(st.trfIds ?? []).map((x) => x.replace('TRF-SIM-', 'SIM ')).join(', ')}</span>
+                <span>
+                  {(st.trfIds ?? []).map((x) => (
+                    <TrfRef key={x} trfId={x} />
+                  ))}
+                </span>
                 <b className={st.state === 'DEPARTED' ? 'ok' : ''}>{STOP_KO[st.state] ?? st.state}</b>
               </div>
             ))}

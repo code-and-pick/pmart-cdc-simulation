@@ -17,6 +17,8 @@ export const PYEONG_M2 = 3.3058;
 
 /** [정본 CDC-1] centerId·위치 코드 첫 구간 */
 export const CENTER_ID = 'CDC01';
+/** DC 백오피스(LAN) — TRF·Wave 짧은 번호를 누르면 여는 곳 [확정 — 사용자 2026-11-27 링크 https://192.168.0.40:8447/c/CDC01/trf-wave/waves/…] */
+export const DC_BACKOFFICE_URL = 'https://192.168.0.40:8447';
 
 /**
  * 랙 치수 [사용자 2026-11-25 랙 규격표·사진] — 모든 구역 같다.

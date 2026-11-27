@@ -1870,3 +1870,7 @@ tr.ex td { color: var(--muted); font-style: italic; }
 .lan-trf .lt-go button:last-child { background: #27ae60; }
 .lan-trf .lt-go button:disabled { opacity: .45; cursor: default; }
 .lan-trf .lt-go span { grid-column: 1 / -1; font-size: 12px; color: #2f80ed; font-weight: 700; }
+/* TRF·Wave 짧은 번호 링크(T286575 · W6307 → DC 백오피스) */
+a.ref { color: #2f80ed; text-decoration: none; font-weight: 700; font-variant-numeric: tabular-nums; }
+a.ref:hover { text-decoration: underline; }
+.refs { display: inline-flex; gap: 6px; }

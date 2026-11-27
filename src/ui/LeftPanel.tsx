@@ -2,6 +2,7 @@
 import { Fragment, lazy, Suspense, useEffect, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { startLanRun } from './LanIncoming';
+import { rememberTransfers, shortIds, TrfWaveRef, useRefs } from './lanRefs';
 import { setLanRun, useLanRun } from './lanRunStore';
 import { checkReadiness, READINESS_KO, type ProbeResult } from '../backend/http/readiness';
 import { useApp, useTick, useView } from '../app/context';
@@ -720,6 +721,7 @@ function LanRun() {
   const { real } = useApp();
   // 상태는 패널 밖(lanRunStore) — 탭이 바뀌어도 진행·팝업이 남는다
   const { mfcId, mode, steps, busy, hideScan } = useLanRun();
+  const refMap = useRefs();
   if (!real) return null;
   // 새 TRF 로 시작 · 이어 하기(PDA) — 새 TRF 알림과 같은 시작 함수(LanIncoming.startLanRun)
   const go = (resumeTrfId?: string) => startLanRun(real, { mfcId, pda: mode === 'pda' || !!resumeTrfId, ...(resumeTrfId ? { resumeTrfId } : {}) });
@@ -779,7 +781,7 @@ function LanRun() {
               <i>{st.state === 'ok' ? '✓' : st.state === 'fail' ? '!' : i + 1}</i>
               <div>
                 <b>{st.name}</b>
-                <small>{st.detail}</small>
+                <small>{shortIds(st.detail, refMap)}</small>
               </div>
             </li>
           ))}
@@ -802,6 +804,7 @@ function LanOpenTrfs({ onResume, busy }: { onResume: (trfId: string) => void; bu
       real.backend.client
         .call<{ items?: { trfId: string; trfNumber?: string; state: string; mfcId: string; pickedQty: number; allocatedQty: number; updatedAt?: string }[] }>('GET', '/cdcs/CDC01/transfers', { query: { size: '50' } })
         // 출발한 것도 오늘 것은 남김(도착·인계를 이어 봄) — 단추는 [흐름]만
+        .then((r) => (rememberTransfers(r.body.items ?? []), r))
         .then((r) => on && setRows((r.body.items ?? []).filter((x) => /^TRF-(SIM|SR)-/.test(x.trfId) && (['RECEIVED', 'ALLOCATED', 'PARTIALLY_ALLOCATED', 'IN_WAVE', 'PICKED', 'SORTED', 'INSPECTED', 'LOADED'].includes(x.state) || (x.state === 'DEPARTED' && Date.now() - new Date(x.updatedAt ?? 0).getTime() < 24 * 3600_000))).reverse()))
         .catch(() => undefined);
     void load();
@@ -841,6 +844,7 @@ export function LanScanPopup() {
   const [pick, setPick] = useState<string | null>(null);
   // 실행이 멈췄으면(실패) 화면 가운데에 알림 — 설정 탭 단계 목록만 보면 PDA 를 들고 있는 사람은 모름(사용자 2026-11-27 "pda 로 작업하기 눌렀는데 작업도 QR 도 안 떠")
   const [shut, setShut] = useState('');
+  const refs = useRefs();
   const failed = !busy && cur?.state === 'fail' ? cur : null;
   const failKey = failed ? `${cur?.trfId ?? ''}|${failed.name}|${failed.detail}` : '';
   if (failed && shut !== failKey)
@@ -848,13 +852,13 @@ export function LanScanPopup() {
       <div className="scan-pop fail" role="alert">
         <div className="scan-pop-h">
           <b>멈춤 — {failed.name.split(' (')[0]}</b>
-          <span>{cur?.trfId ?? ''}</span>
+          <span>{cur?.trfId ? <TrfWaveRef trfId={cur.trfId} /> : ''}</span>
           <button onClick={() => setShut(failKey)} aria-label="닫기" title="닫기">
             ×
           </button>
         </div>
         <div className="scan-pop-fail">
-          <p>{failed.detail}</p>
+          <p>{shortIds(failed.detail, refs)}</p>
           <small>설정 탭 → 시험 TRF 목록에서 [이어 하기]로 이 단계부터 다시 할 수 있어요</small>
         </div>
       </div>,
@@ -879,7 +883,9 @@ export function LanScanPopup() {
     <div className="scan-pop" role="dialog" aria-label="PDA 로 찍을 코드">
       <div className="scan-pop-h">
         <b>{title}</b>
-        <span>{cur?.trfId ? `${cur.trfId} · ` : ''}PDA 로 이 코드를 찍으세요 · {now}</span>
+        <span>
+          {cur?.trfId ? <TrfWaveRef trfId={cur.trfId} /> : ''} PDA 로 이 코드를 찍으세요 · {now}
+        </span>
         <button onClick={() => setLanRun({ hideScan: true })} aria-label="접기" title="접기">
           ▴
         </button>

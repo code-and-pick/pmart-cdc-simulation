@@ -76,7 +76,7 @@ export async function runLanOne(
   try {
     type Ord0 = { orderId: string; trfIds?: string[]; stops?: { trfIds?: string[] }[]; vehicleId?: string | null; dockCode?: string | null; state: string; version: number };
     const res = opt.resumeTrfId
-      ? await step(`이어 하기 — ${opt.resumeTrfId} 지금 상태 읽기`, async () => {
+      ? await step('이어 하기 — 지금 상태 읽기', async () => {
           const it = await deps.internal.getTransferIntake(opt.resumeTrfId!);
           if (it.state === 'DEPARTED' || it.state === 'CANCELLED') throw new Error(`이미 ${it.state}`);
           // Wave 가 없으면(새로 들어온 TRF) 할당 확인 → Wave 만들기·배포부터(사용자 2026-11-26 "새 TRF 들어오면 가상 작업자 or PDA 로 작업하기")
@@ -163,7 +163,7 @@ export async function runLanOne(
       ? ({ waveId: res.intake.waveId! } as Awaited<ReturnType<HttpBackend['createWave']>>)
       : await step('Wave 만들기 (POST /waves)', async () => {
       const w = await deps.backend.createWave({ cdcId: CENTER_ID, trfIds: [trfId], temperatureZone: zone }, key('wave'));
-      return { v: w, detail: `${w.waveId} ${w.state}` };
+      return { v: w, detail: `${(w as { waveNumber?: string }).waveNumber ?? w.waveId} ${w.state}` };
     });
     // 이어 하기 — Wave 는 있는데 아직 배포 전(PLANNED)이면 배포부터(2026-11-27 계란 TRF: 만들기만 되고 배포 안 된 Wave)
     const waveNow = res && hasWave ? await deps.backend.getWave(wave.waveId).catch(() => null) : null;

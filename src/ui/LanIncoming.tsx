@@ -7,6 +7,7 @@ import { createPortal } from 'react-dom';
 import { useApp, type AppCtx } from '../app/context';
 import { runLanOne } from '../backend/http/lanRun';
 import { MFCS } from '../config';
+import { rememberTransfers, TrfRef } from './lanRefs';
 import { lanRunSnapshot, setLanRun, useLanRun } from './lanRunStore';
 
 type Real = NonNullable<AppCtx['real']>;
@@ -51,6 +52,8 @@ export function LanIncoming() {
     const load = () =>
       real.backend.client
         .call<{ items?: Row[] }>('GET', '/cdcs/CDC01/transfers', { query: { size: '100' } })
+        
+        .then((r) => (rememberTransfers(r.body.items ?? []), r))
         .then((r) => on && setRows((r.body.items ?? []).filter((x) => NEW_STATES.includes(x.state) && !x.waveId).sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? ''))))
         .catch(() => undefined);
     void load();
@@ -83,7 +86,10 @@ export function LanIncoming() {
         <span>{list.length > 1 ? `외 ${list.length - 1}건` : ''}</span>
       </div>
       <div className="lan-in-b">
-        <b>{x.trfNumber ?? x.trfId}</b> → {mfc}
+        <b>
+          <TrfRef trfId={x.trfId} {...(x.trfNumber ? { number: x.trfNumber } : {})} />
+        </b>{' '}
+        → {mfc}
         <small>
           {x.lineCount ?? '-'}줄 · 승인 {x.approvedQty ?? '-'}개 · {x.state}
         </small>
