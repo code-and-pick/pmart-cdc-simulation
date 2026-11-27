@@ -35,7 +35,7 @@ describe('위치 목록 내보내기 [CDC-7, cdc-location 0.2.0]', () => {
       } else if (aisle === 90) expect(i.locationType).toBe('DOCK');
       else expect(i.locationType).toBe('STAGING');
     }
-  });
+  }, 20_000); // 4만여 칸 전수 검사 — PC 가 바쁠 때 5초를 넘김(2026-11-27)
 });
 
 describe('피킹면 최소·목표 설정 [시뮬 PICK_FACE_RULE, cdc-location 0.7.0 pick-face-settings]', () => {
