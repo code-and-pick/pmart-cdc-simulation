@@ -798,6 +798,8 @@ function LanNewWork() {
   const { real } = useApp();
   const { busy, steps } = useLanRun();
   const [rows, setRows] = useState<{ trfId: string; trfNumber?: string; state: string; mfcId: string; createdAt?: string; waveId?: string | null }[]>([]);
+  // 마지막으로 읽은 때·실패 — 다른 PC 에서 안 뜰 때 원인 보기
+  const [checked, setChecked] = useState<{ at: number; err?: string } | null>(null);
   useEffect(() => {
     if (!real) return;
     let on = true;
@@ -807,8 +809,9 @@ function LanNewWork() {
         .then((r) => {
           rememberTransfers(r.body.items ?? []);
           if (on) setRows((r.body.items ?? []).filter((x) => ['RECEIVED', 'ALLOCATING', 'ALLOCATED', 'PARTIALLY_ALLOCATED'].includes(x.state) && !x.waveId && !/^TRF-SIM-/.test(x.trfId)).sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? '')));
+          if (on) setChecked({ at: Date.now() });
         })
-        .catch(() => undefined);
+        .catch((e: unknown) => on && setChecked({ at: Date.now(), err: e instanceof Error ? e.message : String(e) }));
     void load();
     const t = setInterval(load, 5000);
     return () => {
@@ -822,8 +825,12 @@ function LanNewWork() {
     <section className={`sec nw${rows.length ? ' has' : ''}`}>
       <h4>
         새 작업
-        <span>{rows.length ? `${rows.length}건 기다림` : '없음'}</span>
+        <span>
+          {rows.length ? `${rows.length}건 기다림` : '없음'}
+          {checked ? ` · ${new Date(checked.at).toLocaleTimeString('ko-KR', { hour12: false })} 확인` : ' · 읽는 중'}
+        </span>
       </h4>
+      {checked?.err && <div className="note">읽기 실패 — {checked.err}</div>}
       {!rows.length && <div className="note">MFC 가 입고 신청을 승인하면 여기 바로 뜹니다(5초마다 확인)</div>}
       {rows.map((x) => (
         <div key={x.trfId} className="nw-row">
