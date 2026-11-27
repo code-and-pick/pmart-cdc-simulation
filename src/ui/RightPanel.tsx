@@ -697,11 +697,12 @@ export function RightPanel() {
     <div className="panel right">
       {/* 고른 작업자의 흐름·실시간 자리 — 맨 위(사용자 2026-11-26) */}
       {/* 실서버 TRF 흐름(PDA 로 하는 TRF) — 맨 위(사용자 2026-11-26) */}
-      <LanTrfFlow open={!view.rightView || view.rightView === 'trf'} />
+      {/* 실서버 운송 탭은 운행 목록만 — 위에 고정된 TRF 카드·시뮬레이션 요약이 자리를 먹어 스크롤이 비좁던 것(사용자 2026-11-27 "운송탭 위에 고정된 부분이 많아서 한눈에 볼 수가 없어"). 실서버 모드에선 시뮬레이션 요약도 뺌(멈춰 있는 숫자) */}
+      {!(real && view.rightView === 'transport') && <LanTrfFlow open={!view.rightView || view.rightView === 'trf'} />}
       <WorkerFlow />
       {view.rightView && (
         <>
-          <Summary />
+          {!real && <Summary />}
           <Log tab={view.rightView} />
         </>
       )}
