@@ -117,8 +117,11 @@ describe('실서버 한 건 — PDA 모드 단계·팝업 코드', () => {
     // 팝업 코드 — 단계마다 PDA 가 찍을 것
     const v = (k: string) => seen.get(k)!.map((c) => c.value);
     expect(v('PDA 피킹')).toEqual(['BUSAN', 'CDC01-A-6-01-01-1-1', 'B-6', 'CDC01-A-6-01-01-1-2', 'B-7']);
-    expect(v('PDA 분배·패킹').slice(0, 2).every((x) => x.startsWith('BOX-'))).toBe(true);
-    expect(v('PDA 분배·패킹').slice(2)).toEqual(['B-6', 'B-7']);
+    // 박스 → 상품 짝으로(PDA 는 박스 먼저)
+    const sv = v('PDA 분배·패킹');
+    expect(sv.filter((_, i) => i % 2 === 0).every((x) => x.startsWith('BOX-'))).toBe(true);
+    expect(sv.filter((_, i) => i % 2 === 1)).toEqual(['B-6', 'B-7']);
+    expect(seen.get('PDA 분배·패킹')![0].label).toContain('먼저');
     expect(v('PDA 검품')).toEqual(['CDC01-A-6-91-01-0-1', 'BOX-1', 'BOX-2']);
     expect(v('PDA 상차')).toEqual(['CDC01-A-6-90-01-0-1', 'VH-1', 'BOX-1', 'BOX-2']);
     // 끝난 단계는 코드를 비워 팝업이 닫힘
