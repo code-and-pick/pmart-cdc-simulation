@@ -82,12 +82,12 @@ export async function runLanOne(
           // Wave 가 없으면(새로 들어온 TRF) 할당 확인 → Wave 만들기·배포부터(사용자 2026-11-26 "새 TRF 들어오면 가상 작업자 or PDA 로 작업하기")
           // 출고일 = 도착 기한(다음 날 06:00) − 30시간
           // 출고일 = TMS 운송 요청서의 shipDate(백엔드가 정함 — R-27 은 READY·dueAt = 희망 시각이라 계산하지 않고 읽음). 못 읽으면 도착 기한 − 30시간
-          const tr = await deps.gateway.call<{ shipDate?: string }>('GET', `/cdcs/${CENTER_ID}/transport-requests/${encodeURIComponent(it.trfId)}`).then((r) => r.body).catch(() => null);
+          const tr = await deps.gateway.call<{ shipDate?: string; tempClass?: string }>('GET', `/cdcs/${CENTER_ID}/transport-requests/${encodeURIComponent(it.trfId)}`).then((r) => r.body).catch(() => null);
           const day = tr?.shipDate ?? kst(new Date(new Date(it.dueAt).getTime() - 30 * 3600_000));
           const r = await deps.gateway.call<{ items?: Ord0[] } | Ord0[]>('GET', `/cdcs/${CENTER_ID}/transport-orders`, { query: { shipDate: day } });
           const list = Array.isArray(r.body) ? r.body : (r.body.items ?? []);
           const order = list.find((x) => (x.trfIds ?? []).includes(it.trfId) || (x.stops ?? []).some((st) => (st.trfIds ?? []).includes(it.trfId))) ?? null;
-          return { v: { intake: it, shipDate: day, order }, detail: `${it.state} · Wave ${it.waveId ?? '아직 없음'} · 출고일 ${day} · 지시서 ${order ? `${order.orderId} ${order.state}` : '없음'}` };
+          return { v: { intake: it, shipDate: day, order, tempClass: tr?.tempClass }, detail: `${it.state} · Wave ${it.waveId ?? '아직 없음'} · 출고일 ${day} · 지시서 ${order ? `${order.orderId} ${order.state}` : '없음'}` };
         })
       : null;
     // 0) 재고에서 고르기
@@ -145,7 +145,8 @@ export async function runLanOne(
     });
     // 2) 할당 기다림
     const hasWave = !!res?.intake.waveId;
-    const zone = ((res?.intake.conditions ?? []).find((c) => c.kind === 'TEMPERATURE_ZONE')?.value ?? 'AMBIENT') as 'AMBIENT' | 'CHILLED' | 'FROZEN';
+    // 온도대 — 인수 conditions, 없으면 TMS 운송 요청서 tempClass(같은 저장 값 — cdc-outbound 0.30.1 전엔 조회에 conditions 가 빠짐, PC1 백엔드 2026-11-27), 그것도 없으면 상온
+    const zone = ((res?.intake.conditions ?? []).find((c) => c.kind === 'TEMPERATURE_ZONE')?.value ?? res?.tempClass ?? 'AMBIENT') as 'AMBIENT' | 'CHILLED' | 'FROZEN';
     let intake: TransferIntake = res && (hasWave || !['RECEIVED', 'ALLOCATING'].includes(res.intake.state))
       ? res.intake
       : await step('할당 (인수 상태 확인)', async () => {
