@@ -83,7 +83,10 @@ export async function runLanOne(
           // 출고일 = 도착 기한(다음 날 06:00) − 30시간
           // 출고일 = TMS 운송 요청서의 shipDate(백엔드가 정함 — R-27 은 READY·dueAt = 희망 시각이라 계산하지 않고 읽음). 못 읽으면 도착 기한 − 30시간
           const tr = await deps.gateway.call<{ shipDate?: string; tempClass?: string }>('GET', `/cdcs/${CENTER_ID}/transport-requests/${encodeURIComponent(it.trfId)}`).then((r) => r.body).catch(() => null);
-          const day = tr?.shipDate ?? kst(new Date(new Date(it.dueAt).getTime() - 12 * 3600_000)); // 배차 생성 규칙: dueAt 이 [D 12:00, D+1 12:00) KST → D(CCdc·PC1 백엔드 2026-11-27)
+          // 배차 생성 전엔 운송 요청서가 없어(404) 같은 규칙으로 셈 — READY(R-28, transport-planning 0.5.0): "D+1 07:30 ≤ dueAt" 인 가장 늦은 D,
+          // ARRIVAL: dueAt 이 [D 12:00, D+1 12:00) KST → D(CCdc 백엔드 2026-11-27)
+          const due = new Date(it.dueAt).getTime();
+          const day = tr?.shipDate ?? (it.deadlineMeaning === 'READY' ? kst(new Date(due - 7.5 * 3600_000 - 86_400_000)) : kst(new Date(due - 12 * 3600_000)));
           const r = await deps.gateway.call<{ items?: Ord0[] } | Ord0[]>('GET', `/cdcs/${CENTER_ID}/transport-orders`, { query: { shipDate: day } });
           const list = Array.isArray(r.body) ? r.body : (r.body.items ?? []);
           const order = list.find((x) => (x.trfIds ?? []).includes(it.trfId) || (x.stops ?? []).some((st) => (st.trfIds ?? []).includes(it.trfId))) ?? null;
