@@ -1934,12 +1934,3 @@ details.lr > summary::before { content: '›'; display: inline-block; margin-rig
 details.lr[open] > summary::before { transform: rotate(90deg); }
 details.lr > summary { display: flex; align-items: center; justify-content: flex-start; gap: 8px; }
 details.lr > summary .lr-tag { margin-left: auto; }
-.lan-trf .lt-held { display: grid; gap: 3px; padding: 10px; border-radius: 10px; border: 1px solid #eb5757; background: color-mix(in srgb, #eb5757 10%, transparent); }
-.lan-trf .lt-held b { color: #eb5757; font-size: 13px; }
-.lan-trf .lt-held span { font-size: 12px; }
-.lan-trf .lt-held small { color: var(--muted); font-size: 11px; }
-.lan-trf .lt-held-a { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 4px; }
-.lan-trf .lt-held-a button { height: 32px; border-radius: 8px; border: 1px solid var(--line); background: transparent; color: inherit; font-weight: 700; font-size: 12px; cursor: pointer; }
-.lan-trf .lt-held-a button:first-child { background: #2a4f86; border-color: #4d8eff; color: #fff; }
-.lan-trf .lt-held-a button:disabled { opacity: .45; cursor: default; }
-.lan-trf .lt-held-a small { grid-column: 1 / -1; color: inherit; font-size: 11.5px; }
